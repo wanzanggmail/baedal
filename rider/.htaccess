@@ -1,0 +1,23 @@
+# MultiViews가 login 등을 잘못 잡는 경우 방지 (일부 호스팅에서 404 원인)
+<IfModule mod_negotiation.c>
+	Options -MultiViews
+</IfModule>
+
+<IfModule mod_rewrite.c>
+	RewriteEngine On
+	# https://도메인/rider/... 구조. DocumentRoot가 rider 폴더면 이 줄 주석 처리.
+	RewriteBase /rider
+
+	# 실제 "파일"만 그대로 제공 (css 등). 폴더(login 등)는 아래에서 index.php로 넘김.
+	RewriteCond %{REQUEST_FILENAME} -f
+	RewriteRule ^ - [L]
+
+	RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
+</IfModule>
+
+# mod_rewrite가 .htaccess에서 막혀 있을 때 대안(둘 다 허용되는 서버면 rewrite가 우선 동작).
+<IfModule mod_dir.c>
+	FallbackResource index.php
+</IfModule>
+
+DirectoryIndex index.php

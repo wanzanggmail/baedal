@@ -1,0 +1,23 @@
+<IfModule mod_negotiation.c>
+	Options -MultiViews
+</IfModule>
+
+<IfModule mod_rewrite.c>
+	RewriteEngine On
+	RewriteBase /admin
+
+	# /admin/login → login.php (내부에서 index.php?route=login 과 동일)
+	RewriteRule ^login$ login.php [L]
+
+	# 실제 파일만 그대로 (logout.php, 정적 등)
+	RewriteCond %{REQUEST_FILENAME} -f
+	RewriteRule ^ - [L]
+
+	RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
+</IfModule>
+
+<IfModule mod_dir.c>
+	FallbackResource index.php
+</IfModule>
+
+DirectoryIndex index.php

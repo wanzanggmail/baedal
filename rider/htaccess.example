@@ -1,0 +1,21 @@
+# 서버에서 .htaccess 로 이름 변경 후 사용
+
+<IfModule mod_negotiation.c>
+	Options -MultiViews
+</IfModule>
+
+<IfModule mod_rewrite.c>
+	RewriteEngine On
+	RewriteBase /rider
+
+	RewriteCond %{REQUEST_FILENAME} -f
+	RewriteRule ^ - [L]
+
+	RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
+</IfModule>
+
+<IfModule mod_dir.c>
+	FallbackResource index.php
+</IfModule>
+
+DirectoryIndex index.php

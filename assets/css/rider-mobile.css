@@ -1,0 +1,66 @@
+/* 라이더 PWA — 모바일 우선, 데스크톱에서 폭 제한(개발·미리보기용) */
+.rider-mobile-root {
+	min-height: 100vh;
+	min-height: 100dvh;
+	padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+@media (min-width: 576px) {
+	.rider-mobile-root {
+		max-width: 430px;
+		margin-left: auto;
+		margin-right: auto;
+		box-shadow: 0 0 24px rgba(0, 0, 0, 0.08);
+	}
+}
+
+#kt_rider_bottom_nav .nav-link.active {
+	color: var(--bs-primary);
+}
+
+#kt_rider_bottom_nav .nav-link.active i {
+	color: var(--bs-primary);
+}
+
+/* 홈: 달력·출금 — 정사각형 타일 (열 너비 = 한 변) */
+.rider-home-actions-row {
+	container-type: inline-size;
+	container-name: rider-home-actions;
+}
+#kt_rider_main .rider-home-actions-row > [class*="col-"] {
+	display: flex;
+	align-items: stretch;
+}
+.rider-home-big-action {
+	display: flex !important;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	aspect-ratio: 1 / 1;
+	height: auto !important;
+	min-height: 11rem;
+	padding: 0.75rem !important;
+	border-radius: 1rem !important;
+	text-align: center;
+}
+.rider-home-big-action .ki-duotone {
+	font-size: clamp(3.25rem, 42cqw, 4.5rem) !important;
+	line-height: 1 !important;
+}
+@supports not (font-size: 1cqw) {
+	.rider-home-big-action .ki-duotone {
+		font-size: clamp(3.25rem, 11vw, 4.5rem) !important;
+	}
+}
+.rider-home-big-action .rider-home-big-action-label {
+	font-size: clamp(1.2rem, 5.5cqw, 1.6rem);
+	line-height: 1.2;
+	font-weight: 700;
+	margin-top: 0.35rem;
+}
+@supports not (font-size: 1cqw) {
+	.rider-home-big-action .rider-home-big-action-label {
+		font-size: clamp(1.2rem, 3.8vw, 1.6rem);
+	}
+}
