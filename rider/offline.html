@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<meta name="theme-color" content="#009ef7" />
+	<title>오프라인 — 도깨비</title>
+	<style>
+		* { box-sizing: border-box; }
+		body {
+			font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 1.5rem;
+			background: #f5f8fa;
+			color: #181c32;
+		}
+		.card {
+			max-width: 360px;
+			text-align: center;
+			background: #fff;
+			border-radius: 12px;
+			padding: 2rem 1.5rem;
+			box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+		}
+		h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+		p { margin: 0; font-size: 0.95rem; line-height: 1.55; color: #5e6278; }
+		button {
+			margin-top: 1.25rem;
+			width: 100%;
+			padding: 0.75rem 1rem;
+			font-size: 1rem;
+			font-weight: 600;
+			color: #fff;
+			background: #009ef7;
+			border: none;
+			border-radius: 8px;
+			cursor: pointer;
+		}
+	</style>
+</head>
+<body>
+	<div class="card">
+		<h1>인터넷에 연결할 수 없습니다</h1>
+		<p>네트워크 연결을 확인한 뒤 다시 시도해 주세요.</p>
+		<button type="button" onclick="location.reload()">다시 시도</button>
+	</div>
+</body>
+</html>

@@ -11,7 +11,7 @@ if (!isset($pageTitle)) {
 	<head>
     <title><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></title>
     <?php require_once __DIR__ . '/config.php'; ?>
-    <link rel="shortcut icon" href="<?= htmlspecialchars(web_asset('media/logos/favicon.ico'), ENT_QUOTES, 'UTF-8') ?>" />
+    <link rel="shortcut icon" href="<?= htmlspecialchars(web_favicon_shortcut_href(), ENT_QUOTES, 'UTF-8') ?>" />
     <!--begin::Fonts(mandatory for all pages)-->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,400,500,600,700" />
     <!--end::Fonts-->
@@ -75,16 +75,7 @@ if (!isset($pageTitle)) {
 								<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-dark.svg'), ENT_QUOTES, 'UTF-8') ?>" class="h-25px app-sidebar-logo-default" />
 								<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-small.svg'), ENT_QUOTES, 'UTF-8') ?>" class="h-20px app-sidebar-logo-minimize" />
 							</a>
-							<!--end::Logo image-->
-							<!--begin::Sidebar toggle-->
-							<!--begin::Minimized sidebar setup:
-            if (isset($_COOKIE["sidebar_minimize_state"]) && $_COOKIE["sidebar_minimize_state"] === "on") { 
-                1. "src/js/layout/sidebar.js" adds "sidebar_minimize_state" cookie value to save the sidebar minimize state.
-                2. Set data-kt-app-sidebar-minimize="on" attribute for body tag.
-                3. Set data-kt-toggle-state="active" attribute to the toggle element with "kt_app_sidebar_toggle" id.
-                4. Add "active" class to to sidebar toggle element with "kt_app_sidebar_toggle" id.
-            }
-        -->
+							
 							<div id="kt_app_sidebar_toggle" class="app-sidebar-toggle btn btn-icon btn-shadow btn-sm btn-color-muted btn-active-color-primary h-30px w-30px position-absolute top-50 start-100 translate-middle rotate" data-kt-toggle="true" data-kt-toggle-state="active" data-kt-toggle-target="body" data-kt-toggle-name="app-sidebar-minimize">
 								<i class="ki-duotone ki-black-left-line fs-3 rotate-180">
 									<span class="path1"></span>

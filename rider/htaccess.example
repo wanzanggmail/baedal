@@ -1,4 +1,9 @@
 # 서버에서 .htaccess 로 이름 변경 후 사용
+#
+# HTTPS 가 로드밸런서/프록시에서 종료되면 PHP 가 http 로 인식해 manifest URL 이 http 로
+# 나가고 PWA 설치가 "안전하지 않은 앱" 으로 막힐 수 있습니다. 아래 중 하나를 적용하세요.
+#   SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
+#   (또는 nginx 에서 proxy_set_header X-Forwarded-Proto $scheme;)
 
 <IfModule mod_negotiation.c>
 	Options -MultiViews

@@ -76,12 +76,6 @@ $riderRoute = $riderRoute ?? '';
 					<span class="menu-title">공지 목록</span>
 				</a>
 			</div>
-			<div class="menu-item">
-				<a class="menu-link<?= rider_nav_active('notices/detail') ?>" href="<?= htmlspecialchars(rider_url('notices/detail'), ENT_QUOTES, 'UTF-8') ?>">
-					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-					<span class="menu-title">공지 상세 (샘플)</span>
-				</a>
-			</div>
 		</div>
 	</div>
 

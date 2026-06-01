@@ -16,6 +16,10 @@ $riderMinimalShell = !empty($riderMinimalShell);
 					<i class="ki-duotone ki-element-11 fs-2x mb-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 					<span>홈</span>
 				</a>
+				<a class="nav-link flex-fill d-flex flex-column align-items-center py-2 px-1 text-gray-600 fs-8 <?= str_starts_with($riderRoute, 'notices') ? 'active' : '' ?>" href="<?= htmlspecialchars(rider_url('notices'), ENT_QUOTES, 'UTF-8') ?>">
+					<i class="ki-duotone ki-notification-bing fs-2x mb-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+					<span>공지</span>
+				</a>
 				<a class="nav-link flex-fill d-flex flex-column align-items-center py-2 px-1 text-gray-600 fs-8 <?= str_starts_with($riderRoute, 'settlement/') ? 'active' : '' ?>" href="<?= htmlspecialchars(rider_url('settlement/list'), ENT_QUOTES, 'UTF-8') ?>">
 					<i class="ki-duotone ki-chart-simple fs-2x mb-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 					<span>정산</span>
@@ -33,36 +37,37 @@ $riderMinimalShell = !empty($riderMinimalShell);
 		<?php endif; ?>
 	</div>
 	<?php
-	$riderNoticePopup = false;
-	if (!$riderMinimalShell && rider_is_logged_in() && !empty($_SESSION['rider_show_notice_popup'])) {
-		$riderNoticePopup = true;
-		unset($_SESSION['rider_show_notice_popup']);
+	$riderNoticePopupQueue = [];
+	if (!$riderMinimalShell && rider_is_logged_in() && !empty($_SESSION['rider_notice_popup_queue'])) {
+		$riderNoticePopupQueue = is_array($_SESSION['rider_notice_popup_queue'])
+			? $_SESSION['rider_notice_popup_queue']
+			: [];
+		unset($_SESSION['rider_notice_popup_queue']);
 	}
+	$riderNoticePopupJson = $riderNoticePopupQueue !== []
+		? json_encode($riderNoticePopupQueue, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+		: '[]';
 	?>
-	<?php if ($riderNoticePopup) : ?>
-	<div class="modal fade" id="kt_rider_notice_modal" tabindex="-1" aria-labelledby="kt_rider_notice_modal_label" aria-hidden="true" data-bs-backdrop="true">
+	<?php if ($riderNoticePopupQueue !== []) : ?>
+	<div class="modal fade" id="kt_rider_notice_modal" tabindex="-1" aria-labelledby="kt_rider_notice_modal_label" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="true">
 		<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable px-3">
 			<div class="modal-content shadow-lg">
 				<div class="modal-header border-0 pb-0">
-					<div class="d-flex align-items-center gap-2">
-						<span class="badge badge-light-primary">공지</span>
-						<span class="text-muted fs-8">2026-05-10</span>
+					<div class="d-flex align-items-center gap-2 flex-wrap">
+						<span class="badge badge-light-primary" id="kt_rider_notice_modal_cat">공지</span>
+						<span class="text-muted fs-8" id="kt_rider_notice_modal_date"></span>
 					</div>
-					<div class="btn btn-icon btn-sm btn-active-light-primary" data-bs-dismiss="modal" aria-label="닫기">
+					<button type="button" class="btn btn-icon btn-sm btn-active-light-primary" id="kt_rider_notice_modal_close_icon" aria-label="닫기">
 						<i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i>
-					</div>
+					</button>
 				</div>
 				<div class="modal-body pt-4 pb-2">
-					<h2 class="fs-4 fw-bold text-gray-900 mb-4" id="kt_rider_notice_modal_label">5월 정산 일정 안내</h2>
-					<div class="fs-6 text-gray-800 lh-lg">
-						<p class="mb-3">안녕하세요.</p>
-						<p class="mb-3">5월 정산 지급일은 <strong>5월 15일(목)</strong> 예정입니다. 자세한 내역은 정산 메뉴에서 확인해 주세요.</p>
-						<p class="mb-0 text-muted fs-7">긴급 공지는 앱 실행 직후 이 창으로 안내합니다. (목업)</p>
-					</div>
+					<h2 class="fs-4 fw-bold text-gray-900 mb-4" id="kt_rider_notice_modal_label"></h2>
+					<div class="fs-6 text-gray-800 lh-lg" id="kt_rider_notice_modal_body"></div>
 				</div>
 				<div class="modal-footer flex-nowrap gap-2 border-0 pt-0">
-					<a href="<?= htmlspecialchars(rider_url('notices'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light-primary flex-grow-1">공지 목록</a>
-					<button type="button" class="btn btn-primary flex-grow-1" data-bs-dismiss="modal">확인</button>
+					<a href="#" class="btn btn-light-primary flex-grow-1" id="kt_rider_notice_modal_detail">자세히</a>
+					<button type="button" class="btn btn-primary flex-grow-1" id="kt_rider_notice_modal_dismiss">닫기</button>
 				</div>
 			</div>
 		</div>
@@ -89,18 +94,87 @@ $riderMinimalShell = !empty($riderMinimalShell);
 	})();
 	</script>
 	<?php endif; ?>
+	<?php
+    $swPath = ROOT_PATH . '/rider/service-worker.js';
+    $swBust = is_file($swPath) ? (string) filemtime($swPath) : '1';
+    $swRegisterUrl = htmlspecialchars(rider_pwa_service_worker_url() . '?v=' . rawurlencode($swBust), ENT_QUOTES, 'UTF-8');
+    $swScope = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/', ENT_QUOTES, 'UTF-8');
+    ?>
+	<script>
+	(function () {
+		if (!('serviceWorker' in navigator)) return;
+		var url = '<?= $swRegisterUrl ?>';
+		var scope = '<?= $swScope ?>';
+		window.addEventListener('load', function () {
+			navigator.serviceWorker.register(url, { scope: scope }).catch(function () {});
+		});
+	})();
+	</script>
 	<script>var hostUrl = "<?= htmlspecialchars(web_assets_base() . '/', ENT_QUOTES, 'UTF-8') ?>";</script>
 	<script src="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 	<script src="<?= htmlspecialchars(web_asset('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 	<?php if (($riderRoute ?? '') === 'settlement/calendar') : ?>
 	<script src="<?= htmlspecialchars(web_asset('js/rider-settlement-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 	<?php endif; ?>
-	<?php if (!empty($riderNoticePopup)) : ?>
+	<?php if ($riderNoticePopupQueue !== []) : ?>
 	<script>
 	(function () {
+		var queue = <?= $riderNoticePopupJson ?>;
 		var el = document.getElementById('kt_rider_notice_modal');
-		if (!el || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+		if (!el || !queue.length || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+
+		var idx = 0;
 		var modal = new bootstrap.Modal(el);
+		var catEl = document.getElementById('kt_rider_notice_modal_cat');
+		var dateEl = document.getElementById('kt_rider_notice_modal_date');
+		var titleEl = document.getElementById('kt_rider_notice_modal_label');
+		var bodyEl = document.getElementById('kt_rider_notice_modal_body');
+		var detailEl = document.getElementById('kt_rider_notice_modal_detail');
+		var dismissBtn = document.getElementById('kt_rider_notice_modal_dismiss');
+		var closeIcon = document.getElementById('kt_rider_notice_modal_close_icon');
+
+		function catClass(c) {
+			if (c === '긴급') return 'danger';
+			if (c === '안내') return 'primary';
+			return 'secondary';
+		}
+
+		function render() {
+			var n = queue[idx];
+			if (!n) return;
+			if (catEl) {
+				catEl.textContent = n.category || '공지';
+				catEl.className = 'badge badge-light-' + catClass(n.category);
+			}
+			if (dateEl) dateEl.textContent = n.published_date || '';
+			if (titleEl) titleEl.textContent = n.title || '';
+			if (bodyEl) {
+				bodyEl.innerHTML = (n.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+			}
+			if (detailEl && n.id) {
+				detailEl.href = <?= json_encode(rider_url('notices/detail'), JSON_THROW_ON_ERROR) ?> + (<?= defined('RIDER_USE_QUERY_URL') && RIDER_USE_QUERY_URL ? "'&'" : "'?'" ?>) + 'id=' + encodeURIComponent(String(n.id));
+			}
+			var label = '닫기 (' + (idx + 1) + '/' + queue.length + ')';
+			if (dismissBtn) dismissBtn.textContent = label;
+		}
+
+		function advance() {
+			idx++;
+			if (idx < queue.length) {
+				render();
+				return;
+			}
+			modal.hide();
+		}
+
+		function onDismiss() {
+			advance();
+		}
+
+		if (dismissBtn) dismissBtn.addEventListener('click', onDismiss);
+		if (closeIcon) closeIcon.addEventListener('click', onDismiss);
+
+		render();
 		modal.show();
 	})();
 	</script>

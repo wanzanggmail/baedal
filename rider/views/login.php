@@ -14,7 +14,7 @@ if ($next === 'login' || $next === 'logout') {
 		<div class="text-center mb-8">
 			<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-small.svg'), ENT_QUOTES, 'UTF-8') ?>" class="h-40px mb-4" />
 			<h2 class="fs-3 fw-bold text-gray-900">라이더 로그인</h2>
-			<p class="text-gray-600 fs-7 mb-0">목업 · 실제 서버 검증 전까지 로컬 세션으로 동작합니다.</p>
+			<p class="text-gray-600 fs-7 mb-0">등록된 라이더 계정으로 로그인합니다.</p>
 		</div>
 		<?php if ($flash !== '') : ?>
 		<div class="alert alert-danger fs-7 py-3 mb-5"><?= htmlspecialchars($flash, ENT_QUOTES, 'UTF-8') ?></div>
@@ -22,18 +22,18 @@ if ($next === 'login' || $next === 'logout') {
 		<form method="post" action="<?= htmlspecialchars(rider_url('login'), ENT_QUOTES, 'UTF-8') ?>" autocomplete="on">
 			<input type="hidden" name="next" value="<?= htmlspecialchars($next, ENT_QUOTES, 'UTF-8') ?>" />
 			<div class="mb-4">
-				<label class="form-label" for="rider_login_id">아이디 / 휴대전화</label>
-				<input type="text" class="form-control form-control-solid" id="rider_login_id" name="login_id" required autocomplete="username" placeholder="예: 01012345678" />
+				<label class="form-label" for="rider_login_id">로그인 ID / 휴대전화</label>
+				<input type="text" class="form-control form-control-solid" id="rider_login_id" name="login_id" required autocomplete="username" placeholder="예: mb1234567890 또는 01012345678" />
 			</div>
 			<div class="mb-4">
 				<label class="form-label" for="rider_password">비밀번호</label>
-				<input type="password" class="form-control form-control-solid" id="rider_password" name="password" required autocomplete="current-password" placeholder="4자 이상 (목업)" minlength="4" />
+				<input type="password" class="form-control form-control-solid" id="rider_password" name="password" required autocomplete="current-password" />
 			</div>
 			<div class="form-check form-check-custom form-check-solid mb-6">
 				<input class="form-check-input" type="checkbox" name="remember" value="1" id="rider_remember" checked />
-				<label class="form-check-label text-gray-800" for="rider_remember">로그인 상태 유지 (PWA·브라우저 재실행)</label>
+				<label class="form-check-label text-gray-800" for="rider_remember">로그인 상태 유지 (30일)</label>
 			</div>
-			<p class="text-gray-500 fs-8 mb-5">로그인 유지 시 서명 쿠키(30일)와 기기 <code class="fs-9">localStorage</code>에 표시명만 저장합니다. 비밀번호는 저장하지 않습니다.</p>
+			<p class="text-gray-500 fs-8 mb-5">시드·테스트 계정 비밀번호는 보통 <strong>Rider1234!</strong> 입니다. (운영에서는 반드시 변경하세요.)</p>
 			<button type="submit" class="btn btn-primary w-100 py-3">로그인</button>
 		</form>
 	</div>

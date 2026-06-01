@@ -62,6 +62,14 @@ $route = $route ?? '';
 														<span class="menu-title">파싱 오류 상세</span>
 													</a>
 												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('settlement/daily-auto') ?>" href="<?= htmlspecialchars(admin_url('settlement/daily-auto'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">자동 일일정산</span>
+													</a>
+												</div>
 											</div>
 										</div>
 										<!--end:Menu item-->

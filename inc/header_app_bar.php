@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-$headerAdminLabel = isset($_SESSION['admin_user_id']) && (string) $_SESSION['admin_user_id'] !== ''
-    ? (string) $_SESSION['admin_user_id']
-    : '관리자';
+$_adminUser         = admin_user();
+$headerAdminLabel   = $_adminUser['name']    ?? '관리자';
+$headerAdminRole    = $_adminUser['role']    ?? '';
+$headerAdminLoginId = $_adminUser['login_id'] ?? '';
 $headerAdminInitial = function_exists('mb_substr')
     ? mb_substr($headerAdminLabel, 0, 1, 'UTF-8')
     : substr($headerAdminLabel, 0, 1);
@@ -39,6 +40,12 @@ $headerAdminInitial = function_exists('mb_substr')
 												<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
 													<span class="menu-icon"><i class="ki-duotone ki-information-2 fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i></span>
 													<span class="menu-title">파싱 오류 상세</span>
+												</a>
+											</div>
+											<div class="menu-item">
+												<a class="menu-link<?= nav_active('settlement/daily-auto') ?>" href="<?= htmlspecialchars(admin_url('settlement/daily-auto'), ENT_QUOTES, 'UTF-8') ?>">
+													<span class="menu-icon"><i class="ki-duotone ki-calendar fs-2"><span class="path1"></span><span class="path2"></span></i></span>
+													<span class="menu-title">자동 일일정산</span>
 												</a>
 											</div>
 										</div>
@@ -186,7 +193,12 @@ $headerAdminInitial = function_exists('mb_substr')
 												</div>
 												<div class="d-flex flex-column">
 													<div class="fw-bold text-gray-900 fs-6"><?= htmlspecialchars($headerAdminLabel, ENT_QUOTES, 'UTF-8') ?></div>
-													<span class="fw-semibold text-muted fs-7">관리자</span>
+													<span class="fw-semibold text-muted fs-7">
+														<?= htmlspecialchars(admin_role_label($headerAdminRole), ENT_QUOTES, 'UTF-8') ?>
+														<?php if ($headerAdminLoginId !== ''): ?>
+															<span class="text-gray-400 ms-1">(<?= htmlspecialchars($headerAdminLoginId, ENT_QUOTES, 'UTF-8') ?>)</span>
+														<?php endif; ?>
+													</span>
 												</div>
 											</div>
 										</div>

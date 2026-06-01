@@ -1,0 +1,17 @@
+# 환경 변수 (패스워드 포함 — 절대 커밋하지 마세요)
+.env
+
+# Composer
+/vendor/
+
+# PHP 업로드·임시 파일
+/uploads/
+/storage/
+*.log
+
+# 플래그 파일
+inc/*.flag
+
+# OS
+.DS_Store
+Thumbs.db

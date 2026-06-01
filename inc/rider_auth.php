@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/RiderAuth.php';
+
 const RIDER_COOKIE_NAME = 'baedal_rider_rm';
 const RIDER_COOKIE_LIFETIME = 60 * 60 * 24 * 30;
 
@@ -15,31 +17,10 @@ function rider_cookie_secret(): string
     return $s;
 }
 
-function rider_display_name(string $loginId): string
+/** @param array<string, mixed> $rider RiderAuth::mapSessionRow() 형식 */
+function rider_sign_remember(int $riderId, int $exp): string
 {
-    $loginId = trim($loginId);
-    if ($loginId === '') {
-        return '라이더';
-    }
-    if (preg_match('/^010[-\d]{8,}$/', $loginId)) {
-        return '라이더 ' . substr(preg_replace('/\D/', '', $loginId), -4);
-    }
-
-    return $loginId;
-}
-
-function rider_set_session_user(string $loginId): void
-{
-    $loginId = trim($loginId);
-    $_SESSION['rider'] = [
-        'login_id' => $loginId,
-        'name' => rider_display_name($loginId),
-    ];
-}
-
-function rider_sign_remember(string $loginId, int $exp): string
-{
-    return hash_hmac('sha256', $loginId . '|' . $exp, rider_cookie_secret());
+    return hash_hmac('sha256', $riderId . '|' . $exp, rider_cookie_secret());
 }
 
 function rider_cookie_path(): string
@@ -52,11 +33,27 @@ function rider_cookie_path(): string
     return $p;
 }
 
-function rider_set_remember_cookie(string $loginId): void
+/** @param array<string, mixed> $rider */
+function rider_set_session_user(array $rider): void
+{
+    $_SESSION['rider'] = [
+        'id'                  => (int) $rider['id'],
+        'rider_code'          => (string) ($rider['rider_code'] ?? ''),
+        'login_id'            => (string) ($rider['login_id'] ?? ''),
+        'name'                => (string) ($rider['name'] ?? ''),
+        'phone'               => (string) ($rider['phone'] ?? ''),
+        'email'               => (string) ($rider['email'] ?? ''),
+        'status'              => (string) ($rider['status'] ?? 'active'),
+        'vehicle_type'        => (string) ($rider['vehicle_type'] ?? ''),
+        'is_daily_settlement' => !empty($rider['is_daily_settlement']),
+    ];
+}
+
+function rider_set_remember_cookie(int $riderId): void
 {
     $exp = time() + RIDER_COOKIE_LIFETIME;
-    $sig = rider_sign_remember($loginId, $exp);
-    $payload = base64_encode(json_encode(['u' => $loginId, 'e' => $exp, 's' => $sig], JSON_THROW_ON_ERROR));
+    $sig = rider_sign_remember($riderId, $exp);
+    $payload = base64_encode(json_encode(['id' => $riderId, 'e' => $exp, 's' => $sig], JSON_THROW_ON_ERROR));
     setcookie(RIDER_COOKIE_NAME, $payload, [
         'expires' => $exp,
         'path' => rider_cookie_path(),
@@ -77,7 +74,7 @@ function rider_clear_remember_cookie(): void
 
 function rider_try_cookie_restore(): void
 {
-    if (!empty($_SESSION['rider']['login_id'])) {
+    if (!empty($_SESSION['rider']['id'])) {
         return;
     }
     if (empty($_COOKIE[RIDER_COOKIE_NAME]) || !is_string($_COOKIE[RIDER_COOKIE_NAME])) {
@@ -91,30 +88,55 @@ function rider_try_cookie_restore(): void
     }
     try {
         $raw = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    } catch (Throwable $e) {
+    } catch (Throwable) {
         rider_clear_remember_cookie();
 
         return;
     }
-    if (!is_array($raw) || empty($raw['u']) || empty($raw['e']) || empty($raw['s'])) {
+    if (!is_array($raw) || empty($raw['e']) || empty($raw['s'])) {
         rider_clear_remember_cookie();
 
         return;
     }
     $exp = (int) $raw['e'];
-    $uid = (string) $raw['u'];
     if ($exp < time()) {
         rider_clear_remember_cookie();
 
         return;
     }
-    $expect = rider_sign_remember($uid, $exp);
-    if (!hash_equals($expect, (string) $raw['s'])) {
+
+    $riderId = 0;
+    if (!empty($raw['id'])) {
+        $riderId = (int) $raw['id'];
+        $expect = rider_sign_remember($riderId, $exp);
+        if (!hash_equals($expect, (string) $raw['s'])) {
+            rider_clear_remember_cookie();
+
+            return;
+        }
+    } elseif (!empty($raw['u'])) {
+        // 구 쿠키(login_id 문자열) 호환
+        $legacy = RiderAuth::findByLoginInput((string) $raw['u']);
+        if (!$legacy || (string) ($legacy['status'] ?? '') !== 'active') {
+            rider_clear_remember_cookie();
+
+            return;
+        }
+        $riderId = (int) $legacy['id'];
+    } else {
         rider_clear_remember_cookie();
 
         return;
     }
-    rider_set_session_user($uid);
+
+    $rider = RiderAuth::findById($riderId);
+    if (!$rider || ($rider['status'] ?? '') !== 'active') {
+        rider_clear_remember_cookie();
+
+        return;
+    }
+
+    rider_set_session_user($rider);
 }
 
 function rider_auth_bootstrap(): void
@@ -124,10 +146,10 @@ function rider_auth_bootstrap(): void
 
 function rider_is_logged_in(): bool
 {
-    return !empty($_SESSION['rider']['login_id']);
+    return !empty($_SESSION['rider']['id']);
 }
 
-/** @return array{login_id: string, name: string}|null */
+/** @return array<string, mixed>|null */
 function rider_current_user(): ?array
 {
     if (!rider_is_logged_in()) {
@@ -135,8 +157,13 @@ function rider_current_user(): ?array
     }
 
     return [
-        'login_id' => (string) $_SESSION['rider']['login_id'],
-        'name' => (string) ($_SESSION['rider']['name'] ?? rider_display_name((string) $_SESSION['rider']['login_id'])),
+        'id'                  => (int) $_SESSION['rider']['id'],
+        'rider_code'          => (string) ($_SESSION['rider']['rider_code'] ?? ''),
+        'login_id'            => (string) ($_SESSION['rider']['login_id'] ?? ''),
+        'name'                => (string) ($_SESSION['rider']['name'] ?? ''),
+        'phone'               => (string) ($_SESSION['rider']['phone'] ?? ''),
+        'email'               => (string) ($_SESSION['rider']['email'] ?? ''),
+        'is_daily_settlement' => !empty($_SESSION['rider']['is_daily_settlement']),
     ];
 }
 

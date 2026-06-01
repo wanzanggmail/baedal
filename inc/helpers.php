@@ -40,19 +40,39 @@ function admin_logout_url(): string
 }
 
 /**
+ * 배포 경로 접두사 (/baedal 등). 라이더·관리자 URL 모두에서 동일한 /assets·/uploads 를 씁니다.
+ */
+function web_app_deploy_base(): string
+{
+    $bases = [];
+    if (defined('RIDER_BASE')) {
+        $bases[] = RIDER_BASE;
+    }
+    if (defined('ADMIN_BASE')) {
+        $bases[] = ADMIN_BASE;
+    }
+    foreach ($bases as $base) {
+        $base = rtrim(str_replace('\\', '/', (string) $base), '/');
+        if ($base === '' || $base === '/admin' || $base === '/rider') {
+            continue;
+        }
+        $parent = str_replace('\\', '/', dirname($base));
+        if ($parent !== '/' && $parent !== '.' && $parent !== '' && $parent !== '\\') {
+            return rtrim($parent, '/');
+        }
+    }
+
+    return '';
+}
+
+/**
  * 웹 루트 기준 정적 파일(/assets/…) 접두사.
- * ADMIN_BASE가 /admin 이면 /assets, /baedal/admin 이면 /baedal/assets.
- * (깊은 가상 경로 /admin/settlement/upload 에서도 CSS·JS가 깨지지 않게 절대 경로로 씀)
  */
 function web_assets_base(): string
 {
-    $admin = rtrim(str_replace('\\', '/', ADMIN_BASE), '/');
-    $parent = str_replace('\\', '/', dirname($admin));
-    if ($parent === '/' || $parent === '.' || $parent === '' || $parent === '\\') {
-        return '/assets';
-    }
+    $deploy = web_app_deploy_base();
 
-    return rtrim($parent, '/') . '/assets';
+    return ($deploy !== '' ? $deploy : '') . '/assets';
 }
 
 /** $relativePath: media/logos/favicon.ico 처럼 assets/ 다음 구간 */
@@ -61,6 +81,148 @@ function web_asset(string $relativePath): string
     $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
 
     return web_assets_base() . '/' . $relativePath;
+}
+
+/** 업로드 파일 웹 경로 접두사 (/uploads 또는 /baedal/uploads) */
+function web_uploads_base(): string
+{
+    $deploy = web_app_deploy_base();
+
+    return ($deploy !== '' ? $deploy : '') . '/uploads';
+}
+
+/** DB 저장 경로(/uploads/banners/…) → 브라우저 URL */
+function web_upload_url(string $storedPath): string
+{
+    $storedPath = '/' . ltrim(str_replace('\\', '/', $storedPath), '/');
+    if (!str_starts_with($storedPath, '/uploads/')) {
+        return $storedPath;
+    }
+
+    return web_uploads_base() . substr($storedPath, strlen('/uploads'));
+}
+
+/**
+ * 현재 HTTP 요청 기준 오리진 (예: https://example.com).
+ * SSL 종단이 앞단(로드밸런서)인 경우 X-Forwarded-Proto / Host 를 반영해야
+ * manifest 아이콘·start_url 이 http 로 나가며 PWA 설치가 막히지 않습니다.
+ */
+function web_request_origin(): string
+{
+    $proto = 'http';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
+        $first = strtolower(trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]));
+        if ($first === 'https') {
+            $proto = 'https';
+        }
+    } elseif (!empty($_SERVER['HTTPS']) && (string) $_SERVER['HTTPS'] !== 'off') {
+        $proto = 'https';
+    } elseif (!empty($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443') {
+        $proto = 'https';
+    } elseif (!empty($_SERVER['REQUEST_SCHEME']) && strtolower((string) $_SERVER['REQUEST_SCHEME']) === 'https') {
+        $proto = 'https';
+    }
+
+    $host = '';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_HOST'])) {
+        $host = trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_HOST'])[0]);
+    } elseif (!empty($_SERVER['HTTP_HOST'])) {
+        $host = (string) $_SERVER['HTTP_HOST'];
+    }
+    $host = trim($host);
+    if ($host === '') {
+        $host = 'localhost';
+    }
+
+    return $proto . '://' . $host;
+}
+
+/** /path?query 형태 또는 이미 절대 URL → https? 절대 URL */
+function web_absolute_url(string $pathOrAbsolute): string
+{
+    $pathOrAbsolute = str_replace('\\', '/', $pathOrAbsolute);
+    if (preg_match('#^https?://#i', $pathOrAbsolute)) {
+        return $pathOrAbsolute;
+    }
+    $pathOrAbsolute = '/' . ltrim($pathOrAbsolute, '/');
+
+    return web_request_origin() . $pathOrAbsolute;
+}
+
+/** 브라우저 탭 아이콘 — assets/media/favicon 우선 */
+function web_favicon_shortcut_href(): string
+{
+    $dir = ROOT_PATH . '/assets/media/favicon';
+    if (is_file($dir . '/favicon.ico')) {
+        return web_asset('media/favicon/favicon.ico');
+    }
+
+    return web_asset('media/logos/favicon.ico');
+}
+
+/** iOS 홈 화면 — 파일이 있을 때만 */
+function web_favicon_apple_touch_href(): ?string
+{
+    $dir = ROOT_PATH . '/assets/media/favicon';
+    $file = 'apple-icon-180x180.png';
+    if (is_file($dir . '/' . $file)) {
+        return web_asset('media/favicon/' . $file);
+    }
+
+    return null;
+}
+
+/**
+ * Web App Manifest icons[] — PNG 세트가 있으면 사용, 없으면 favicon.ico / 로고 폴백
+ *
+ * @return list<array{src: string, sizes: string, type: string, purpose?: string}>
+ */
+function web_pwa_icons_from_favicon_dir(): array
+{
+    $faviconDir = ROOT_PATH . '/assets/media/favicon';
+    $specs = [
+        ['file' => 'android-icon-512x512.png', 'sizes' => '512x512'],
+        ['file' => 'android-icon-192x192.png', 'sizes' => '192x192'],
+        ['file' => 'android-icon-144x144.png', 'sizes' => '144x144'],
+        ['file' => 'android-icon-96x96.png', 'sizes' => '96x96'],
+        ['file' => 'android-icon-72x72.png', 'sizes' => '72x72'],
+        ['file' => 'android-icon-48x48.png', 'sizes' => '48x48'],
+        ['file' => 'android-icon-36x36.png', 'sizes' => '36x36'],
+    ];
+    $icons = [];
+    foreach ($specs as $spec) {
+        if (!is_file($faviconDir . '/' . $spec['file'])) {
+            continue;
+        }
+        $icons[] = [
+            'src' => web_asset('media/favicon/' . $spec['file']),
+            'sizes' => $spec['sizes'],
+            'type' => 'image/png',
+            'purpose' => 'any',
+        ];
+    }
+    if ($icons !== []) {
+        return $icons;
+    }
+    if (is_file($faviconDir . '/favicon.ico')) {
+        return [
+            [
+                'src' => web_asset('media/favicon/favicon.ico'),
+                'sizes' => '48x48',
+                'type' => 'image/x-icon',
+                'purpose' => 'any',
+            ],
+        ];
+    }
+
+    return [
+        [
+            'src' => web_asset('media/logos/favicon.ico'),
+            'sizes' => '48x48',
+            'type' => 'image/x-icon',
+            'purpose' => 'any',
+        ],
+    ];
 }
 
 /**
@@ -92,9 +254,24 @@ function admin_requested_route(): string
     return '';
 }
 
+/** 라이더 PWA Service Worker 스크립트 URL (물리 파일 rider/service-worker.js) */
+function rider_pwa_service_worker_url(): string
+{
+    return rtrim(RIDER_BASE, '/') . '/service-worker.js';
+}
+
 /**
  * 라이더(PWA) 화면 URL — /rider/home 형태
  */
+/** 라이더 공지 상세 URL (?id= DB id) */
+function rider_notice_detail_url(int $id): string
+{
+    $base = rider_url('notices/detail');
+    $sep  = str_contains($base, '?') ? '&' : '?';
+
+    return $base . $sep . 'id=' . rawurlencode((string) $id);
+}
+
 function rider_url(string $path = ''): string
 {
     $base = RIDER_BASE;

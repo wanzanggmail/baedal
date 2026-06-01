@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200" viewBox="0 0 800 200" role="img" aria-label="� H�">
+  <defs>
+    <linearGradient id="bg4" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#181c32"/>
+      <stop offset="100%" style="stop-color:#3f4254"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="200" rx="16" fill="url(#bg4)"/>
+  <text x="40" y="74" fill="#ffffff" font-family="Malgun Gothic, Apple SD Gothic Neo, sans-serif" font-size="26" font-weight="700">5� � � � H�</text>
+  <text x="40" y="110" fill="#a1a5b7" font-family="Malgun Gothic, Apple SD Gothic Neo, sans-serif" font-size="17">q� ||� ��D UxX8�</text>
+  <text x="40" y="148" fill="#50cd89" font-family="Malgun Gothic, sans-serif" font-size="15" font-weight="600">�	 | 5� 15|(�)</text>
+  <rect x="580" y="50" width="180" height="100" rx="12" fill="#009ef7" opacity="0.9"/>
+  <text x="670" y="95" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="22" font-weight="700">�</text>
+  <text x="670" y="125" text-anchor="middle" fill="#ffffff" font-family="Malgun Gothic, sans-serif" font-size="14">� Tt</text>
+</svg>

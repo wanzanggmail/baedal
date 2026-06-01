@@ -1,0 +1,204 @@
+/**
+ * 랜딩 전용: 본문 가독성(글자 크기) ↑, 과한 세로 여백 ↓
+ * html 에 class="landing-tuned" 와 함께 사용
+ */
+/* 본문·부제 */
+html.landing-tuned #kt_app_root .fs-7 {
+	font-size: 1.05rem !important;
+}
+html.landing-tuned #kt_app_root .fs-6 {
+	font-size: 1.125rem !important;
+}
+html.landing-tuned #kt_app_root .fs-5 {
+	font-size: 1.28rem !important;
+}
+html.landing-tuned #kt_app_root .fs-4 {
+	font-size: 1.35rem !important;
+}
+html.landing-tuned #kt_app_root .fs-3 {
+	font-size: calc(1.32rem + 0.18vw) !important;
+}
+
+/* 섹션 제목 */
+html.landing-tuned #kt_app_root .fs-2hx {
+	font-size: calc(1.5rem + 1.85vw) !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .fs-lg-2hx {
+		font-size: calc(1.55rem + 1.9vw) !important;
+	}
+}
+
+html.landing-tuned #kt_app_root .fs-2tx {
+	font-size: calc(1.55rem + 2vw) !important;
+}
+
+/* 히어로 H1 */
+html.landing-tuned #kt_app_root h1.fs-2x {
+	font-size: calc(1.45rem + 1.15vw) !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root h1.fs-lg-3x {
+		font-size: calc(1.65rem + 2.45vw) !important;
+	}
+}
+
+/* 헤더 로고 */
+html.landing-tuned #kt_app_root .landing-header .fs-3 {
+	font-size: calc(1.35rem + 0.35vw) !important;
+}
+
+/* 뱃지 */
+html.landing-tuned #kt_app_root .badge.fs-7 {
+	font-size: 0.95rem !important;
+}
+
+/* 버튼 */
+html.landing-tuned #kt_app_root .btn:not(.btn-icon) {
+	font-size: 1.08rem;
+	font-weight: 600;
+	padding: 0.65rem 1.35rem;
+}
+html.landing-tuned #kt_app_root .btn.btn-primary.w-100 {
+	padding-top: 0.85rem;
+	padding-bottom: 0.85rem;
+}
+
+/* 히어로 영역 높이·패딩 축소 */
+html.landing-tuned #kt_app_root .min-h-350px {
+	min-height: 260px !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .min-h-lg-500px {
+		min-height: 380px !important;
+	}
+}
+
+html.landing-tuned #home .py-10 {
+	padding-top: 1.75rem !important;
+	padding-bottom: 1.75rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #home .py-lg-20 {
+		padding-top: 2.5rem !important;
+		padding-bottom: 2.5rem !important;
+	}
+	html.landing-tuned #home .mb-lg-10 {
+		margin-bottom: 1.75rem !important;
+	}
+}
+html.landing-tuned #home .mb-15 {
+	margin-bottom: 2rem !important;
+}
+html.landing-tuned #home .mb-5.mb-lg-10 {
+	margin-bottom: 1.25rem !important;
+}
+
+html.landing-tuned #partners-hero .m-md-6 {
+	margin: 1rem !important;
+}
+
+/* 곡선 아래 여백 */
+html.landing-tuned #kt_app_root .mb-10.mb-lg-20 {
+	margin-bottom: 2rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .mb-10.mb-lg-20 {
+		margin-bottom: 2.75rem !important;
+	}
+}
+
+/* 지원 절차 블록 */
+html.landing-tuned #kt_app_root .mb-17 {
+	margin-bottom: 2.75rem !important;
+}
+html.landing-tuned #kt_app_root .mb-md-20 {
+	margin-bottom: 2.75rem !important;
+}
+html.landing-tuned #kt_app_root .gy-10 {
+	--bs-gutter-y: 1.65rem;
+}
+html.landing-tuned #kt_app_root .mb-9 {
+	margin-bottom: 1.35rem !important;
+}
+
+/* 혜택(다크) 구간 */
+html.landing-tuned #kt_app_root .pt-18 {
+	padding-top: 2.75rem !important;
+}
+html.landing-tuned #kt_app_root .pb-15 {
+	padding-bottom: 2.5rem !important;
+}
+html.landing-tuned #kt_app_root .mt-15 {
+	margin-top: 2rem !important;
+}
+html.landing-tuned #kt_app_root .mb-18 {
+	margin-bottom: 2.75rem !important;
+}
+
+html.landing-tuned #kt_app_root .h-200px {
+	height: 175px !important;
+}
+html.landing-tuned #kt_app_root .w-200px {
+	width: 175px !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .h-lg-250px {
+		height: 220px !important;
+	}
+	html.landing-tuned #kt_app_root .w-lg-250px {
+		width: 220px !important;
+	}
+}
+
+/* 파트너·문의 섹션 */
+html.landing-tuned #partners.py-15 {
+	padding-top: 2.75rem !important;
+	padding-bottom: 2.75rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #partners.py-lg-20 {
+		padding-top: 3.25rem !important;
+		padding-bottom: 3.25rem !important;
+	}
+}
+html.landing-tuned #kt_app_root .mb-13 {
+	margin-bottom: 2rem !important;
+}
+html.landing-tuned #kt_app_root .pb-20 {
+	padding-bottom: 2.75rem !important;
+}
+html.landing-tuned #contact .mb-10 {
+	margin-bottom: 1.75rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #contact .p-lg-12 {
+		padding: 2.5rem !important;
+	}
+}
+
+/* 푸터 */
+html.landing-tuned #kt_app_root .landing-dark-bg.pt-15.pb-15 {
+	padding-top: 2.25rem !important;
+	padding-bottom: 2.25rem !important;
+}
+html.landing-tuned #kt_app_root .py-7 {
+	padding-top: 1.15rem !important;
+	padding-bottom: 1.15rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .py-lg-10 {
+		padding-top: 1.5rem !important;
+		padding-bottom: 1.5rem !important;
+	}
+}
+
+/* 겹침(곡선)은 유지하되 과도한 당김만 완화 */
+html.landing-tuned #kt_app_root .mb-n10 {
+	margin-bottom: -1.75rem !important;
+}
+@media (min-width: 992px) {
+	html.landing-tuned #kt_app_root .mb-lg-n20 {
+		margin-bottom: -3.5rem !important;
+	}
+}

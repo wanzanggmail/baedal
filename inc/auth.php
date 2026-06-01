@@ -14,3 +14,69 @@ function admin_require_login(): void
         exit;
     }
 }
+
+/**
+ * 현재 로그인한 관리자 정보를 반환합니다.
+ *
+ * @return array{id:int,login_id:string,name:string,role:string}|null
+ */
+function admin_user(): ?array
+{
+    if (!admin_is_logged_in()) {
+        return null;
+    }
+
+    return [
+        'id'       => (int) ($_SESSION['admin_id']       ?? 0),
+        'login_id' => (string) ($_SESSION['admin_login_id'] ?? ''),
+        'name'     => (string) ($_SESSION['admin_name']     ?? ''),
+        'role'     => (string) ($_SESSION['admin_role']     ?? ''),
+    ];
+}
+
+/**
+ * 현재 관리자의 역할이 주어진 역할 중 하나인지 확인합니다.
+ * 사용 예: admin_has_role('super', 'settlement')
+ */
+function admin_has_role(string ...$roles): bool
+{
+    $user = admin_user();
+    if ($user === null) {
+        return false;
+    }
+
+    return in_array($user['role'], $roles, true);
+}
+
+/**
+ * 역할 라벨 반환 (화면 표시용)
+ */
+function admin_role_label(string $role): string
+{
+    return match ($role) {
+        'super'      => '최고관리자',
+        'settlement' => '정산담당',
+        'operation'  => '운영담당',
+        default      => $role,
+    };
+}
+
+/**
+ * 접근 제한 — 허용 역할이 아니면 403 응답 후 종료
+ */
+function admin_require_role(string ...$roles): void
+{
+    admin_require_login();
+
+    if (!admin_has_role(...$roles)) {
+        http_response_code(403);
+        $pageTitle = '접근 권한 없음';
+        require_once INC_PATH . '/header.php';
+        require_once INC_PATH . '/shell_main_open.php';
+        require_once INC_PATH . '/app_content_open.php';
+        echo '<div class="alert alert-danger">이 메뉴에 접근할 권한이 없습니다.</div>';
+        require_once INC_PATH . '/app_content_close.php';
+        require_once INC_PATH . '/shell_close.php';
+        exit;
+    }
+}

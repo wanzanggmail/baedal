@@ -5,7 +5,7 @@ declare(strict_types=1);
 require_once INC_PATH . '/rider_auth.php';
 
 if (!isset($riderPageTitle)) {
-    $riderPageTitle = '라이더';
+    $riderPageTitle = '도깨비';
 }
 if (!isset($riderRoute)) {
     $riderRoute = '';
@@ -13,8 +13,8 @@ if (!isset($riderRoute)) {
 $riderMinimalShell = !empty($riderMinimalShell);
 $riderUser = $riderUser ?? rider_current_user();
 
-$riderHeaderBarTitle = '도깨비라이더 - ' . $riderPageTitle;
-$fullTitle = $riderPageTitle . ' — 도깨비 배달 라이더';
+$riderHeaderBarTitle = '도깨비 - ' . $riderPageTitle;
+$fullTitle = $riderPageTitle . ' — 도깨비 배달';
 $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
@@ -23,16 +23,21 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 	<title><?= htmlspecialchars($fullTitle, ENT_QUOTES, 'UTF-8') ?></title>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-	<meta name="description" content="도깨비 배달 라이더 앱" />
+	<meta name="description" content="도깨비 배달 앱" />
 	<meta name="theme-color" content="#009ef7" />
+	<meta name="application-name" content="도깨비" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-title" content="도깨비" />
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	<link rel="manifest" href="<?= $manifestHref ?>" />
-	<link rel="shortcut icon" href="<?= htmlspecialchars(web_asset('media/logos/favicon.ico'), ENT_QUOTES, 'UTF-8') ?>" />
+	<link rel="shortcut icon" href="<?= htmlspecialchars(web_favicon_shortcut_href(), ENT_QUOTES, 'UTF-8') ?>" />
+	<?php if (($appleTouch = web_favicon_apple_touch_href()) !== null) : ?>
+	<link rel="apple-touch-icon" sizes="180x180" href="<?= htmlspecialchars($appleTouch, ENT_QUOTES, 'UTF-8') ?>" />
+	<?php endif; ?>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,400,500,600,700" />
 	<link href="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
 	<link href="<?= htmlspecialchars(web_asset('css/style.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
-	<link href="<?= htmlspecialchars(web_asset('css/rider-mobile.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
+	<link href="<?= htmlspecialchars(web_asset('css/rider-mobile.css?v=' . time()), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
 	<script>
 		var defaultThemeMode = "light";
 		var themeMode;
@@ -68,7 +73,7 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 					<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-small.svg'), ENT_QUOTES, 'UTF-8') ?>" class="h-30px me-3" />
 					<div>
 						<div class="fw-bold text-gray-900">도깨비 배달</div>
-						<div class="fs-8 text-muted"><?= $riderUser ? htmlspecialchars($riderUser['name'], ENT_QUOTES, 'UTF-8') : '라이더' ?></div>
+						<div class="fs-8 text-muted"><?= $riderUser ? htmlspecialchars($riderUser['name'], ENT_QUOTES, 'UTF-8') : '도깨비' ?></div>
 					</div>
 				</div>
 				<div class="flex-grow-1 overflow-auto">

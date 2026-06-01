@@ -3,8 +3,9 @@
 declare(strict_types=1);
 
 /** @var string|null $loginError */
-$loginError = $loginError ?? null;
-$pageTitle = '로그인 — 도깨비 배달 관리자';
+$loginError     = $loginError     ?? null;
+$loginCsrfToken = $loginCsrfToken ?? '';
+$pageTitle      = '로그인 — 도깨비 배달 관리자';
 ?>
 <!DOCTYPE html>
 <html lang="ko">
@@ -12,7 +13,7 @@ $pageTitle = '로그인 — 도깨비 배달 관리자';
 	<title><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></title>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<link rel="shortcut icon" href="<?= htmlspecialchars(web_asset('media/logos/favicon.ico'), ENT_QUOTES, 'UTF-8') ?>" />
+	<link rel="shortcut icon" href="<?= htmlspecialchars(web_favicon_shortcut_href(), ENT_QUOTES, 'UTF-8') ?>" />
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,400,500,600,700" />
 	<link href="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
 	<link href="<?= htmlspecialchars(web_asset('css/style.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
@@ -34,18 +35,22 @@ $pageTitle = '로그인 — 도깨비 배달 관리자';
 			<div class="d-flex flex-column-fluid flex-lg-row-auto justify-content-center justify-content-lg-end p-12 p-lg-20">
 				<div class="bg-body d-flex flex-column align-items-stretch flex-center rounded-4 w-md-600px p-20">
 					<div class="d-flex flex-center flex-column flex-column-fluid px-lg-10 pb-15 pb-lg-20">
-						<form class="form w-100" method="post" action="<?= htmlspecialchars(admin_login_url(), ENT_QUOTES, 'UTF-8') ?>" accept-charset="UTF-8">
+						<form class="form w-100" method="post" action="<?= htmlspecialchars(admin_login_url(), ENT_QUOTES, 'UTF-8') ?>" accept-charset="UTF-8" autocomplete="on">
+							<input type="hidden" name="_token" value="<?= htmlspecialchars($loginCsrfToken, ENT_QUOTES, 'UTF-8') ?>" />
 							<div class="text-center mb-11">
 								<h1 class="text-gray-900 fw-bolder mb-3">로그인</h1>
 								<div class="text-gray-500 fw-semibold fs-6">관리자 계정으로 로그인하세요</div>
 							</div>
 							<?php if ($loginError !== null && $loginError !== ''): ?>
 								<div class="alert alert-danger d-flex align-items-center mb-8">
+									<i class="ki-duotone ki-shield-cross fs-2hx text-danger me-4"><span class="path1"></span><span class="path2"></span></i>
 									<span><?= htmlspecialchars($loginError, ENT_QUOTES, 'UTF-8') ?></span>
 								</div>
 							<?php endif; ?>
 							<div class="fv-row mb-8">
-								<input type="text" placeholder="아이디" name="user_id" autocomplete="username" class="form-control bg-transparent" value="<?= isset($_POST['user_id']) ? htmlspecialchars((string) $_POST['user_id'], ENT_QUOTES, 'UTF-8') : '' ?>" />
+								<input type="text" placeholder="아이디" name="user_id" autocomplete="username"
+								       class="form-control bg-transparent"
+								       value="<?= isset($_POST['user_id']) ? htmlspecialchars((string) $_POST['user_id'], ENT_QUOTES, 'UTF-8') : '' ?>" />
 							</div>
 							<div class="fv-row mb-3">
 								<input type="password" placeholder="비밀번호" name="password" autocomplete="current-password" class="form-control bg-transparent" />

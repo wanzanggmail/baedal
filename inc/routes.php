@@ -5,8 +5,10 @@ declare(strict_types=1);
 return [
     'dashboard' => ['title' => '대시보드', 'view' => 'dashboard'],
     'settlement/upload' => ['title' => '엑셀 업로드', 'view' => 'settlement_upload'],
+    'settlement/upload-detail' => ['title' => '업로드 상세', 'view' => 'settlement_upload_detail'],
     'settlement/history' => ['title' => '업로드 이력', 'view' => 'settlement_history'],
     'settlement/parse-errors' => ['title' => '파싱 오류 상세', 'view' => 'settlement_parse_errors'],
+    'settlement/daily-auto' => ['title' => '자동 일일정산', 'view' => 'settlement_daily_auto'],
     'promotion/rules' => ['title' => '프로모션 규칙', 'view' => 'promotion_rules'],
     'promotion/batch' => ['title' => '배치 실행', 'view' => 'promotion_batch'],
     'promotion/history' => ['title' => '실행 이력', 'view' => 'promotion_history'],

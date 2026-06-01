@@ -2,39 +2,20 @@
 
 declare(strict_types=1);
 
-$mockNoticesSeed = [
-    [
-        'id' => 'nt-20260510-001',
-        'title' => '5월 정산 일정 안내',
-        'body' => "안녕하세요.\n5월 정산 지급일은 5월 15일(목) 예정입니다.\n자세한 내역은 앱에서 확인해 주세요.",
-        'category' => '안내',
-        'pinned' => true,
-        'status' => 'published',
-        'published_at' => '2026-05-10 10:00',
-        'updated_at' => '2026-05-10 10:00',
-    ],
-    [
-        'id' => 'nt-20260509-002',
-        'title' => '앱 점검 안내 (5/12 02:00~04:00)',
-        'body' => "시스템 점검으로 일시적으로 서비스 이용이 제한될 수 있습니다.",
-        'category' => '긴급',
-        'pinned' => true,
-        'status' => 'published',
-        'published_at' => '2026-05-09 18:30',
-        'updated_at' => '2026-05-09 18:30',
-    ],
-    [
-        'id' => 'nt-20260508-003',
-        'title' => '프로모션 지급 기준 변경 (예정)',
-        'body' => "내부 검토 중인 초안입니다. 게시 전입니다.",
-        'category' => '일반',
-        'pinned' => false,
-        'status' => 'draft',
-        'published_at' => '',
-        'updated_at' => '2026-05-08 14:00',
-    ],
-];
-$noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+require_once INC_PATH . '/Notice.php';
+
+$listError = null;
+$notices   = [];
+$apiUrl    = ADMIN_BASE . '/api/notices.php';
+
+try {
+    $notices = Notice::listAdmin();
+} catch (Throwable $e) {
+    $listError = $e->getMessage();
+}
+
+$needsMigrate = $listError !== null
+    && (str_contains($listError, 'content_notices') || str_contains($listError, "doesn't exist"));
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -45,19 +26,15 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 				<li class="breadcrumb-item text-muted">
 					<a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a>
 				</li>
-				<li class="breadcrumb-item">
-					<span class="bullet bg-gray-500 w-5px h-2px"></span>
-				</li>
+				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-muted">콘텐츠</li>
-				<li class="breadcrumb-item">
-					<span class="bullet bg-gray-500 w-5px h-2px"></span>
-				</li>
+				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">공지</li>
 			</ul>
 		</div>
 		<div class="d-flex gap-2 flex-wrap">
 			<a href="<?= htmlspecialchars(admin_url('content/banners'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">광고 배너</a>
-			<button type="button" class="btn btn-sm btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#kt_notice_modal" id="btn_notice_create">
+			<button type="button" class="btn btn-sm btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#kt_notice_modal" id="btn_notice_create"<?= $needsMigrate ? ' disabled' : '' ?>>
 				<i class="ki-duotone ki-plus fs-3"><span class="path1"></span><span class="path2"></span></i>
 				공지 등록
 			</button>
@@ -67,11 +44,24 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 <!--end::Toolbar-->
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
+	<?php if ($needsMigrate) : ?>
+	<div class="alert alert-warning mb-8">
+		<strong>DB 테이블이 없습니다.</strong> 서버에서 <code>php migrate_content.php</code> 를 한 번 실행한 뒤 이 페이지를 새로고침하세요.
+	</div>
+	<?php elseif ($listError !== null) : ?>
+	<div class="alert alert-danger mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>
+	<?php else : ?>
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-notepad fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			<strong>목업</strong>입니다. 등록·수정·삭제는 브라우저 <code class="fs-8">localStorage</code>에만 반영되며 서버로 전송되지 않습니다.
+			게시된 공지는 <strong>라이더 앱</strong> 공지 목록·로그인 팝업(상단 고정 우선)에 표시됩니다. 정산·출금 로직과는 분리되어 있습니다.
 		</div>
+	</div>
+	<?php endif; ?>
+
+	<div id="notice_toast" class="alert alert-dismissible d-none mb-6" role="alert">
+		<span id="notice_toast_msg"></span>
+		<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="닫기"></button>
 	</div>
 
 	<div class="card card-flush">
@@ -96,7 +86,35 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 							<th class="min-w-140px text-end">관리</th>
 						</tr>
 					</thead>
-					<tbody id="notice_tbody"></tbody>
+					<tbody id="notice_tbody">
+						<?php if ($listError === null && $notices === []) : ?>
+						<tr><td colspan="8" class="text-center text-muted py-10">등록된 공지가 없습니다.</td></tr>
+						<?php endif; ?>
+						<?php foreach ($notices as $row) :
+						    $excerpt = mb_strlen($row['body']) > 48
+						        ? mb_substr(preg_replace('/\s+/u', ' ', $row['body']), 0, 48) . '…'
+						        : $row['body'];
+						    ?>
+						<tr data-id="<?= (int) $row['id'] ?>">
+							<td class="fw-semibold text-gray-800"><?= htmlspecialchars($row['public_id'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td>
+								<span class="text-gray-900 fw-bold"><?= htmlspecialchars($row['title'], ENT_QUOTES, 'UTF-8') ?></span>
+								<span class="text-muted fs-7 d-block"><?= htmlspecialchars($excerpt, ENT_QUOTES, 'UTF-8') ?></span>
+							</td>
+							<td><span class="badge badge-light-primary"><?= htmlspecialchars($row['category'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td><?= $row['pinned'] ? '<span class="badge badge-light-success">고정</span>' : '<span class="text-muted">—</span>' ?></td>
+							<td><span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($row['status_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td class="text-gray-700"><?= $row['published_at'] !== '' ? htmlspecialchars($row['published_at'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+							<td class="text-gray-700"><?= htmlspecialchars($row['updated_at'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-end">
+								<button type="button" class="btn btn-sm btn-light-primary me-1 btn-notice-edit"
+									data-id="<?= (int) $row['id'] ?>"
+									data-json="<?= htmlspecialchars(json_encode($row, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">수정</button>
+								<button type="button" class="btn btn-sm btn-light-danger btn-notice-del" data-id="<?= (int) $row['id'] ?>">삭제</button>
+							</td>
+						</tr>
+						<?php endforeach; ?>
+					</tbody>
 				</table>
 			</div>
 		</div>
@@ -122,9 +140,9 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 							<div class="col-md-6">
 								<label class="form-label">카테고리</label>
 								<select class="form-select form-select-solid" id="notice_category">
-									<option value="일반">일반</option>
-									<option value="안내">안내</option>
-									<option value="긴급">긴급</option>
+									<?php foreach (Notice::categories() as $cat) : ?>
+									<option value="<?= htmlspecialchars($cat, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($cat, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
 								</select>
 							</div>
 							<div class="col-md-6">
@@ -139,11 +157,11 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 						<div class="mb-6">
 							<label class="form-label form-check form-check-custom form-check-solid">
 								<input class="form-check-input" type="checkbox" id="notice_pinned" />
-								<span class="form-check-label fw-semibold text-gray-700">상단 고정</span>
+								<span class="form-check-label fw-semibold text-gray-700">상단 고정 (로그인 팝업 우선)</span>
 							</label>
 						</div>
 						<div class="mb-6">
-							<label class="form-label">게시일시 (비어 있으면 저장 시각)</label>
+							<label class="form-label">게시일시 (비어 있으면 게시 시 현재 시각)</label>
 							<input type="text" class="form-control form-control-solid" id="notice_published_at" placeholder="YYYY-MM-DD HH:mm" autocomplete="off" />
 						</div>
 						<div class="mb-8">
@@ -152,7 +170,7 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 						</div>
 						<div class="d-flex justify-content-end gap-3">
 							<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
-							<button type="submit" class="btn btn-primary">저장 (목업)</button>
+							<button type="submit" class="btn btn-primary" id="notice_submit_btn">저장</button>
 						</div>
 					</form>
 				</div>
@@ -162,75 +180,30 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 
 	<script>
 	(function () {
-		var STORAGE_KEY = 'baedal_content_notices';
-		var SEED = <?= $noticesSeedJson ?>;
+		var API = <?= json_encode($apiUrl, JSON_THROW_ON_ERROR) ?>;
+		var disabled = <?= $needsMigrate ? 'true' : 'false' ?>;
 
-		function pad(n) { return String(n).padStart(2, '0'); }
-		function nowStr() {
-			var d = new Date();
-			return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+		function toast(msg, ok) {
+			var el = document.getElementById('notice_toast');
+			var msgEl = document.getElementById('notice_toast_msg');
+			if (!el || !msgEl) return;
+			el.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger');
+			msgEl.textContent = msg;
+			el.classList.remove('d-none');
 		}
 
-		function loadList() {
-			try {
-				var raw = localStorage.getItem(STORAGE_KEY);
-				if (raw) {
-					var a = JSON.parse(raw);
-					if (Array.isArray(a) && a.length) return a;
-				}
-			} catch (e) {}
-			return SEED.slice();
-		}
-
-		function saveList(arr) {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-		}
-
-		function statusLabel(st) {
-			if (st === 'published') return { t: '게시', c: 'success' };
-			if (st === 'hidden') return { t: '숨김', c: 'dark' };
-			return { t: '초안', c: 'warning' };
-		}
-
-		function excerpt(body) {
-			var s = (body || '').replace(/\s+/g, ' ').trim();
-			return s.length > 48 ? s.slice(0, 48) + '…' : s;
-		}
-
-		function render() {
-			var list = loadList().slice().sort(function (a, b) {
-				if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1;
-				return (b.updated_at || '').localeCompare(a.updated_at || '');
+		function apiPost(payload) {
+			return fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify(payload),
+			}).then(function (res) {
+				return res.json().then(function (j) {
+					if (!res.ok || !j.ok) throw new Error(j.message || '요청 실패');
+					return j;
+				});
 			});
-			var tb = document.getElementById('notice_tbody');
-			tb.innerHTML = '';
-			list.forEach(function (row) {
-				var st = statusLabel(row.status);
-				var tr = document.createElement('tr');
-				tr.innerHTML =
-					'<td class="fw-semibold text-gray-800">' + escapeHtml(row.id) + '</td>' +
-					'<td><span class="text-gray-900 fw-bold">' + escapeHtml(row.title) + '</span>' +
-					'<span class="text-muted fs-7 d-block">' + escapeHtml(excerpt(row.body)) + '</span></td>' +
-					'<td><span class="badge badge-light-primary">' + escapeHtml(row.category) + '</span></td>' +
-					'<td>' + (row.pinned ? '<span class="badge badge-light-success">고정</span>' : '<span class="text-muted">—</span>') + '</td>' +
-					'<td><span class="badge badge-light-' + st.c + '">' + st.t + '</span></td>' +
-					'<td class="text-gray-700">' + escapeHtml(row.published_at || '—') + '</td>' +
-					'<td class="text-gray-700">' + escapeHtml(row.updated_at || '—') + '</td>' +
-					'<td class="text-end">' +
-					'<button type="button" class="btn btn-sm btn-light-primary me-1 btn-notice-edit" data-id="' + escapeAttr(row.id) + '">수정</button>' +
-					'<button type="button" class="btn btn-sm btn-light-danger btn-notice-del" data-id="' + escapeAttr(row.id) + '">삭제</button>' +
-					'</td>';
-				tb.appendChild(tr);
-			});
-		}
-
-		function escapeHtml(s) {
-			var d = document.createElement('div');
-			d.textContent = s == null ? '' : String(s);
-			return d.innerHTML;
-		}
-		function escapeAttr(s) {
-			return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 		}
 
 		function openCreate() {
@@ -244,15 +217,12 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 			document.getElementById('notice_body').value = '';
 		}
 
-		function openEdit(id) {
-			var list = loadList();
-			var row = list.find(function (r) { return r.id === id; });
-			if (!row) return;
+		function openEdit(row) {
 			document.getElementById('notice_modal_title').textContent = '공지 수정';
-			document.getElementById('notice_id').value = row.id;
-			document.getElementById('notice_title').value = row.title;
-			document.getElementById('notice_category').value = row.category;
-			document.getElementById('notice_status').value = row.status;
+			document.getElementById('notice_id').value = String(row.id);
+			document.getElementById('notice_title').value = row.title || '';
+			document.getElementById('notice_category').value = row.category || '일반';
+			document.getElementById('notice_status').value = row.status || 'draft';
 			document.getElementById('notice_pinned').checked = !!row.pinned;
 			document.getElementById('notice_published_at').value = row.published_at || '';
 			document.getElementById('notice_body').value = row.body || '';
@@ -260,73 +230,58 @@ $noticesSeedJson = json_encode($mockNoticesSeed, JSON_UNESCAPED_UNICODE | JSON_T
 			m.show();
 		}
 
-		document.getElementById('btn_notice_create').addEventListener('click', function () {
-			openCreate();
-		});
+		if (!disabled) {
+			document.getElementById('btn_notice_create').addEventListener('click', openCreate);
 
-		document.getElementById('notice_tbody').addEventListener('click', function (ev) {
-			var ed = ev.target.closest('.btn-notice-edit');
-			var del = ev.target.closest('.btn-notice-del');
-			if (ed) openEdit(ed.getAttribute('data-id'));
-			if (del) {
-				var id = del.getAttribute('data-id');
-				if (!window.confirm('이 공지를 삭제할까요? (목업)')) return;
-				var list = loadList().filter(function (r) { return r.id !== id; });
-				saveList(list);
-				render();
-			}
-		});
+			document.getElementById('notice_tbody').addEventListener('click', function (ev) {
+				var ed = ev.target.closest('.btn-notice-edit');
+				var del = ev.target.closest('.btn-notice-del');
+				if (ed) {
+					try {
+						openEdit(JSON.parse(ed.getAttribute('data-json') || '{}'));
+					} catch (e) { toast('데이터 오류', false); }
+				}
+				if (del) {
+					var id = del.getAttribute('data-id');
+					if (!window.confirm('이 공지를 삭제할까요?')) return;
+					apiPost({ action: 'delete', id: id })
+						.then(function () {
+							toast('삭제되었습니다.', true);
+							setTimeout(function () { location.reload(); }, 400);
+						})
+						.catch(function (e) { toast(e.message, false); });
+				}
+			});
 
-		document.getElementById('notice_form').addEventListener('submit', function (ev) {
-			ev.preventDefault();
-			var id = document.getElementById('notice_id').value.trim();
-			var title = document.getElementById('notice_title').value.trim();
-			var body = document.getElementById('notice_body').value;
-			var category = document.getElementById('notice_category').value;
-			var status = document.getElementById('notice_status').value;
-			var pinned = document.getElementById('notice_pinned').checked;
-			var pubAt = document.getElementById('notice_published_at').value.trim();
-			var ts = nowStr();
-			var list = loadList();
-			if (id) {
-				var idx = list.findIndex(function (r) { return r.id === id; });
-				if (idx < 0) return;
-				list[idx] = {
-					id: id,
-					title: title,
-					body: body,
-					category: category,
-					pinned: pinned,
-					status: status,
-					published_at: status === 'published' ? (pubAt || ts) : pubAt,
-					updated_at: ts,
-				};
-			} else {
-				id = 'nt-' + Date.now();
-				list.unshift({
-					id: id,
-					title: title,
-					body: body,
-					category: category,
-					pinned: pinned,
-					status: status,
-					published_at: status === 'published' ? (pubAt || ts) : pubAt,
-					updated_at: ts,
-				});
-			}
-			saveList(list);
-			render();
-			var modalEl = document.getElementById('kt_notice_modal');
-			var mi = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
-			mi.hide();
-		});
+			document.getElementById('notice_form').addEventListener('submit', function (ev) {
+				ev.preventDefault();
+				var btn = document.getElementById('notice_submit_btn');
+				btn.disabled = true;
+				apiPost({
+					action: 'save',
+					id: document.getElementById('notice_id').value.trim() || undefined,
+					title: document.getElementById('notice_title').value.trim(),
+					body: document.getElementById('notice_body').value,
+					category: document.getElementById('notice_category').value,
+					status: document.getElementById('notice_status').value,
+					pinned: document.getElementById('notice_pinned').checked,
+					published_at: document.getElementById('notice_published_at').value.trim(),
+				})
+					.then(function () {
+						toast('저장되었습니다.', true);
+						var modalEl = document.getElementById('kt_notice_modal');
+						(bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl)).hide();
+						setTimeout(function () { location.reload(); }, 400);
+					})
+					.catch(function (e) { toast(e.message, false); })
+					.finally(function () { btn.disabled = false; });
+			});
 
-		document.getElementById('kt_notice_modal').addEventListener('show.bs.modal', function (ev) {
-			if (ev.target !== this) return;
-			if (!document.getElementById('notice_id').value) openCreate();
-		});
-
-		render();
+			document.getElementById('kt_notice_modal').addEventListener('show.bs.modal', function (ev) {
+				if (ev.target !== this) return;
+				if (!document.getElementById('notice_id').value) openCreate();
+			});
+		}
 	})();
 	</script>
 

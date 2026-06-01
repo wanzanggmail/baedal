@@ -1,0 +1,2 @@
+-- 출금 신청 · 자동 일일정산 (프로젝트에 이미 동일/유사 테이블이 있으면 migrate 스킵)
+-- 실제 운영 스키마: kind enum('rider_manual','auto_daily'), withhold_* 컬럼

@@ -37,30 +37,104 @@
 	align-items: center;
 	justify-content: center;
 	width: 100%;
-	aspect-ratio: 1 / 1;
+	aspect-ratio: 5 / 4;
 	height: auto !important;
-	min-height: 11rem;
-	padding: 0.75rem !important;
-	border-radius: 1rem !important;
+	min-height: 8.8rem;
+	padding: 0.6rem !important;
+	border-radius: 0.8rem !important;
 	text-align: center;
 }
 .rider-home-big-action .ki-duotone {
-	font-size: clamp(3.25rem, 42cqw, 4.5rem) !important;
+	font-size: clamp(2.6rem, 33.6cqw, 3.6rem) !important;
 	line-height: 1 !important;
 }
 @supports not (font-size: 1cqw) {
 	.rider-home-big-action .ki-duotone {
-		font-size: clamp(3.25rem, 11vw, 4.5rem) !important;
+		font-size: clamp(2.6rem, 8.8vw, 3.6rem) !important;
 	}
 }
 .rider-home-big-action .rider-home-big-action-label {
-	font-size: clamp(1.2rem, 5.5cqw, 1.6rem);
+	font-size: clamp(0.96rem, 4.4cqw, 1.28rem);
 	line-height: 1.2;
 	font-weight: 700;
-	margin-top: 0.35rem;
+	margin-top: 0.28rem;
 }
 @supports not (font-size: 1cqw) {
 	.rider-home-big-action .rider-home-big-action-label {
-		font-size: clamp(1.2rem, 3.8vw, 1.6rem);
+		font-size: clamp(0.96rem, 3vw, 1.28rem);
 	}
+}
+
+/* 홈: 공지 카드·리스트 (컴팩트) */
+.rider-home-notices > .card-header {
+	padding: 0.65rem 0.85rem 0.2rem;
+	min-height: auto;
+}
+.rider-home-notices > .card-body {
+	padding: 0.25rem 0.85rem 0.55rem;
+}
+.rider-home-notice-list .rider-home-notice-item {
+	border-bottom: 1px solid var(--bs-gray-200);
+	padding-top: 0.4rem;
+	padding-bottom: 0.4rem;
+}
+.rider-home-notice-list li:last-child .rider-home-notice-item {
+	border-bottom: 0;
+	padding-bottom: 0.15rem;
+}
+.rider-home-notice-list li:first-child .rider-home-notice-item {
+	padding-top: 0.15rem;
+}
+
+/* 홈: 정산·출금 카드 (컴팩트) */
+.rider-home-settlement > .card-body {
+	padding: 0.55rem 0.85rem 0.65rem;
+}
+.rider-home-settlement-top {
+	padding-bottom: 0.55rem;
+	margin-bottom: 0.55rem;
+}
+.rider-home-settlement-withdraw {
+	padding-top: 0.1rem;
+}
+
+/* 홈: DB 광고 배너 캐러셀 (하단) */
+.rider-home-banners {
+	margin-bottom: 0.5rem;
+}
+.rider-home-carousel .carousel-inner {
+	border-radius: 0.75rem;
+}
+.rider-home-banner-img {
+	display: block;
+	width: 100%;
+	height: auto;
+	min-height: 5rem;
+	aspect-ratio: 4 / 1;
+	object-fit: cover;
+	object-position: center;
+	background: var(--bs-gray-200);
+}
+.rider-home-banner-fallback {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 5.5rem;
+	aspect-ratio: 4 / 1;
+}
+.rider-home-carousel .carousel-control-prev,
+.rider-home-carousel .carousel-control-next {
+	width: 2.5rem;
+	opacity: 0.85;
+}
+.rider-home-carousel-indicators {
+	margin-bottom: 0.35rem;
+}
+.rider-home-carousel-indicators [data-bs-target] {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+}
+#kt_rider_bottom_nav .nav-link span {
+	font-size: 0.65rem;
 }

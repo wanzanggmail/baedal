@@ -33,28 +33,101 @@ if (rider_is_logged_in() && $riderRoute === 'login') {
 }
 
 if ($riderRoute === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $loginId = trim((string) ($_POST['login_id'] ?? ''));
+    require_once INC_PATH . '/RiderAuth.php';
+
+    $loginId  = trim((string) ($_POST['login_id'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
     $remember = isset($_POST['remember']);
-    $nextRaw = trim((string) ($_POST['next'] ?? $_GET['next'] ?? 'home'));
+    $nextRaw  = trim((string) ($_POST['next'] ?? $_GET['next'] ?? 'home'));
 
-    if ($loginId === '' || strlen($password) < 4) {
-        $_SESSION['rider_flash_error'] = '아이디와 비밀번호(4자 이상)를 입력하세요.';
+    $throttle = RiderAuth::checkLoginThrottle();
+    if ($throttle !== null) {
+        $_SESSION['rider_flash_error'] = $throttle;
         header('Location: ' . rider_url('login'), true, 302);
         exit;
     }
 
-    rider_set_session_user($loginId);
+    if ($loginId === '' || $password === '') {
+        $_SESSION['rider_flash_error'] = '아이디와 비밀번호를 입력하세요.';
+        header('Location: ' . rider_url('login'), true, 302);
+        exit;
+    }
+
+    try {
+        $rider = RiderAuth::authenticate($loginId, $password);
+    } catch (RuntimeException $e) {
+        $_SESSION['rider_flash_error'] = $e->getMessage();
+        header('Location: ' . rider_url('login'), true, 302);
+        exit;
+    }
+
+    if ($rider === null) {
+        RiderAuth::recordLoginFailure();
+        $_SESSION['rider_flash_error'] = '아이디 또는 비밀번호가 올바르지 않습니다.';
+        header('Location: ' . rider_url('login'), true, 302);
+        exit;
+    }
+
+    session_regenerate_id(true);
+    RiderAuth::clearLoginFailures();
+    rider_set_session_user($rider);
+    RiderAuth::touchLastLogin((int) $rider['id']);
+
     if ($remember) {
-        rider_set_remember_cookie($loginId);
+        rider_set_remember_cookie((int) $rider['id']);
     } else {
         rider_clear_remember_cookie();
     }
 
-    $_SESSION['rider_show_notice_popup'] = true;
+    try {
+        require_once INC_PATH . '/Notice.php';
+        $popupQueue = Notice::loginPopupQueue();
+        if ($popupQueue !== []) {
+            $_SESSION['rider_notice_popup_queue'] = $popupQueue;
+        }
+    } catch (Throwable) {
+    }
 
     $next = rider_safe_next_route($nextRaw, $routes);
     header('Location: ' . rider_url($next), true, 302);
+    exit;
+}
+
+if ($riderRoute === 'profile/password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once INC_PATH . '/RiderAuth.php';
+
+    $csrf = (string) ($_POST['_token'] ?? '');
+    $expect = (string) ($_SESSION['rider_pw_csrf'] ?? '');
+    if ($expect === '' || !hash_equals($expect, $csrf)) {
+        $_SESSION['rider_flash_error'] = '잘못된 요청입니다. 다시 시도해 주세요.';
+        header('Location: ' . rider_url('profile/password'), true, 302);
+        exit;
+    }
+
+    $ru = rider_current_user();
+    if (!$ru) {
+        header('Location: ' . rider_url('login'), true, 302);
+        exit;
+    }
+
+    try {
+        RiderAuth::changePassword(
+            (int) $ru['id'],
+            (string) ($_POST['current_password'] ?? ''),
+            (string) ($_POST['new_password'] ?? ''),
+            (string) ($_POST['new_password_confirm'] ?? '')
+        );
+        unset($_SESSION['rider_pw_csrf']);
+        rider_clear_remember_cookie();
+        session_regenerate_id(true);
+        $_SESSION['rider_flash_ok'] = '비밀번호가 변경되었습니다.';
+    } catch (InvalidArgumentException $e) {
+        $_SESSION['rider_flash_error'] = $e->getMessage();
+    } catch (Throwable $e) {
+        $_SESSION['rider_flash_error'] = '비밀번호 변경에 실패했습니다.';
+    }
+
+    header('Location: ' . rider_url('profile/password'), true, 302);
     exit;
 }
 

@@ -1,0 +1,294 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * 정산 엑셀 업로드 API
+ * POST /admin/api/settlement_upload.php
+ *
+ * DB 스키마: 초기 설계(settlement_uploads) + settlement_daily_riders(일별 라이더 요약)
+ */
+
+require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
+require_once INC_PATH . '/XlsxParser.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+admin_require_login();
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['ok' => false, 'error' => 'POST 요청만 허용됩니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$platform  = trim((string) ($_POST['platform'] ?? 'baemin'));
+$dateInput = trim((string) ($_POST['settlement_date'] ?? ''));
+
+if (!in_array($platform, ['baemin', 'coupang', 'other'], true)) {
+    $platform = 'baemin';
+}
+
+if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+    $errCode = $_FILES['file']['error'] ?? 'N/A';
+    echo json_encode(['ok' => false, 'error' => "파일 업로드 실패 (코드: {$errCode})"], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$origName = (string) ($_FILES['file']['name'] ?? 'upload.xlsx');
+$tmpPath  = (string) ($_FILES['file']['tmp_name'] ?? '');
+
+if ($tmpPath === '' || !is_file($tmpPath)) {
+    echo json_encode(['ok' => false, 'error' => '업로드된 임시 파일을 찾을 수 없습니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+if ($ext !== 'xlsx') {
+    echo json_encode(['ok' => false, 'error' => '.xlsx 파일만 업로드 가능합니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$settlementDate = '';
+if (preg_match('/(\d{4})(\d{2})(\d{2})/', $origName, $m)) {
+    $settlementDate = "{$m[1]}-{$m[2]}-{$m[3]}";
+}
+if ($settlementDate === '' && $dateInput !== '') {
+    $settlementDate = $dateInput;
+}
+if ($settlementDate === '') {
+    $settlementDate = date('Y-m-d');
+}
+
+$teamName   = '';
+$regionName = '';
+$baseName   = pathinfo($origName, PATHINFO_FILENAME);
+$parts      = explode('_', $baseName);
+if (count($parts) >= 3) {
+    $teamName   = $parts[0] ?? '';
+    $regionName = implode('_', array_slice($parts, 1, -1));
+}
+
+$metaJson = json_encode(['team' => $teamName, 'region' => $regionName], JSON_UNESCAPED_UNICODE);
+
+$parser = new XlsxParser();
+try {
+    $parser->open($tmpPath);
+    $parsed     = $parser->parseDailySheet($settlementDate);
+    $deductions = $parser->parseDeductionSheet();
+} catch (Throwable $e) {
+    if (isset($parser)) {
+        $parser->close();
+    }
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+$parser->close();
+
+$rows = $parsed['rows'] ?? [];
+if ($rows === []) {
+    echo json_encode(['ok' => false, 'error' => '파싱된 데이터가 없습니다. 파일 형식을 확인해 주세요.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$adminId = (int) ($_SESSION['admin_id'] ?? 0);
+if ($adminId <= 0) {
+    $adminId = null;
+}
+
+try {
+    $result = db_transaction(static function () use (
+        $platform,
+        $settlementDate,
+        $origName,
+        $metaJson,
+        $rows,
+        $deductions,
+        $adminId
+    ): array {
+        // 동일 일자·플랫폼 일간 업로드가 있으면 덮어쓰기
+        $existing = db_row(
+            'SELECT id FROM settlement_uploads
+              WHERE kind = ? AND platform = ? AND settlement_date = ?
+              ORDER BY id DESC LIMIT 1',
+            ['daily', $platform, $settlementDate]
+        );
+
+        $totalRows = count($rows);
+
+        if ($existing) {
+            $uploadId = (int) $existing['id'];
+            db_execute(
+                'UPDATE settlement_uploads
+                    SET original_filename = ?, stored_path = ?, total_rows = ?,
+                        status = ?, operator_id = ?, updated_at = NOW()
+                  WHERE id = ?',
+                [$origName, $metaJson, $totalRows, 'parsed', $adminId, $uploadId]
+            );
+            db_execute('DELETE FROM settlement_daily_riders WHERE upload_id = ?', [$uploadId]);
+            db_execute('DELETE FROM settlement_weekly_deductions WHERE upload_id = ?', [$uploadId]);
+        } else {
+            $uploadId = db_insert(
+                'INSERT INTO settlement_uploads
+                    (kind, platform, original_filename, stored_path, settlement_date,
+                     total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
+                 VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
+                ['daily', $platform, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
+            );
+        }
+
+        $inserted  = 0;
+        $matched   = 0;
+        $unmatched = [];
+
+        foreach ($rows as $row) {
+            $riderId = null;
+
+            if ($row['license_id'] !== '') {
+                $rp = db_row(
+                    'SELECT rider_id FROM rider_platforms WHERE platform = ? AND external_id = ?',
+                    [$platform, (string) $row['license_id']]
+                );
+                if ($rp) {
+                    $riderId = (int) $rp['rider_id'];
+                }
+            }
+
+            if ($riderId === null && $row['name'] !== '') {
+                $r = db_row('SELECT id FROM riders WHERE name = ? LIMIT 1', [$row['name']]);
+                if ($r) {
+                    $riderId = (int) $r['id'];
+                }
+            }
+
+            if ($riderId !== null) {
+                $matched++;
+            } else {
+                $unmatched[] = $row['name_raw'];
+            }
+
+            db_insert(
+                'INSERT INTO settlement_daily_riders
+                    (upload_id, settlement_date, platform, rider_id, license_id, rider_name_raw,
+                     order_count, gross_amount, fee_pickup, fee_delivery, fee_area,
+                     fee_dist_cnt, fee_dist_surge, fee_pickup_cnt, fee_pickup_surge,
+                     fee_dest_cnt, fee_dest_surge, fee_weather_cnt, fee_weather,
+                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, payout_amount)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                [
+                    $uploadId,
+                    $settlementDate,
+                    $platform,
+                    $riderId,
+                    $row['license_id'],
+                    $row['name_raw'],
+                    $row['order_count'],
+                    $row['gross_amount'],
+                    $row['fee_pickup'],
+                    $row['fee_delivery'],
+                    $row['fee_area'],
+                    $row['fee_dist_cnt'],
+                    $row['fee_dist_surge'],
+                    $row['fee_pickup_cnt'],
+                    $row['fee_pickup_surge'],
+                    $row['fee_dest_cnt'],
+                    $row['fee_dest_surge'],
+                    $row['fee_weather_cnt'],
+                    $row['fee_weather'],
+                    $row['fee_promo1'],
+                    $row['fee_promo2'],
+                    $row['fee_promo3'],
+                    $row['fee_promo4'],
+                    $row['payout_amount'],
+                ]
+            );
+            $inserted++;
+        }
+
+        $deductionCount = 0;
+        foreach ($deductions as $ded) {
+            if ($ded['order_no'] === '' && $ded['amount'] === 0) {
+                continue;
+            }
+
+            db_insert(
+                'INSERT INTO settlement_weekly_deductions
+                    (upload_id, week_start, order_date, order_no, rider_id, rider_name_raw,
+                     deduction_type, store_name, assigned_at, menu_price, delivery_fee, amount)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                [
+                    $uploadId,
+                    $settlementDate,
+                    settlement_parse_date($ded['order_date']),
+                    $ded['order_no'],
+                    null,
+                    '',
+                    $ded['type'],
+                    $ded['store_name'],
+                    null,
+                    $ded['menu_price'],
+                    $ded['delivery_fee'],
+                    $ded['amount'],
+                ]
+            );
+            $deductionCount++;
+        }
+
+        $errorRows = count($unmatched);
+        db_execute(
+            'UPDATE settlement_uploads
+                SET ok_rows = ?, skipped_rows = 0, error_rows = ?, status = ?
+              WHERE id = ?',
+            [$matched, $errorRows, 'parsed', $uploadId]
+        );
+
+        return [
+            'upload_id'  => $uploadId,
+            'inserted'   => $inserted,
+            'matched'    => $matched,
+            'unmatched'  => $unmatched,
+            'deductions' => $deductionCount,
+        ];
+    });
+} catch (Throwable $e) {
+    $msg = $e->getMessage();
+    if (str_contains($msg, 'settlement_daily_riders')) {
+        $msg .= ' — migrate_settlement.php 를 한 번 실행해 주세요.';
+    }
+    echo json_encode(['ok' => false, 'error' => 'DB 저장 오류: ' . $msg], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+echo json_encode([
+    'ok'         => true,
+    'upload_id'  => $result['upload_id'],
+    'date'       => $settlementDate,
+    'team'       => $teamName,
+    'region'     => $regionName,
+    'rows'       => $result['inserted'],
+    'matched'    => $result['matched'],
+    'deductions' => $result['deductions'],
+    'unmatched'  => $result['unmatched'],
+    'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명)",
+], JSON_UNESCAPED_UNICODE);
+
+/**
+ * @param mixed $value
+ */
+function settlement_parse_date($value): ?string
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    if (is_numeric($value)) {
+        $unix = ((int) $value - 25569) * 86400;
+
+        return gmdate('Y-m-d', $unix);
+    }
+    $s = trim((string) $value);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}/', $s)) {
+        return substr($s, 0, 10);
+    }
+
+    return null;
+}
