@@ -79,13 +79,17 @@ jobs:
             ./ "$DEST"
 
       - name: Fix permissions (optional)
-        if: ${{ secrets.DEPLOY_POST_CMD != '' }}
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_POST_CMD: ${{ secrets.DEPLOY_POST_CMD }}
         run: |
+          if [ -z "${DEPLOY_POST_CMD}" ]; then
+            echo "DEPLOY_POST_CMD not set, skipping post-deploy command"
+            exit 0
+          fi
           PORT="${DEPLOY_PORT:-22}"
           ssh -i ~/.ssh/deploy_key -p "$PORT" -o StrictHostKeyChecking=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "${{ secrets.DEPLOY_POST_CMD }}"
+            "${DEPLOY_POST_CMD}"
