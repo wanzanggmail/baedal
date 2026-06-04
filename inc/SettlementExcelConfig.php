@@ -96,6 +96,7 @@ final class SettlementExcelConfig
 
         $unique = [];
         foreach ($list as $pw) {
+            $pw = trim($pw);
             if ($pw !== '' && !in_array($pw, $unique, true)) {
                 $unique[] = $pw;
             }

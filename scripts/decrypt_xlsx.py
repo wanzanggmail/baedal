@@ -34,7 +34,27 @@ def main() -> int:
         sys.stderr.write(str(exc) + "\n")
         return 3
 
-    return 0
+    try:
+        with open(out, "rb") as check:
+            head = check.read(4)
+    except OSError as exc:
+        sys.stderr.write(str(exc) + "\n")
+        return 5
+
+    if head == b"PK\x03\x04":
+        return 0
+    if head == b"\xd0\xcf\x11\xe0":
+        sys.stderr.write("decrypted_ole_xls: xls 형식입니다. xlsx로 저장된 파일을 업로드하세요.\n")
+        return 6
+    if head == b"":
+        sys.stderr.write("decrypted_empty\n")
+        return 5
+
+    sys.stderr.write(
+        "decrypted_invalid: 비밀번호가 틀렸거나 손상된 출력(header=%s)\n"
+        % head.hex()
+    )
+    return 4
 
 
 if __name__ == "__main__":

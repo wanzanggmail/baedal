@@ -111,6 +111,7 @@ $platformLabels = [
 									<?php if (!$excelConfigReady) : ?>
 									<span class="d-block mt-1 text-danger">DB: <code>php migrate_settlement_excel_config.php</code> · 서버: <code>pip install -r requirements-settlement.txt</code></span>
 									<?php endif; ?>
+									<a class="d-block mt-2 fw-semibold" href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_check.php', ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">엑셀 복호화 환경 진단 (PHP가 쓰는 Python 확인)</a>
 								</div>
 							</div>
 
