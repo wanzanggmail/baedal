@@ -1,0 +1,3 @@
+# 정산 엑셀 파일 열기 암호 해제 (서버 1회 설치)
+# pip install -r requirements-settlement.txt
+msoffcrypto-tool>=5.0.0

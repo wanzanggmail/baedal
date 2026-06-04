@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/SettlementExcelConfig.php';
+
+$excelPasswords   = SettlementExcelConfig::allStored();
+$excelConfigReady = SettlementExcelConfig::tableExists();
+$excelConfigApi   = ADMIN_BASE . '/api/settlement_excel_config.php';
+$canSaveExcelPw   = admin_can_write('settlement');
+
 // 최근 업로드 이력 (일간)
 $recentUploads = [];
 try {
@@ -90,11 +97,20 @@ $platformLabels = [
 							</h3>
 						</div>
 						<div class="card-body pt-5">
-							<div class="alert alert-primary d-flex align-items-center p-5 mb-8">
+							<div class="alert alert-primary d-flex align-items-center p-5 mb-5">
 								<i class="ki-duotone ki-information-5 fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
 								<div class="d-flex flex-column">
 									<span class="fw-bold">플랫폼에서 받은 일간 정산서(.xlsx)를 그대로 올려 주세요.</span>
 									<span class="text-gray-700 fs-7 mt-1">파일명에 날짜가 포함된 경우(예: 팀도깨비_서울_강서남부_<strong>20260225</strong>.xlsx) 귀속일이 자동 추출됩니다.</span>
+								</div>
+							</div>
+							<div class="alert alert-warning d-flex align-items-center p-5 mb-8">
+								<i class="ki-duotone ki-lock fs-2hx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+								<div class="fs-7 text-gray-800">
+									<strong>파일 열기 암호</strong>가 걸린 정산서는 아래에 비밀번호를 등록하면 업로드 시 자동으로 해제 후 파싱합니다.
+									<?php if (!$excelConfigReady) : ?>
+									<span class="d-block mt-1 text-danger">DB: <code>php migrate_settlement_excel_config.php</code> · 서버: <code>pip install -r requirements-settlement.txt</code></span>
+									<?php endif; ?>
 								</div>
 							</div>
 
@@ -116,10 +132,15 @@ $platformLabels = [
 									<input type="date" class="form-control form-control-solid" name="settlement_date" id="settlementDateInput" />
 									<div class="form-text">파일명에 날짜가 없는 경우에만 수동 입력하세요.</div>
 								</div>
-								<div class="mb-8">
+								<div class="mb-6">
 									<label class="form-label required">파일</label>
 									<input type="file" class="form-control form-control-solid" name="file" id="xlsxFileInput" accept=".xlsx" />
-									<div class="form-text">xlsx 파일만 가능합니다. (최대 20MB)</div>
+									<div class="form-text">xlsx 파일만 가능합니다. (최대 20MB) · 암호 파일도 그대로 업로드</div>
+								</div>
+								<div class="mb-8">
+									<label class="form-label" for="excel_password_once">이번만 사용할 열기 암호 <span class="text-muted">(선택)</span></label>
+									<input type="password" class="form-control form-control-solid" name="excel_password" id="excel_password_once"
+										autocomplete="off" placeholder="저장된 암호가 있으면 비워도 됩니다" />
 								</div>
 								<div class="d-flex justify-content-end">
 									<button type="submit" class="btn btn-primary" id="uploadBtn">
@@ -137,6 +158,44 @@ $platformLabels = [
 					</div>
 				</div>
 				<!--end::업로드 폼-->
+
+				<!--begin::엑셀 암호 설정-->
+				<div class="col-xl-12">
+					<div class="card card-flush mb-5">
+						<div class="card-header pt-5">
+							<h3 class="card-title fw-bold">엑셀 열기 암호 (플랫폼별 저장)</h3>
+						</div>
+						<div class="card-body pt-0 fs-7">
+							<?php if (!$excelConfigReady) : ?>
+							<p class="text-warning mb-0">마이그레이션 후 저장할 수 있습니다.</p>
+							<?php else : ?>
+							<div id="excel_pw_toast" class="alert alert-dismissible d-none mb-4" role="alert">
+								<span id="excel_pw_toast_msg"></span>
+								<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+							</div>
+							<form id="excel_pw_form" class="row g-4 align-items-end">
+								<?php foreach (SettlementExcelConfig::platforms() as $pf) :
+								    $pfLabel = $platformLabels[$pf] ?? $pf;
+								    ?>
+								<div class="col-md-4">
+									<label class="form-label" for="excel_pw_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($pfLabel, ENT_QUOTES, 'UTF-8') ?></label>
+									<input type="password" class="form-control form-control-solid" id="excel_pw_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>"
+										value="<?= htmlspecialchars($excelPasswords[$pf] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+										autocomplete="new-password" <?= $canSaveExcelPw ? '' : 'readonly' ?> />
+								</div>
+								<?php endforeach; ?>
+								<?php if ($canSaveExcelPw) : ?>
+								<div class="col-md-12">
+									<button type="button" class="btn btn-sm btn-light-primary" id="excel_pw_save_btn">암호 저장</button>
+									<span class="text-muted ms-3">비우고 저장하면 해당 플랫폼 등록 암호를 삭제합니다.</span>
+								</div>
+								<?php endif; ?>
+							</form>
+							<?php endif; ?>
+						</div>
+					</div>
+				</div>
+				<!--end::엑셀 암호 설정-->
 
 				<!--begin::파싱 컬럼 안내-->
 				<div class="col-xl-7">
@@ -365,6 +424,37 @@ $platformLabels = [
 
 	function escHtml(s) {
 		return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+	}
+
+	// 플랫폼별 엑셀 열기 암호 저장
+	const excelPwBtn = document.getElementById('excel_pw_save_btn');
+	if (excelPwBtn) {
+		const excelPwApi = <?= json_encode($excelConfigApi, JSON_UNESCAPED_UNICODE) ?>;
+		const toast = document.getElementById('excel_pw_toast');
+		const toastMsg = document.getElementById('excel_pw_toast_msg');
+		excelPwBtn.addEventListener('click', async function () {
+			const passwords = {
+				baemin: document.getElementById('excel_pw_baemin')?.value || '',
+				coupang: document.getElementById('excel_pw_coupang')?.value || '',
+				other: document.getElementById('excel_pw_other')?.value || '',
+			};
+			try {
+				const resp = await fetch(excelPwApi, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'save', passwords: passwords }),
+				});
+				const data = await resp.json();
+				if (!data.ok) throw new Error(data.message || '저장 실패');
+				toast.className = 'alert alert-dismissible mb-4 alert-success';
+				toastMsg.textContent = data.message || '저장되었습니다.';
+				toast.classList.remove('d-none');
+			} catch (err) {
+				toast.className = 'alert alert-dismissible mb-4 alert-danger';
+				toastMsg.textContent = err.message || '저장 실패';
+				toast.classList.remove('d-none');
+			}
+		});
 	}
 })();
 </script>

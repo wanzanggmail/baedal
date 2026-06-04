@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/XlsxParser.php';
+require_once INC_PATH . '/XlsxDecrypt.php';
+require_once INC_PATH . '/SettlementExcelConfig.php';
 require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -74,19 +76,29 @@ if (count($parts) >= 3) {
 
 $metaJson = json_encode(['team' => $teamName, 'region' => $regionName], JSON_UNESCAPED_UNICODE);
 
-$parser = new XlsxParser();
+$uploadPassword = trim((string) ($_POST['excel_password'] ?? ''));
+$passwords      = SettlementExcelConfig::passwordsToTry(
+    $platform,
+    $uploadPassword !== '' ? $uploadPassword : null
+);
+
+$parsePath = $tmpPath;
+$parser    = new XlsxParser();
 try {
-    $parser->open($tmpPath);
+    $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords);
+    $parser->open($parsePath);
     $parsed     = $parser->parseDailySheet($settlementDate);
     $deductions = $parser->parseDeductionSheet();
 } catch (Throwable $e) {
     if (isset($parser)) {
         $parser->close();
     }
+    XlsxDecrypt::cleanupTemps();
     echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     exit;
 }
 $parser->close();
+XlsxDecrypt::cleanupTemps();
 
 $rows = $parsed['rows'] ?? [];
 if ($rows === []) {

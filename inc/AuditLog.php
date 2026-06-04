@@ -223,6 +223,7 @@ final class AuditLog
             str_starts_with($action, 'content.notice') => 'content_notices',
             str_starts_with($action, 'content.banner') => 'content_banners',
             str_starts_with($action, 'settlement.upload') => 'settlement_uploads',
+            str_starts_with($action, 'settlement.excel_password') => 'settlement_excel_config',
             str_starts_with($action, 'settlement.') => 'settlement_rider_cycles',
             str_starts_with($action, 'withdrawal.') => 'withdrawal_requests',
             str_starts_with($action, 'deduction.') => 'deduction_global_config',

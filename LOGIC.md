@@ -47,7 +47,7 @@
 | route | 화면 | 상태 | 도메인/API | 비고 |
 |-------|------|------|------------|------|
 | `dashboard` | 대시보드 | **DB** | `AdminDashboard` | `settlement_daily_riders`, `withdrawal_requests` 등 테이블 없으면 일부 0 |
-| `settlement/upload` | 엑셀 업로드 | **DB** | `settlement_upload.php`, `XlsxParser` | 업로드 → `settlement_uploads` + `settlement_daily_riders` |
+| `settlement/upload` | 엑셀 업로드 | **DB** | `settlement_upload.php`, `XlsxParser`, `XlsxDecrypt` | 파일 열기 암호 자동 해제 후 파싱 |
 | `settlement/upload-detail` | 업로드 상세 | **DB** | SQL 직접 | |
 | `settlement/history` | 업로드 이력 | **DB** | SQL 직접 | |
 | `settlement/fees` | 정산 수수료 내역 | **DB** | `SettlementLedger::listAdmin` | 정산 반영 후 생성 |
@@ -181,7 +181,8 @@
 |------|------|
 | platform | `baemin` \| `coupang` \| `other` |
 | 파서 | `inc/XlsxParser.php` |
-| migrate | `migrate_settlement.php`, `sql/settlement_tables.sql` |
+| 파일 열기 암호 | `XlsxDecrypt` + `SettlementExcelConfig` (DB·`.env`) · 복호화: `scripts/decrypt_xlsx.py` (`msoffcrypto-tool`) |
+| migrate | `migrate_settlement.php`, `migrate_settlement_excel_config.php` |
 | 권한 | 조회: settlement, operation, super / 업로드: settlement, super |
 
 #### 정산 반영·수수료 내역
@@ -309,6 +310,7 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 | `migrate_content.php` | content_notices, content_banners |
 | `migrate_settlement.php` | settlement_daily_riders 등 |
 | `migrate_settlement_ledger.php` | settlement_rider_cycles, settlement_fee_items |
+| `migrate_settlement_excel_config.php` | settlement_excel_config (플랫폼별 열기 암호) |
 | `migrate_agency_fee_config.php` | deduction_global_config 대행 수수료 컬럼 |
 | `migrate_daily_settlement.php` | withdrawal_requests (구) |
 | `migrate_withdrawal_wallet.php` | withdrawal_config, rider_wallets, accrued_days 컬럼 |
