@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/XlsxParser.php';
+require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -21,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['ok' => false, 'error' => 'POST 요청만 허용됩니다.'], JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+admin_deny_write_json('settlement');
 
 $platform  = trim((string) ($_POST['platform'] ?? 'baemin'));
 $dateInput = trim((string) ($_POST['settlement_date'] ?? ''));
@@ -258,6 +261,12 @@ try {
     echo json_encode(['ok' => false, 'error' => 'DB 저장 오류: ' . $msg], JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+AuditLog::record(
+    'settlement.upload',
+    $origName,
+    "{$platform} · {$settlementDate} · {$result['inserted']}명 저장"
+);
 
 echo json_encode([
     'ok'         => true,

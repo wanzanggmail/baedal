@@ -1,6 +1,10 @@
 # 환경 변수 (패스워드 포함 — 절대 커밋하지 마세요)
 .env
 
+# AWS Lightsail / SSH 키 (GitHub Secrets에만 등록)
+*.pem
+*.ppk
+
 # Composer
 /vendor/
 

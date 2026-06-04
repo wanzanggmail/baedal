@@ -2,24 +2,61 @@
 
 declare(strict_types=1);
 
-$auditSeed = [
-    ['at' => '2026-05-10 09:14', 'actor' => 'super@baedal', 'action' => 'auth.login', 'target' => '세션', 'detail' => '관리자 로그인 성공', 'ip' => '10.0.1.20'],
-    ['at' => '2026-05-10 09:18', 'actor' => 'settlement01', 'action' => 'settlement.upload', 'target' => '20260509_settlement.xlsx', 'detail' => '정산 엑셀 업로드(샘플)', 'ip' => '10.0.1.31'],
-    ['at' => '2026-05-10 08:42', 'actor' => 'ops_hw', 'action' => 'content.notice.publish', 'target' => 'nt-20260510-001', 'detail' => '공지 게시', 'ip' => '10.0.2.5'],
-    ['at' => '2026-05-09 17:05', 'actor' => 'super@baedal', 'action' => 'withdrawal.export', 'target' => 'batch-20260509', 'detail' => '출금 신청 엑셀 다운로드', 'ip' => '10.0.1.20'],
-    ['at' => '2026-05-09 16:20', 'actor' => 'settlement01', 'action' => 'promotion.batch', 'target' => 'rule-APR-2026', 'detail' => '프로모션 배치 수동 실행', 'ip' => '10.0.1.31'],
-    ['at' => '2026-05-09 14:11', 'actor' => 'viewer_cs', 'action' => 'rider.view', 'target' => 'R-10482', 'detail' => '라이더 상세 조회', 'ip' => '192.168.40.12'],
-    ['at' => '2026-05-09 11:33', 'actor' => 'ops_hw', 'action' => 'rider.documents', 'target' => 'R-10490', 'detail' => '가입 서류 메타 확인(목업)', 'ip' => '10.0.2.5'],
-    ['at' => '2026-05-08 19:50', 'actor' => 'super@baedal', 'action' => 'admin.role_change', 'target' => 'ops_hw', 'detail' => '역할 검토(샘플 로그)', 'ip' => '10.0.1.20'],
-    ['at' => '2026-05-08 15:02', 'actor' => 'settlement01', 'action' => 'deduction.entry', 'target' => 'D-8821', 'detail' => '차감 내역 등록', 'ip' => '10.0.1.31'],
-    ['at' => '2026-05-08 09:00', 'actor' => 'system', 'action' => 'job.backup', 'target' => 'db-snapshot', 'detail' => '일일 백업 완료(가정)', 'ip' => '127.0.0.1'],
-    ['at' => '2026-05-07 22:15', 'actor' => 'super@baedal', 'action' => 'auth.logout', 'target' => '세션', 'detail' => '로그아웃', 'ip' => '10.0.1.20'],
-    ['at' => '2026-05-07 18:40', 'actor' => 'viewer_cs', 'action' => 'stats.export', 'target' => 'summary.csv', 'detail' => '통계 내보내기 조회', 'ip' => '192.168.40.12'],
-    ['at' => '2026-05-07 10:05', 'actor' => 'ops_hw', 'action' => 'content.banner.update', 'target' => 'bn-main-01', 'detail' => '배너 이미지 교체', 'ip' => '10.0.2.5'],
-    ['at' => '2026-05-06 16:48', 'actor' => 'settlement01', 'action' => 'settlement.apply', 'target' => 'week-202605-1', 'detail' => '정산 반영 확정', 'ip' => '10.0.1.31'],
-    ['at' => '2026-05-06 09:30', 'actor' => 'super@baedal', 'action' => 'codes.view', 'target' => 'bank', 'detail' => '마스터 코드 화면 조회', 'ip' => '10.0.1.20'],
-];
-$auditSeedJson = json_encode($auditSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+require_once INC_PATH . '/AuditLog.php';
+
+$listError = null;
+$result = ['rows' => [], 'total' => 0, 'page' => 1, 'limit' => 50, 'pages' => 1];
+$needsMigrate = false;
+
+$filterQ = trim((string) ($_GET['q'] ?? ''));
+$filterActor = trim((string) ($_GET['actor'] ?? ''));
+$filterPrefix = trim((string) ($_GET['action_prefix'] ?? ''));
+$page = max(1, (int) ($_GET['page'] ?? 1));
+
+try {
+    if (!AuditLog::tableExists()) {
+        $needsMigrate = true;
+    } else {
+        $result = AuditLog::list([
+            'q'             => $filterQ,
+            'actor'         => $filterActor,
+            'action_prefix' => $filterPrefix,
+            'page'          => $page,
+            'limit'         => 50,
+        ]);
+    }
+} catch (Throwable $e) {
+    $listError = $e->getMessage();
+    if (str_contains($listError, 'audit_logs') || str_contains($listError, "doesn't exist")) {
+        $needsMigrate = true;
+        $listError = null;
+    }
+}
+
+$rows = $result['rows'];
+$total = (int) $result['total'];
+$pages = (int) $result['pages'];
+$listUrl = admin_url('system/audit');
+$exportBase = ADMIN_BASE . '/api/audit_export.php';
+$exportQs = http_build_query(array_filter([
+    'q'             => $filterQ !== '' ? $filterQ : null,
+    'actor'         => $filterActor !== '' ? $filterActor : null,
+    'action_prefix' => $filterPrefix !== '' ? $filterPrefix : null,
+]));
+$exportUrl = $exportBase . ($exportQs !== '' ? ('?' . $exportQs) : '');
+
+function audit_page_url(string $base, int $page, string $q, string $actor, string $prefix): string
+{
+    $qs = http_build_query(array_filter([
+        'route'         => 'system/audit',
+        'q'             => $q !== '' ? $q : null,
+        'actor'         => $actor !== '' ? $actor : null,
+        'action_prefix' => $prefix !== '' ? $prefix : null,
+        'page'          => $page > 1 ? $page : null,
+    ]));
+
+    return $base . ($qs !== '' ? ('?' . $qs) : '');
+}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -30,54 +67,66 @@ $auditSeedJson = json_encode($auditSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_
 				<li class="breadcrumb-item text-muted">
 					<a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a>
 				</li>
-				<li class="breadcrumb-item">
-					<span class="bullet bg-gray-500 w-5px h-2px"></span>
-				</li>
+				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-muted">시스템</li>
-				<li class="breadcrumb-item">
-					<span class="bullet bg-gray-500 w-5px h-2px"></span>
-				</li>
+				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">감사</li>
 			</ul>
 		</div>
 		<div class="d-flex gap-2 flex-wrap">
 			<a href="<?= htmlspecialchars(admin_url('system/admins'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">관리자</a>
 			<a href="<?= htmlspecialchars(admin_url('system/codes'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">코드/마스터</a>
-			<button type="button" class="btn btn-sm btn-light-primary fw-bold" id="btn_audit_export">CSV 내보내기</button>
+			<?php if (!$needsMigrate) : ?>
+			<a href="<?= htmlspecialchars($exportUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">CSV 내보내기</a>
+			<?php endif; ?>
 		</div>
 	</div>
 </div>
 <!--end::Toolbar-->
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
-	<div class="alert alert-dismissible bg-light-warning d-flex flex-column flex-sm-row p-5 mb-8">
-		<i class="ki-duotone ki-information-5 fs-2hx text-warning me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+	<?php if ($needsMigrate) : ?>
+	<div class="alert alert-warning p-5 mb-8">
+		<strong>감사 로그 테이블이 없습니다.</strong>
+		<div class="fs-7 mt-2">서버에서 <code>php migrate_audit.php</code> 를 실행하세요.</div>
+	</div>
+	<?php elseif ($listError !== null) : ?>
+	<div class="alert alert-danger p-5 mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>
+	<?php else : ?>
+	<div class="alert alert-dismissible bg-light-info d-flex flex-column flex-sm-row p-5 mb-8">
+		<i class="ki-duotone ki-shield-tick fs-2hx text-info me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			<strong>목업</strong>입니다. 아래 시드 로그는 고정 샘플이며, <strong>관리자·코드</strong> 화면에서 저장할 때 쌓인 이벤트는 <code class="fs-8">localStorage</code>에만 추가됩니다. 실제 SIEM·DB 감사 테이블과 다릅니다.
+			관리자 <strong>로그인·로그아웃</strong>, 공지·배너·정산·출금·라이더 조치 등이
+			<strong>DB <code>audit_logs</code></strong> (actor_type / target_table / before·after JSON) 에 기록됩니다.
 		</div>
 	</div>
+	<?php endif; ?>
 
+	<?php if (!$needsMigrate && $listError === null) : ?>
 	<div class="card card-flush mb-8">
 		<div class="card-body py-5">
-			<div class="row g-4 align-items-end">
+			<form method="get" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="row g-4 align-items-end">
+				<input type="hidden" name="route" value="system/audit" />
 				<div class="col-md-4">
 					<label class="form-label fs-7" for="audit_q">검색 (행동·대상·상세)</label>
-					<input type="search" class="form-control form-control-solid" id="audit_q" placeholder="예: admin, codes, login" autocomplete="off" />
+					<input type="search" class="form-control form-control-solid" id="audit_q" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: login, notice, withdrawal" autocomplete="off" />
 				</div>
 				<div class="col-md-3">
 					<label class="form-label fs-7" for="audit_actor">수행자</label>
-					<input type="text" class="form-control form-control-solid" id="audit_actor" placeholder="전체" />
+					<input type="text" class="form-control form-control-solid" id="audit_actor" name="actor" value="<?= htmlspecialchars($filterActor, ENT_QUOTES, 'UTF-8') ?>" placeholder="전체" />
 				</div>
 				<div class="col-md-3">
 					<label class="form-label fs-7" for="audit_action_prefix">행동 접두사</label>
-					<input type="text" class="form-control form-control-solid" id="audit_action_prefix" placeholder="예: admin., codes." />
+					<input type="text" class="form-control form-control-solid" id="audit_action_prefix" name="action_prefix" value="<?= htmlspecialchars($filterPrefix, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: LOGIN, UPDATE, content_notices" />
 				</div>
 				<div class="col-md-2 d-flex gap-2">
-					<button type="button" class="btn btn-primary flex-grow-1" id="audit_apply">필터</button>
-					<button type="button" class="btn btn-light" id="audit_clear" title="초기화">↺</button>
+					<button type="submit" class="btn btn-primary flex-grow-1">필터</button>
+					<a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light" title="초기화">↺</a>
 				</div>
+			</form>
+			<div class="fs-8 text-gray-600 mt-3 mb-0">
+				총 <?= number_format($total) ?>건 · <?= (int) $result['page'] ?> / <?= max(1, $pages) ?> 페이지
 			</div>
-			<div class="fs-8 text-gray-600 mt-3 mb-0" id="audit_count"></div>
 		</div>
 	</div>
 
@@ -85,7 +134,7 @@ $auditSeedJson = json_encode($auditSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_
 		<div class="card-header align-items-center py-5">
 			<div class="card-title">
 				<h3 class="fw-bold m-0">이벤트 목록</h3>
-				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">최신 순 · 시드 + 브라우저에 기록된 목업 이벤트</span>
+				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">최신 순 · DB 저장</span>
 			</div>
 		</div>
 		<div class="card-body pt-0">
@@ -101,108 +150,36 @@ $auditSeedJson = json_encode($auditSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_
 							<th class="min-w-100px">IP</th>
 						</tr>
 					</thead>
-					<tbody id="audit_tbody"></tbody>
+					<tbody>
+						<?php if ($rows === []) : ?>
+						<tr><td colspan="6" class="text-center text-muted py-10">기록된 감사 로그가 없습니다.</td></tr>
+						<?php else : ?>
+						<?php foreach ($rows as $r) : ?>
+						<tr>
+							<td class="text-gray-800 text-nowrap"><?= htmlspecialchars((string) $r['at'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="font-monospace"><?= htmlspecialchars((string) $r['actor'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td><span class="badge badge-light-primary"><?= htmlspecialchars((string) $r['action'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td class="font-monospace text-break"><?= htmlspecialchars((string) $r['target'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-700"><?= htmlspecialchars((string) $r['detail'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-muted"><?= htmlspecialchars((string) $r['ip'], ENT_QUOTES, 'UTF-8') ?></td>
+						</tr>
+						<?php endforeach; ?>
+						<?php endif; ?>
+					</tbody>
 				</table>
 			</div>
+			<?php if ($pages > 1) : ?>
+			<div class="d-flex justify-content-center gap-2 mt-6">
+				<?php if ($page > 1) : ?>
+				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page - 1, $filterQ, $filterActor, $filterPrefix), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">이전</a>
+				<?php endif; ?>
+				<?php if ($page < $pages) : ?>
+				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page + 1, $filterQ, $filterActor, $filterPrefix), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">다음</a>
+				<?php endif; ?>
+			</div>
+			<?php endif; ?>
 		</div>
 	</div>
-
-	<script>
-	(function () {
-		var SEED = <?= $auditSeedJson ?>;
-		var AUDIT_KEY = 'baedal_audit_log';
-
-		function clientEvents() {
-			try {
-				var list = JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]');
-				return Array.isArray(list) ? list : [];
-			} catch (e) {
-				return [];
-			}
-		}
-		function merged() {
-			return clientEvents().concat(SEED);
-		}
-		function esc(s) {
-			var d = document.createElement('div');
-			d.textContent = s == null ? '' : String(s);
-			return d.innerHTML;
-		}
-		var filtered = merged();
-		function applyFilter() {
-			var q = document.getElementById('audit_q').value.trim().toLowerCase();
-			var actor = document.getElementById('audit_actor').value.trim().toLowerCase();
-			var ap = document.getElementById('audit_action_prefix').value.trim().toLowerCase();
-			filtered = merged().filter(function (r) {
-				if (actor && String(r.actor || '').toLowerCase().indexOf(actor) === -1) return false;
-				if (ap && String(r.action || '').toLowerCase().indexOf(ap) !== 0) return false;
-				if (q) {
-					var blob = [r.action, r.target, r.detail, r.actor].join(' ').toLowerCase();
-					if (blob.indexOf(q) === -1) return false;
-				}
-				return true;
-			});
-			render();
-		}
-		function render() {
-			var tb = document.getElementById('audit_tbody');
-			var cnt = document.getElementById('audit_count');
-			if (cnt) cnt.textContent = '표시 ' + filtered.length + '건 / 전체 ' + merged().length + '건';
-			if (!tb) return;
-			tb.innerHTML = filtered
-				.map(function (r) {
-					return (
-						'<tr><td class="text-gray-800 text-nowrap">' +
-						esc(r.at) +
-						'</td><td class="font-monospace">' +
-						esc(r.actor) +
-						'</td><td><span class="badge badge-light-primary">' +
-						esc(r.action) +
-						'</span></td><td class="font-monospace">' +
-						esc(r.target) +
-						'</td><td class="text-gray-700">' +
-						esc(r.detail) +
-						'</td><td class="text-muted">' +
-						esc(r.ip) +
-						'</td></tr>'
-					);
-				})
-				.join('');
-		}
-		document.getElementById('audit_apply').addEventListener('click', applyFilter);
-		document.getElementById('audit_clear').addEventListener('click', function () {
-			document.getElementById('audit_q').value = '';
-			document.getElementById('audit_actor').value = '';
-			document.getElementById('audit_action_prefix').value = '';
-			filtered = merged();
-			render();
-		});
-		document.getElementById('audit_q').addEventListener('keydown', function (e) {
-			if (e.key === 'Enter') applyFilter();
-		});
-		document.getElementById('btn_audit_export').addEventListener('click', function () {
-			var rows = filtered.slice();
-			var header = ['일시', '수행자', '행동', '대상', '상세', 'IP'];
-			var lines = [header.join(',')].concat(
-				rows.map(function (r) {
-					function c(v) {
-						var s = String(v == null ? '' : v).replace(/"/g, '""');
-						if (/[",\n]/.test(s)) return '"' + s + '"';
-						return s;
-					}
-					return [c(r.at), c(r.actor), c(r.action), c(r.target), c(r.detail), c(r.ip)].join(',');
-				}),
-			);
-			var blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-			var a = document.createElement('a');
-			a.href = URL.createObjectURL(blob);
-			a.download = 'audit-log-mock-' + new Date().toISOString().slice(0, 10) + '.csv';
-			a.click();
-			URL.revokeObjectURL(a.href);
-		});
-		filtered = merged();
-		render();
-	})();
-	</script>
+	<?php endif; ?>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

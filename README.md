@@ -1,5 +1,12 @@
 # 배달 정산 — 관리자(백오피스) 개발
 
+## GitHub → 실서버 배포
+
+`main` / `master`에 push하면 GitHub Actions가 서버로 파일을 동기화합니다.  
+설정 방법: **[DEPLOY.md](DEPLOY.md)** (SSH 시크릿, `.env`는 서버에만 둠).
+
+---
+
 ## 전제
 
 - **관리자 UI**: 이 저장소의 **Metronic 8.3.3 HTML** 레이아웃을 그대로 사용한다. (`assets/` 정적 리소스 + PHP로 레이아웃 분할)

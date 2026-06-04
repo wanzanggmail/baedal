@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/Banner.php';
+require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -39,6 +40,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
+    admin_deny_write_json('content');
     $raw  = file_get_contents('php://input');
     $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
     $body = str_contains($ct, 'application/json')
@@ -54,6 +56,7 @@ if ($method === 'POST') {
                 $err('삭제할 광고 ID가 없습니다.');
             }
             Banner::delete($id);
+            AuditLog::record('content.banner.delete', (string) ($body['id'] ?? $id), '광고 배너 삭제');
             echo json_encode(['ok' => true, 'message' => '삭제되었습니다.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
@@ -63,6 +66,11 @@ if ($method === 'POST') {
         }
 
         $row = Banner::save($body, $adminId > 0 ? $adminId : null);
+        AuditLog::record(
+            'content.banner.save',
+            (string) ($row['public_id'] ?? $row['id'] ?? ''),
+            '광고 저장 · ' . (string) ($row['title'] ?? '')
+        );
         echo json_encode([
             'ok'      => true,
             'message' => '저장되었습니다.',

@@ -2,64 +2,24 @@
 
 declare(strict_types=1);
 
-$adminSeed = [
-    [
-        'id' => 'adm-seed-1',
-        'login_id' => 'super@baedal',
-        'name' => '김운영',
-        'email' => 'super@baedal.local',
-        'role' => 'super',
-        'active' => true,
-        'last_login_at' => '2026-05-10 09:12',
-        'created_at' => '2025-01-02',
-        'seed' => true,
-        'note' => '최초 시스템 관리자',
-    ],
-    [
-        'id' => 'adm-seed-2',
-        'login_id' => 'settlement01',
-        'name' => '이정산',
-        'email' => 'settlement@baedal.local',
-        'role' => 'settlement',
-        'active' => true,
-        'last_login_at' => '2026-05-09 18:40',
-        'created_at' => '2025-03-10',
-        'seed' => true,
-        'note' => '',
-    ],
-    [
-        'id' => 'adm-seed-3',
-        'login_id' => 'ops_hw',
-        'name' => '박현장',
-        'email' => 'ops@baedal.local',
-        'role' => 'ops',
-        'active' => true,
-        'last_login_at' => '2026-05-08 11:05',
-        'created_at' => '2025-06-01',
-        'seed' => true,
-        'note' => '라이더·콘텐츠 담당',
-    ],
-    [
-        'id' => 'adm-seed-4',
-        'login_id' => 'viewer_cs',
-        'name' => '최조회',
-        'email' => 'viewer@baedal.local',
-        'role' => 'read_only',
-        'active' => true,
-        'last_login_at' => '2026-05-07 08:55',
-        'created_at' => '2026-01-15',
-        'seed' => true,
-        'note' => 'CS 파견 조회 전용',
-    ],
-];
-$adminSeedJson = json_encode($adminSeed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+require_once INC_PATH . '/AdminAccount.php';
 
-$roleLabels = [
-    'super' => '최고 관리자',
-    'ops' => '운영',
-    'settlement' => '정산',
-    'read_only' => '조회 전용',
-];
+$roleLabels = AdminAccount::roleLabels();
+$listError  = null;
+$admins     = [];
+$apiUrl     = ADMIN_BASE . '/api/admins.php';
+$canManage  = admin_has_role('super');
+$selfId     = (int) ($_SESSION['admin_id'] ?? 0);
+
+try {
+    if (!$canManage) {
+        $listError = '최고 관리자만 관리자 계정을 변경할 수 있습니다.';
+    } else {
+        $admins = AdminAccount::listAll();
+    }
+} catch (Throwable $e) {
+    $listError = $e->getMessage();
+}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -83,21 +43,32 @@ $roleLabels = [
 		<div class="d-flex gap-2 flex-wrap">
 			<a href="<?= htmlspecialchars(admin_url('system/codes'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">코드/마스터</a>
 			<a href="<?= htmlspecialchars(admin_url('system/audit'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">감사 로그</a>
+			<?php if ($canManage) : ?>
 			<button type="button" class="btn btn-sm btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#kt_admin_modal" id="btn_admin_create">
 				<i class="ki-duotone ki-plus fs-3"><span class="path1"></span><span class="path2"></span></i>
 				관리자 추가
 			</button>
+			<?php endif; ?>
 		</div>
 	</div>
 </div>
 <!--end::Toolbar-->
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
+	<?php if ($listError !== null) : ?>
+	<div class="alert alert-danger mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>
+	<?php else : ?>
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-shield-tick fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			<strong>목업</strong>입니다. 계정 추가·비활성화·역할 변경은 브라우저 <code class="fs-8">localStorage</code>에만 저장되며 실제 인증·SSO와 연동되지 않습니다. 시드 계정은 삭제할 수 없고 비활성만 가능합니다.
+			관리자 계정은 <strong>DB(admins)</strong>에 저장됩니다. 역할에 따라 메뉴 접근·수정 권한이 적용되며, 변경 내역은 <strong>감사 로그</strong>에 기록됩니다.
 		</div>
+	</div>
+	<?php endif; ?>
+
+	<div id="admin_toast" class="alert alert-dismissible d-none mb-6" role="alert">
+		<span id="admin_toast_msg"></span>
+		<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="닫기"></button>
 	</div>
 
 	<div class="row g-6 mb-8">
@@ -105,14 +76,14 @@ $roleLabels = [
 			<div class="card card-flush h-xl-100">
 				<div class="card-header pt-5">
 					<h3 class="card-title fw-bold">역할 요약</h3>
-					<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">실서비스에서는 RBAC·정책 엔진과 매핑</span>
+					<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">로그인 시 역할별 메뉴·API 권한 적용</span>
 				</div>
 				<div class="card-body pt-0 fs-7">
 					<ul class="list-unstyled mb-0">
-						<li class="mb-3"><span class="badge badge-light-danger me-2">최고</span> 전 메뉴·관리자 초대·시스템 설정</li>
-						<li class="mb-3"><span class="badge badge-light-primary me-2">운영</span> 라이더·콘텐츠·출금 조회, 일부 조치</li>
-						<li class="mb-3"><span class="badge badge-light-success me-2">정산</span> 정산 업로드·차감·프로모션 배치</li>
-						<li class="mb-0"><span class="badge badge-light-dark me-2">조회</span> 읽기 전용, 다운로드 제한(가정)</li>
+						<li class="mb-3"><span class="badge badge-light-danger me-2">최고</span> 전 메뉴·관리자 계정·시스템 설정</li>
+						<li class="mb-3"><span class="badge badge-light-primary me-2">운영</span> 라이더·콘텐츠·출금 처리</li>
+						<li class="mb-3"><span class="badge badge-light-success me-2">정산</span> 정산·프로모션·차감</li>
+						<li class="mb-0"><span class="badge badge-light-dark me-2">조회</span> 통계·출금·감사 로그 읽기 전용</li>
 					</ul>
 				</div>
 			</div>
@@ -120,7 +91,7 @@ $roleLabels = [
 		<div class="col-xl-8">
 			<div class="card card-flush h-xl-100">
 				<div class="card-header pt-5">
-					<h3 class="card-title fw-bold">권한 매트릭스 (샘플)</h3>
+					<h3 class="card-title fw-bold">권한 매트릭스</h3>
 				</div>
 				<div class="card-body pt-0">
 					<div class="table-responsive">
@@ -150,23 +121,30 @@ $roleLabels = [
 									<td class="text-center text-muted">—</td>
 								</tr>
 								<tr>
-									<td>정산 엑셀·차감·프로모션</td>
+									<td>정산·프로모션·차감</td>
 									<td class="text-center text-success">●</td>
 									<td class="text-center text-muted">△</td>
 									<td class="text-center text-success">●</td>
 									<td class="text-center text-muted">—</td>
 								</tr>
 								<tr>
+									<td>출금 처리</td>
+									<td class="text-center text-success">●</td>
+									<td class="text-center text-success">●</td>
+									<td class="text-center text-muted">—</td>
+									<td class="text-center text-muted">—</td>
+								</tr>
+								<tr>
 									<td>관리자·코드·감사</td>
 									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">△</td>
+									<td class="text-center text-muted">—</td>
 									<td class="text-center text-muted">—</td>
 									<td class="text-center text-muted">△</td>
 								</tr>
 							</tbody>
 						</table>
 					</div>
-					<p class="text-gray-500 fs-8 mb-0 mt-3">● 전체 · △ 일부(메뉴별 세분화 가정) · — 없음</p>
+					<p class="text-gray-500 fs-8 mb-0 mt-3">● 전체 · △ 일부(감사 로그 조회) · — 없음</p>
 				</div>
 			</div>
 		</div>
@@ -190,16 +168,56 @@ $roleLabels = [
 							<th class="min-w-110px">역할</th>
 							<th class="min-w-80px">상태</th>
 							<th class="min-w-130px">마지막 로그인</th>
-							<th class="min-w-100px">유형</th>
+							<th class="min-w-100px">등록일</th>
+							<?php if ($canManage) : ?>
 							<th class="min-w-200px text-end">관리</th>
+							<?php endif; ?>
 						</tr>
 					</thead>
-					<tbody id="admin_tbody"></tbody>
+					<tbody id="admin_tbody">
+						<?php if ($listError === null && $admins === []) : ?>
+						<tr><td colspan="<?= $canManage ? 8 : 7 ?>" class="text-center text-muted py-10">등록된 관리자가 없습니다.</td></tr>
+						<?php endif; ?>
+						<?php foreach ($admins as $row) :
+						    $role = (string) $row['role'];
+						    $badgeClass = match ($role) {
+						        'super' => 'danger',
+						        'operation' => 'primary',
+						        'settlement' => 'success',
+						        default => 'dark',
+						    };
+						    $isSelf = (int) $row['id'] === $selfId;
+						    ?>
+						<tr class="<?= !($row['active'] ?? false) ? 'opacity-75' : '' ?>" data-id="<?= (int) $row['id'] ?>">
+							<td class="font-monospace fw-bold"><?= htmlspecialchars((string) $row['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td><?= htmlspecialchars((string) $row['name'], ENT_QUOTES, 'UTF-8') ?><?= $isSelf ? ' <span class="badge badge-light-info fs-8">나</span>' : '' ?></td>
+							<td class="fs-7"><?= ($row['email'] ?? '') !== '' ? htmlspecialchars((string) $row['email'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+							<td><span class="badge badge-light-<?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string) $row['role_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td><?= ($row['active'] ?? false) ? '<span class="badge badge-light-success">활성</span>' : '<span class="badge badge-light-dark">중지</span>' ?></td>
+							<td class="fs-7"><?= ($row['last_login_at'] ?? '') !== '' ? htmlspecialchars((string) $row['last_login_at'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+							<td class="fs-7"><?= htmlspecialchars((string) ($row['created_at'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
+							<?php if ($canManage) : ?>
+							<td class="text-end">
+								<div class="d-flex flex-wrap justify-content-end gap-1">
+									<button type="button" class="btn btn-sm btn-light-primary btn-admin-edit"
+										data-json="<?= htmlspecialchars(json_encode($row, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">수정</button>
+									<?php if (!$isSelf) : ?>
+									<button type="button" class="btn btn-sm btn-light-<?= ($row['active'] ?? false) ? 'warning' : 'success' ?> btn-admin-toggle"
+										data-id="<?= (int) $row['id'] ?>"
+										data-active="<?= ($row['active'] ?? false) ? '1' : '0' ?>"><?= ($row['active'] ?? false) ? '비활성' : '활성' ?></button>
+									<?php endif; ?>
+								</div>
+							</td>
+							<?php endif; ?>
+						</tr>
+						<?php endforeach; ?>
+					</tbody>
 				</table>
 			</div>
 		</div>
 	</div>
 
+	<?php if ($canManage) : ?>
 	<div class="modal fade" id="kt_admin_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered mw-650px">
 			<div class="modal-content">
@@ -214,29 +232,28 @@ $roleLabels = [
 						<input type="hidden" id="admin_edit_id" value="" />
 						<div class="mb-5">
 							<label class="form-label required" for="admin_login_id">로그인 ID</label>
-							<input type="text" class="form-control form-control-solid" id="admin_login_id" required autocomplete="username" />
-							<div class="form-text">목업: 이메일 형식 또는 사번 형태 모두 가능</div>
+							<input type="text" class="form-control form-control-solid" id="admin_login_id" required autocomplete="username" maxlength="60" />
 						</div>
 						<div class="mb-5">
 							<label class="form-label required" for="admin_name">이름</label>
-							<input type="text" class="form-control form-control-solid" id="admin_name" required />
+							<input type="text" class="form-control form-control-solid" id="admin_name" required maxlength="50" />
 						</div>
 						<div class="mb-5">
 							<label class="form-label" for="admin_email">이메일</label>
-							<input type="email" class="form-control form-control-solid" id="admin_email" />
+							<input type="email" class="form-control form-control-solid" id="admin_email" maxlength="120" />
 						</div>
 						<div class="mb-5">
 							<label class="form-label required" for="admin_role">역할</label>
 							<select class="form-select form-select-solid" id="admin_role" required>
-								<option value="super"><?= htmlspecialchars($roleLabels['super'], ENT_QUOTES, 'UTF-8') ?></option>
-								<option value="ops"><?= htmlspecialchars($roleLabels['ops'], ENT_QUOTES, 'UTF-8') ?></option>
-								<option value="settlement"><?= htmlspecialchars($roleLabels['settlement'], ENT_QUOTES, 'UTF-8') ?></option>
-								<option value="read_only"><?= htmlspecialchars($roleLabels['read_only'], ENT_QUOTES, 'UTF-8') ?></option>
+								<?php foreach ($roleLabels as $value => $label) : ?>
+								<option value="<?= htmlspecialchars($value, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></option>
+								<?php endforeach; ?>
 							</select>
 						</div>
-						<div class="mb-5">
-							<label class="form-label" for="admin_note">메모</label>
-							<textarea class="form-control form-control-solid" id="admin_note" rows="2"></textarea>
+						<div class="mb-5" id="admin_password_wrap">
+							<label class="form-label" for="admin_password" id="admin_password_label">비밀번호</label>
+							<input type="password" class="form-control form-control-solid" id="admin_password" autocomplete="new-password" minlength="8" />
+							<div class="form-text" id="admin_password_hint">8자 이상. 수정 시 변경할 때만 입력하세요.</div>
 						</div>
 					</form>
 				</div>
@@ -250,265 +267,107 @@ $roleLabels = [
 
 	<script>
 	(function () {
-		var SEED = <?= $adminSeedJson ?>;
-		var ROLE_LABEL = <?= json_encode($roleLabels, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?>;
-		var STORAGE_KEY = 'baedal_system_admins_v1';
-		var AUDIT_KEY = 'baedal_audit_log';
-		var SESSION_ACTOR = <?= json_encode((string) ($_SESSION['admin_user_id'] ?? '관리자'), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?>;
+		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?>;
+		var toast = document.getElementById('admin_toast');
+		var toastMsg = document.getElementById('admin_toast_msg');
 
-		function loadState() {
-			try {
-				var raw = localStorage.getItem(STORAGE_KEY);
-				if (!raw) return { seedPatch: {}, extras: [] };
-				var s = JSON.parse(raw);
-				return {
-					seedPatch: s.seedPatch && typeof s.seedPatch === 'object' ? s.seedPatch : {},
-					extras: Array.isArray(s.extras) ? s.extras : [],
-				};
-			} catch (e) {
-				return { seedPatch: {}, extras: [] };
-			}
+		function showToast(msg, ok) {
+			if (!toast || !toastMsg) return;
+			toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger');
+			toastMsg.textContent = msg;
+			toast.classList.remove('d-none');
 		}
-		function saveState(st) {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
-		}
-		function auditPush(entry) {
-			try {
-				var list = JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]');
-				if (!Array.isArray(list)) list = [];
-				list.unshift(entry);
-				localStorage.setItem(AUDIT_KEY, JSON.stringify(list.slice(0, 400)));
-			} catch (e) {}
-		}
-		function nowStr() {
-			var d = new Date();
-			function z(n) { return n < 10 ? '0' + n : '' + n; }
-			return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
-		}
-		function actor() {
-			return SESSION_ACTOR || '관리자';
-		}
-		function mergedList() {
-			var st = loadState();
-			var rows = SEED.map(function (s) {
-				var p = st.seedPatch[s.id] || {};
-				return Object.assign({}, s, p);
-			});
-			return rows.concat(st.extras.slice());
-		}
-		function esc(s) {
-			var d = document.createElement('div');
-			d.textContent = s == null ? '' : String(s);
-			return d.innerHTML;
-		}
-		function roleBadge(role) {
-			var cls =
-				role === 'super'
-					? 'danger'
-					: role === 'ops'
-						? 'primary'
-						: role === 'settlement'
-							? 'success'
-							: 'dark';
-			return '<span class="badge badge-light-' + cls + '">' + esc(ROLE_LABEL[role] || role) + '</span>';
-		}
-		function render() {
-			var tb = document.getElementById('admin_tbody');
-			if (!tb) return;
-			var rows = mergedList();
-			tb.innerHTML = rows
-				.map(function (r) {
-					var active = !!r.active;
-					var typeLabel = r.seed ? '<span class="badge badge-light">시드</span>' : '<span class="badge badge-light-info">추가</span>';
-					var btnToggle =
-						'<button type="button" class="btn btn-sm ' +
-						(active ? 'btn-light-warning' : 'btn-light-success') +
-						' btn-admin-toggle" data-id="' +
-						esc(r.id) +
-						'">' +
-						(active ? '비활성' : '활성') +
-						'</button>';
-					var btnEdit =
-						'<button type="button" class="btn btn-sm btn-light-primary btn-admin-edit" data-id="' + esc(r.id) + '">역할·메모</button>';
-					var btnDel = r.seed
-						? ''
-						: '<button type="button" class="btn btn-sm btn-light-danger btn-admin-del" data-id="' + esc(r.id) + '">삭제</button>';
-					return (
-						'<tr class="' +
-						(!active ? 'opacity-75' : '') +
-						'"><td class="font-monospace fw-bold">' +
-						esc(r.login_id) +
-						'</td><td>' +
-						esc(r.name) +
-						'</td><td class="fs-7">' +
-						esc(r.email || '—') +
-						'</td><td>' +
-						roleBadge(r.role) +
-						'</td><td>' +
-						(active ? '<span class="badge badge-light-success">활성</span>' : '<span class="badge badge-light-dark">중지</span>') +
-						'</td><td class="fs-7">' +
-						esc(r.last_login_at || '—') +
-						'</td><td>' +
-						typeLabel +
-						'</td><td class="text-end"><div class="d-flex flex-wrap justify-content-end gap-1">' +
-						btnEdit +
-						btnToggle +
-						btnDel +
-						'</div></td></tr>'
-					);
-				})
-				.join('');
-		}
-		function findRow(id) {
-			var rows = mergedList();
-			for (var i = 0; i < rows.length; i++) {
-				if (rows[i].id === id) return rows[i];
-			}
-			return null;
-		}
-		document.getElementById('btn_admin_create').addEventListener('click', function () {
+
+		function resetForm() {
 			document.getElementById('admin_modal_title').textContent = '관리자 추가';
 			document.getElementById('admin_edit_id').value = '';
 			document.getElementById('admin_form').reset();
 			document.getElementById('admin_login_id').removeAttribute('readonly');
-		});
+			document.getElementById('admin_password').required = true;
+			document.getElementById('admin_password_label').classList.add('required');
+			document.getElementById('admin_password_hint').textContent = '8자 이상';
+		}
+
+		document.getElementById('btn_admin_create').addEventListener('click', resetForm);
+
 		document.getElementById('admin_tbody').addEventListener('click', function (ev) {
-			var t = ev.target;
-			if (!t || !t.closest) return;
-			var edit = t.closest('.btn-admin-edit');
-			var toggle = t.closest('.btn-admin-toggle');
-			var del = t.closest('.btn-admin-del');
+			var edit = ev.target.closest('.btn-admin-edit');
+			var toggle = ev.target.closest('.btn-admin-toggle');
 			if (edit) {
-				var row = findRow(edit.getAttribute('data-id'));
-				if (!row) return;
-				document.getElementById('admin_modal_title').textContent = row.seed ? '역할·메모 (시드)' : '관리자 수정';
-				document.getElementById('admin_edit_id').value = row.id;
-				document.getElementById('admin_login_id').value = row.login_id;
+				var row = JSON.parse(edit.getAttribute('data-json') || '{}');
+				document.getElementById('admin_modal_title').textContent = '관리자 수정';
+				document.getElementById('admin_edit_id').value = row.id || '';
+				document.getElementById('admin_login_id').value = row.login_id || '';
 				document.getElementById('admin_login_id').setAttribute('readonly', 'readonly');
-				document.getElementById('admin_name').value = row.name;
+				document.getElementById('admin_name').value = row.name || '';
 				document.getElementById('admin_email').value = row.email || '';
-				document.getElementById('admin_role').value = row.role;
-				document.getElementById('admin_note').value = row.note || '';
+				document.getElementById('admin_role').value = row.role || 'admin';
+				document.getElementById('admin_password').value = '';
+				document.getElementById('admin_password').required = false;
+				document.getElementById('admin_password_label').classList.remove('required');
+				document.getElementById('admin_password_hint').textContent = '변경할 때만 입력 (8자 이상)';
 				new bootstrap.Modal(document.getElementById('kt_admin_modal')).show();
 				return;
 			}
 			if (toggle) {
 				var id = toggle.getAttribute('data-id');
-				var st = loadState();
-				var row = findRow(id);
-				if (!row) return;
-				var next = !row.active;
-				if (row.seed) {
-					st.seedPatch[id] = st.seedPatch[id] || {};
-					st.seedPatch[id].active = next;
-				} else {
-					st.extras = st.extras.map(function (x) {
-						if (x.id !== id) return x;
-						return Object.assign({}, x, { active: next });
-					});
-				}
-				saveState(st);
-				auditPush({
-					at: nowStr(),
-					actor: actor(),
-					action: next ? 'admin.activate' : 'admin.deactivate',
-					target: row.login_id,
-					detail: '관리자 상태 변경 (목업)',
-					ip: '—',
-				});
-				render();
-				return;
-			}
-			if (del) {
-				var did = del.getAttribute('data-id');
-				if (!confirm('이 관리자를 목록에서 제거할까요? (localStorage만)')) return;
-				var st2 = loadState();
-				st2.extras = st2.extras.filter(function (x) {
-					return x.id !== did;
-				});
-				saveState(st2);
-				auditPush({
-					at: nowStr(),
-					actor: actor(),
-					action: 'admin.delete',
-					target: did,
-					detail: '추가 계정 삭제 (목업)',
-					ip: '—',
-				});
-				render();
+				var active = toggle.getAttribute('data-active') !== '1';
+				var label = active ? '활성화' : '비활성화';
+				if (!confirm('이 관리자를 ' + label + '할까요?')) return;
+				fetch(API, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ action: 'toggle_active', id: Number(id), active: active }),
+				})
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (!res.ok) throw new Error(res.message || '실패');
+						location.reload();
+					})
+					.catch(function (e) { showToast(e.message || '상태 변경 실패', false); });
 			}
 		});
+
 		document.getElementById('admin_save_btn').addEventListener('click', function () {
 			var editId = document.getElementById('admin_edit_id').value;
 			var loginId = document.getElementById('admin_login_id').value.trim();
 			var name = document.getElementById('admin_name').value.trim();
-			if (!loginId || !name) return;
-			var st = loadState();
-			if (editId) {
-				var base = findRow(editId);
-				if (!base) return;
-				if (base.seed) {
-					st.seedPatch[editId] = st.seedPatch[editId] || {};
-					st.seedPatch[editId].role = document.getElementById('admin_role').value;
-					st.seedPatch[editId].note = document.getElementById('admin_note').value.trim();
-				} else {
-					st.extras = st.extras.map(function (x) {
-						if (x.id !== editId) return x;
-						return Object.assign({}, x, {
-							name: name,
-							email: document.getElementById('admin_email').value.trim(),
-							role: document.getElementById('admin_role').value,
-							note: document.getElementById('admin_note').value.trim(),
-						});
-					});
-				}
-				saveState(st);
-				auditPush({
-					at: nowStr(),
-					actor: actor(),
-					action: 'admin.update',
-					target: loginId,
-					detail: '역할·메모 수정 (목업)',
-					ip: '—',
-				});
-			} else {
-				var dup = mergedList().some(function (x) {
-					return x.login_id === loginId;
-				});
-				if (dup) {
-					alert('동일한 로그인 ID가 이미 있습니다.');
-					return;
-				}
-				var id = 'adm-custom-' + Date.now();
-				st.extras.push({
-					id: id,
-					login_id: loginId,
-					name: name,
-					email: document.getElementById('admin_email').value.trim(),
-					role: document.getElementById('admin_role').value,
-					active: true,
-					last_login_at: '—',
-					created_at: nowStr().slice(0, 10),
-					seed: false,
-					note: document.getElementById('admin_note').value.trim(),
-				});
-				saveState(st);
-				auditPush({
-					at: nowStr(),
-					actor: actor(),
-					action: 'admin.create',
-					target: loginId,
-					detail: '관리자 추가 (목업)',
-					ip: '—',
-				});
+			var password = document.getElementById('admin_password').value;
+			if (!loginId || !name) {
+				showToast('로그인 ID와 이름을 입력하세요.', false);
+				return;
 			}
-			var modalEl = document.getElementById('kt_admin_modal');
-			var inst = bootstrap.Modal.getInstance(modalEl);
-			if (inst) inst.hide();
-			render();
+			if (!editId && password.length < 8) {
+				showToast('비밀번호는 8자 이상이어야 합니다.', false);
+				return;
+			}
+			var payload = {
+				action: 'save',
+				id: editId ? Number(editId) : 0,
+				login_id: loginId,
+				name: name,
+				email: document.getElementById('admin_email').value.trim(),
+				role: document.getElementById('admin_role').value,
+			};
+			if (password !== '') payload.password = password;
+
+			fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+			})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '저장 실패');
+					var modalEl = document.getElementById('kt_admin_modal');
+					var inst = bootstrap.Modal.getInstance(modalEl);
+					if (inst) inst.hide();
+					location.reload();
+				})
+				.catch(function (e) { showToast(e.message || '저장 실패', false); });
 		});
-		render();
 	})();
 	</script>
+	<?php endif; ?>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

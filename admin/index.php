@@ -66,6 +66,15 @@ if ($route === 'login') {
                             );
                         } catch (Throwable) {}
 
+                        require_once INC_PATH . '/AuditLog.php';
+                        AuditLog::record(
+                            'auth.login',
+                            '세션',
+                            '관리자 로그인 성공',
+                            (int) $admin['id'],
+                            (string) $admin['login_id']
+                        );
+
                         header('Location: ' . admin_url('dashboard'), true, 302);
                         exit;
                     }
@@ -73,6 +82,8 @@ if ($route === 'login') {
                     // 로그인 실패
                     $_SESSION['login_fail_count'] = ($fails + 1);
                     $_SESSION['login_fail_at']    = $now;
+                    require_once INC_PATH . '/AuditLog.php';
+                    AuditLog::record('auth.login.fail', $loginId, '로그인 실패', null, $loginId);
                     $loginError = '아이디 또는 비밀번호가 올바르지 않습니다.';
                 }
             }
@@ -93,6 +104,18 @@ admin_require_login();
 
 if ($route === '') {
     $route = 'dashboard';
+}
+
+if (!admin_can_access_route($route)) {
+    http_response_code(403);
+    $pageTitle = '접근 권한 없음';
+    require_once INC_PATH . '/header.php';
+    require_once INC_PATH . '/shell_main_open.php';
+    require_once INC_PATH . '/app_content_open.php';
+    echo '<div class="alert alert-danger">이 메뉴에 접근할 권한이 없습니다.</div>';
+    require_once INC_PATH . '/app_content_close.php';
+    require_once INC_PATH . '/shell_close.php';
+    exit;
 }
 
 $routes = require INC_PATH . '/routes.php';

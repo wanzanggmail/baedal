@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/DailySettlement.php';
+require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -99,6 +100,7 @@ if ($action === 'preview') {
 }
 
 if ($action === 'commit') {
+    admin_deny_write_json('settlement');
     if ($settlementDate === '') {
         $err('settlement_date 가 필요합니다.');
     }
@@ -107,6 +109,12 @@ if ($action === 'commit') {
 
     try {
         $result = DailySettlement::commit($settlementDate, $params, $adminId);
+        $created = (int) ($result['created'] ?? 0);
+        AuditLog::record(
+            'settlement.daily_auto.commit',
+            $settlementDate,
+            "자동 일일정산 출금 {$created}건 생성"
+        );
         echo json_encode(['ok' => true, 'date' => $settlementDate] + $result, JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         if (str_contains($e->getMessage(), 'Duplicate') || str_contains($e->getMessage(), 'uq_wr')) {

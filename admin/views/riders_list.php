@@ -60,7 +60,7 @@ $teamLabel = [
     'ydp' => '영등포', 'mapo' => '마포', 'etc' => '기타',
 ];
 
-$banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' ORDER BY sort_order");
+$banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order");
 $detailBase = admin_url('riders/detail');
 $apiBase    = ADMIN_BASE . '/api/riders.php';
 $currentUrl = admin_url('riders/list');

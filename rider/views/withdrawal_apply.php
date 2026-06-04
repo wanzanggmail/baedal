@@ -2,65 +2,104 @@
 
 declare(strict_types=1);
 
-require_once INC_PATH . '/RiderSettlement.php';
-require_once INC_PATH . '/RiderAuth.php';
+require_once INC_PATH . '/RiderWallet.php';
+require_once INC_PATH . '/Withdrawal.php';
 
-$withdrawSummary = [
-    'withdrawable'    => 0,
-    'withdrawal_hold' => false,
-    'error'           => null,
-];
-$bankLabel = '';
-$bankAccount = '';
-$accountHolder = '';
+$riderUser = rider_current_user();
+$riderId   = $riderUser ? (int) $riderUser['id'] : 0;
+$preview   = $riderId > 0 ? RiderWallet::previewWithdrawal($riderId) : [];
+$canApply  = $riderId > 0 && (bool) ($preview['can_apply'] ?? false) && !Withdrawal::hasOpenRiderRequest($riderId);
 
-$ru = rider_current_user();
-if ($ru) {
-    $withdrawSummary = RiderSettlement::homeSummary((int) $ru['id']);
-    try {
-        $profile = RiderAuth::findById((int) $ru['id']);
-        if ($profile) {
-            $bankLabel = (string) ($profile['bank_label'] ?? '');
-            $bankAccount = (string) ($profile['bank_account'] ?? '');
-            $accountHolder = (string) ($profile['account_holder'] ?? $profile['name'] ?? '');
-        }
-    } catch (Throwable) {
+$bankLabel = '—';
+$bankAcct  = '—';
+$bankHolder = $riderUser['name'] ?? '';
+if ($riderId > 0) {
+    $r = db_row(
+        'SELECT r.bank_code, r.bank_account, r.account_holder, r.name, sc.label AS bank_label
+         FROM riders r
+         LEFT JOIN system_codes sc ON sc.category = \'bank\' AND sc.code = r.bank_code
+         WHERE r.id = ? LIMIT 1',
+        [$riderId]
+    );
+    if ($r) {
+        $bankLabel  = (string) ($r['bank_label'] ?: $r['bank_code'] ?: '—');
+        $acct       = (string) ($r['bank_account'] ?? '');
+        $bankAcct   = $acct !== '' && strlen($acct) > 4
+            ? substr($acct, 0, 3) . str_repeat('*', max(0, strlen($acct) - 5)) . substr($acct, -2)
+            : '미등록';
+        $bankHolder = (string) ($r['account_holder'] ?: $r['name']);
     }
 }
 
-$bankDisplay = '등록된 계좌 없음';
-if ($bankLabel !== '' && $bankAccount !== '') {
-    $masked = strlen($bankAccount) > 4
-        ? str_repeat('*', max(0, strlen($bankAccount) - 4)) . substr($bankAccount, -4)
-        : $bankAccount;
-    $bankDisplay = trim($bankLabel . ' ' . $masked . ($accountHolder !== '' ? ' · ' . $accountHolder : ''));
+$flashOk   = (string) ($_SESSION['rider_flash_ok'] ?? '');
+$flashErr  = (string) ($_SESSION['rider_flash_error'] ?? '');
+unset($_SESSION['rider_flash_ok'], $_SESSION['rider_flash_error']);
+
+if (empty($_SESSION['rider_wd_csrf'])) {
+    $_SESSION['rider_wd_csrf'] = bin2hex(random_bytes(32));
 }
+$csrfToken = $_SESSION['rider_wd_csrf'];
 ?>
 <div class="card card-flush shadow-sm">
 	<div class="card-header border-0 pt-5">
 		<h2 class="card-title fw-bold fs-4">출금 신청</h2>
-		<span class="text-gray-500 fs-7">금액·계좌 확인 후 제출</span>
+		<span class="text-gray-500 fs-7">모인 금액 전액 출금 (보증금·수수료 자동 차감)</span>
 	</div>
 	<div class="card-body pt-0">
-		<?php if ($withdrawSummary['error'] !== null) : ?>
-		<div class="alert alert-warning fs-8 mb-4"><?= htmlspecialchars($withdrawSummary['error'], ENT_QUOTES, 'UTF-8') ?></div>
+		<?php if ($flashOk !== '') : ?>
+		<div class="alert alert-success fs-7 mb-4"><?= htmlspecialchars($flashOk, ENT_QUOTES, 'UTF-8') ?></div>
 		<?php endif; ?>
-		<div class="mb-4">
-			<label class="form-label">출금 가능 잔액</label>
-			<div class="fs-2 fw-bold text-gray-900">₩ <?= htmlspecialchars(number_format($withdrawSummary['withdrawable']), ENT_QUOTES, 'UTF-8') ?></div>
-			<?php if ($withdrawSummary['withdrawal_hold']) : ?>
-			<div class="form-text text-danger">출금 보류 상태입니다.</div>
-			<?php endif; ?>
+		<?php if ($flashErr !== '') : ?>
+		<div class="alert alert-danger fs-7 mb-4"><?= htmlspecialchars($flashErr, ENT_QUOTES, 'UTF-8') ?></div>
+		<?php endif; ?>
+
+		<div class="mb-5 p-4 bg-light rounded">
+			<div class="d-flex justify-content-between mb-2">
+				<span class="text-gray-600 fs-7">지갑 잔액</span>
+				<span class="fw-bold">₩ <?= number_format((int) ($preview['balance'] ?? 0)) ?></span>
+			</div>
+			<div class="d-flex justify-content-between mb-2">
+				<span class="text-gray-600 fs-7">적립 일수</span>
+				<span><?= (int) ($preview['accrued_days'] ?? 0) ?>일</span>
+			</div>
+			<div class="d-flex justify-content-between mb-2">
+				<span class="text-gray-600 fs-7">보증금 (출금 후 유지)</span>
+				<span class="text-danger">− ₩ <?= number_format((int) ($preview['reserve_amount'] ?? 0)) ?></span>
+			</div>
+			<div class="d-flex justify-content-between mb-2">
+				<span class="text-gray-600 fs-7">출금 수수료 (건당)</span>
+				<span class="text-danger">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
+			</div>
+			<div class="border-top pt-3 mt-2 d-flex justify-content-between align-items-center">
+				<span class="fw-bold text-gray-800">실지급 예정액</span>
+				<span class="fs-3 fw-bold text-primary">₩ <?= number_format((int) ($preview['payout_amount'] ?? 0)) ?></span>
+			</div>
 		</div>
-		<div class="mb-4">
-			<label class="form-label">신청 금액</label>
-			<input type="text" class="form-control form-control-solid" placeholder="₩" disabled />
-		</div>
-		<div class="mb-4">
-			<label class="form-label">입금 계좌</label>
-			<div class="form-control form-control-solid bg-light"><?= htmlspecialchars($bankDisplay, ENT_QUOTES, 'UTF-8') ?></div>
+
+		<div class="mb-5">
+			<label class="form-label fs-7">입금 계좌</label>
+			<div class="form-control form-control-solid bg-light">
+				<?= htmlspecialchars($bankLabel, ENT_QUOTES, 'UTF-8') ?>
+				<?= htmlspecialchars($bankAcct, ENT_QUOTES, 'UTF-8') ?>
+				· <?= htmlspecialchars($bankHolder, ENT_QUOTES, 'UTF-8') ?>
+			</div>
 			<div class="form-text"><a href="<?= htmlspecialchars(rider_url('profile/bank'), ENT_QUOTES, 'UTF-8') ?>">계좌 변경</a></div>
 		</div>
-		<button type="button" class="btn btn-primary w-100" disabled>제출 (준비 중)</button>
+
+		<form method="post" action="<?= htmlspecialchars(rider_url('withdrawal/apply'), ENT_QUOTES, 'UTF-8') ?>">
+			<input type="hidden" name="_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>" />
+			<button type="submit" class="btn btn-primary w-100"<?= $canApply ? '' : ' disabled' ?>>
+				전액 출금 신청
+			</button>
+		</form>
+		<?php if (!$canApply && $flashOk === '') : ?>
+		<p class="text-muted fs-8 mt-3 mb-0">
+			<?php if (Withdrawal::hasOpenRiderRequest($riderId)) : ?>
+			처리 중인 출금 신청이 있습니다. <a href="<?= htmlspecialchars(rider_url('withdrawal/history'), ENT_QUOTES, 'UTF-8') ?>">내역 확인</a>
+			<?php else : ?>
+			출금 가능 금액이 없거나 계좌·상태를 확인해 주세요.
+			<?php endif; ?>
+		</p>
+		<?php endif; ?>
 	</div>
 </div>

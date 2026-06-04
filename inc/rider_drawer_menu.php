@@ -33,6 +33,12 @@ $riderRoute = $riderRoute ?? '';
 				</a>
 			</div>
 			<div class="menu-item">
+				<a class="menu-link<?= (($riderRoute ?? '') === 'settlement/fees' || ($riderRoute ?? '') === 'settlement/fee-detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(rider_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>">
+					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+					<span class="menu-title">수수료 내역</span>
+				</a>
+			</div>
+			<div class="menu-item">
 				<a class="menu-link<?= rider_nav_active('settlement/detail') ?>" href="<?= htmlspecialchars(rider_url('settlement/detail'), ENT_QUOTES, 'UTF-8') ?>">
 					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 					<span class="menu-title">상세 (샘플)</span>

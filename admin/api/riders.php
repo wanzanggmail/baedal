@@ -22,6 +22,7 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 // ── POST: 신규 등록 ────────────────────────────────────────────
 if ($method === 'POST') {
+    admin_deny_write_json('riders');
     $raw  = file_get_contents('php://input');
     $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
     $body = str_contains($ct, 'application/json')

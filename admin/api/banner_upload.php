@@ -24,6 +24,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     exit;
 }
 
+admin_deny_write_json('content');
+
 try {
     $file = $_FILES['image'] ?? $_FILES['file'] ?? null;
     if (!is_array($file)) {

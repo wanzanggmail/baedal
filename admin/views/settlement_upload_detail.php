@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/SettlementLedger.php';
+
 $uploadId = (int) ($_GET['id'] ?? 0);
 if ($uploadId <= 0) {
     require_once INC_PATH . '/app_content_open.php';
@@ -119,6 +121,12 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2">
+			<?php if (($upload['status'] ?? '') === 'parsed' && SettlementLedger::tableExists()) : ?>
+			<button type="button" class="btn btn-sm btn-success fw-bold" id="btn_settlement_apply" data-upload-id="<?= (int) $uploadId ?>">
+				정산 반영 · 수수료·지갑
+			</button>
+			<?php endif; ?>
+			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">수수료 내역</a>
 			<a href="<?= htmlspecialchars($uploadListUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">업로드</a>
 			<a href="<?= htmlspecialchars($historyUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">전체 이력</a>
 		</div>
@@ -278,5 +286,33 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		</div>
 	</div>
 	<!--end::라이더 목록-->
+
+	<?php if (($upload['status'] ?? '') === 'parsed' && SettlementLedger::tableExists()) : ?>
+	<script>
+	(function () {
+		var btn = document.getElementById('btn_settlement_apply');
+		if (!btn) return;
+		btn.addEventListener('click', function () {
+			if (!confirm('매칭된 라이더에 정산 수수료를 계산하고 지갑에 반영할까요?\n이미 반영된 일자·플랫폼은 건너뜁니다.')) return;
+			btn.disabled = true;
+			fetch('<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_apply.php', ENT_QUOTES, 'UTF-8') ?>', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ upload_id: Number(btn.getAttribute('data-upload-id')) }),
+			})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '실패');
+					alert(res.message || '반영되었습니다.');
+					location.reload();
+				})
+				.catch(function (e) {
+					alert(e.message || '정산 반영 실패');
+					btn.disabled = false;
+				});
+		});
+	})();
+	</script>
+	<?php endif; ?>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

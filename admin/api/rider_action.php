@@ -9,6 +9,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
+require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -99,6 +100,7 @@ if ($method === 'GET') {
 
 // ── POST: 액션 ────────────────────────────────────────────────
 if ($method === 'POST' || $method === 'PATCH') {
+    admin_deny_write_json('riders');
     $raw  = file_get_contents('php://input');
     $body = (array) json_decode($raw ?: '{}', true);
     if (empty($body)) $body = $_POST;
@@ -110,6 +112,7 @@ if ($method === 'POST' || $method === 'PATCH') {
         $newStatus = trim((string) ($body['status'] ?? ''));
         if (!in_array($newStatus, $allowed, true)) $err('올바르지 않은 상태값입니다.');
         db_execute('UPDATE riders SET status = ? WHERE id = ?', [$newStatus, $id]);
+        AuditLog::record('rider.status', (string) ($rider['rider_code'] ?? $id), "상태 → {$newStatus}");
         echo json_encode(['ok' => true, 'message' => '상태가 변경되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -117,6 +120,7 @@ if ($method === 'POST' || $method === 'PATCH') {
     if ($action === 'memo') {
         $memo = (string) ($body['memo'] ?? '');
         db_execute('UPDATE riders SET admin_memo = ? WHERE id = ?', [$memo, $id]);
+        AuditLog::record('rider.memo', (string) ($rider['rider_code'] ?? $id), '관리자 메모 저장');
         echo json_encode(['ok' => true, 'message' => '메모가 저장되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -124,6 +128,7 @@ if ($method === 'POST' || $method === 'PATCH') {
     if ($action === 'withdrawal_hold') {
         $hold = !empty($body['hold']) ? 1 : 0;
         db_execute('UPDATE riders SET withdrawal_hold = ? WHERE id = ?', [$hold, $id]);
+        AuditLog::record('rider.withdrawal_hold', (string) ($rider['rider_code'] ?? $id), $hold ? '출금 보류 설정' : '출금 보류 해제');
         echo json_encode(['ok' => true, 'message' => $hold ? '출금 보류로 설정했습니다.' : '출금 보류를 해제했습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -131,6 +136,7 @@ if ($method === 'POST' || $method === 'PATCH') {
     if ($action === 'daily_settlement') {
         $daily = !empty($body['daily']) ? 1 : 0;
         db_execute('UPDATE riders SET is_daily_settlement = ? WHERE id = ?', [$daily, $id]);
+        AuditLog::record('rider.daily_settlement', (string) ($rider['rider_code'] ?? $id), $daily ? '일일정산 대상' : '주간정산 대상');
         echo json_encode([
             'ok'      => true,
             'message' => $daily ? '일일정산 대상으로 설정했습니다.' : '주간 정산 대상으로 변경했습니다.',

@@ -9,6 +9,21 @@ $headerAdminLoginId = $_adminUser['login_id'] ?? '';
 $headerAdminInitial = function_exists('mb_substr')
     ? mb_substr($headerAdminLabel, 0, 1, 'UTF-8')
     : substr($headerAdminLabel, 0, 1);
+
+$headerWithdrawPending = 0;
+$headerWithdrawAmount  = 0;
+if (admin_is_logged_in()) {
+    try {
+        require_once INC_PATH . '/Withdrawal.php';
+        $headerWithdrawSummary = Withdrawal::summary();
+        $headerWithdrawPending = (int) ($headerWithdrawSummary['pending_count'] ?? 0);
+        $headerWithdrawAmount  = (int) ($headerWithdrawSummary['pending_amount'] ?? 0);
+    } catch (Throwable) {
+    }
+}
+$headerWithdrawTooltip = $headerWithdrawPending > 0
+    ? '출금 신청 대기 ' . number_format($headerWithdrawPending) . '건 · ' . number_format($headerWithdrawAmount) . '원'
+    : '출금 신청 대기 없음';
 ?>
 							<!--begin::Menu wrapper-->
 							<div class="app-header-menu app-header-mobile-drawer align-items-stretch" data-kt-drawer="true" data-kt-drawer-name="app-header-menu" data-kt-drawer-activate="{default: true, lg: false}" data-kt-drawer-overlay="true" data-kt-drawer-width="250px" data-kt-drawer-direction="end" data-kt-drawer-toggle="#kt_app_header_menu_toggle" data-kt-swapper="true" data-kt-swapper-mode="{default: 'append', lg: 'prepend'}" data-kt-swapper-parent="{default: '#kt_app_body', lg: '#kt_app_header_wrapper'}">
@@ -37,15 +52,15 @@ $headerAdminInitial = function_exists('mb_substr')
 												</a>
 											</div>
 											<div class="menu-item">
-												<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
-													<span class="menu-icon"><i class="ki-duotone ki-information-2 fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i></span>
-													<span class="menu-title">파싱 오류 상세</span>
+												<a class="menu-link<?= (($route ?? '') === 'settlement/fees' || ($route ?? '') === 'settlement/fee-detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>">
+													<span class="menu-icon"><i class="ki-duotone ki-dollar fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i></span>
+													<span class="menu-title">정산 수수료 내역</span>
 												</a>
 											</div>
 											<div class="menu-item">
-												<a class="menu-link<?= nav_active('settlement/daily-auto') ?>" href="<?= htmlspecialchars(admin_url('settlement/daily-auto'), ENT_QUOTES, 'UTF-8') ?>">
-													<span class="menu-icon"><i class="ki-duotone ki-calendar fs-2"><span class="path1"></span><span class="path2"></span></i></span>
-													<span class="menu-title">자동 일일정산</span>
+												<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
+													<span class="menu-icon"><i class="ki-duotone ki-information-2 fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i></span>
+													<span class="menu-title">파싱 오류 상세</span>
 												</a>
 											</div>
 										</div>
@@ -143,10 +158,10 @@ $headerAdminInitial = function_exists('mb_substr')
 							<!--begin::Navbar-->
 							<div class="app-navbar flex-shrink-0">
 								<div class="app-navbar-item ms-1 ms-md-3 d-none d-lg-flex">
-									<a href="<?= htmlspecialchars(admin_url('withdrawal/list'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-flex btn-light-danger align-items-center px-3" data-bs-toggle="tooltip" title="출금 신청 대기(샘플)">
+									<a href="<?= htmlspecialchars(admin_url('withdrawal/list'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-flex btn-light-danger align-items-center px-3" data-bs-toggle="tooltip" title="<?= htmlspecialchars($headerWithdrawTooltip, ENT_QUOTES, 'UTF-8') ?>">
 										<i class="ki-duotone ki-wallet fs-4 text-danger me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 										<span class="fw-bold">출금 대기</span>
-										<span class="badge badge-circle badge-danger ms-2">14</span>
+										<span class="badge badge-circle ms-2<?= $headerWithdrawPending > 0 ? ' badge-danger' : ' badge-light-secondary text-gray-600' ?>"><?= number_format($headerWithdrawPending) ?></span>
 									</a>
 								</div>
 								<div class="app-navbar-item ms-1 ms-md-3 d-none d-lg-flex">

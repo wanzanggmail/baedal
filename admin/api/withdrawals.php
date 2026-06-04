@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/Withdrawal.php';
+require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -64,6 +65,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
+    admin_deny_write_json('withdrawal');
     $raw  = file_get_contents('php://input');
     $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
     $body = str_contains($ct, 'application/json')
@@ -83,6 +85,7 @@ if ($method === 'POST') {
             if ($n === 0) {
                 $err('다운로드 완료 처리할 대기 건이 없습니다.');
             }
+            AuditLog::record('withdrawal.mark_downloaded', implode(',', $ids), "{$n}건 다운로드 완료 처리");
             echo json_encode([
                 'ok'      => true,
                 'updated' => $n,
@@ -96,6 +99,7 @@ if ($method === 'POST') {
             if ($n === 0) {
                 $err('입금 완료 처리할 수 있는 건이 없습니다. (다운로드 완료 상태만 가능)');
             }
+            AuditLog::record('withdrawal.complete', implode(',', $ids), "{$n}건 출금 처리 완료");
             echo json_encode([
                 'ok'      => true,
                 'updated' => $n,
@@ -110,6 +114,7 @@ if ($method === 'POST') {
             if ($n === 0) {
                 $err('반려할 수 있는 건이 없습니다.');
             }
+            AuditLog::record('withdrawal.reject', implode(',', $ids), "{$n}건 반려" . ($reason !== '' ? " · {$reason}" : ''));
             echo json_encode([
                 'ok'      => true,
                 'updated' => $n,

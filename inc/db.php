@@ -169,3 +169,20 @@ function db_ping(): bool
         return false;
     }
 }
+
+/**
+ * 현재 DB에 테이블 존재 여부 (SHOW TABLES LIKE ? 는 네이티브 prepare 미지원)
+ */
+function db_table_exists(string $table): bool
+{
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
+        return false;
+    }
+
+    return db_row(
+        'SELECT 1 AS ok FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = ?
+         LIMIT 1',
+        [$table]
+    ) !== null;
+}

@@ -11,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/Withdrawal.php';
 require_once INC_PATH . '/ShinhanTransferFile.php';
 require_once INC_PATH . '/download_response.php';
+require_once INC_PATH . '/AuditLog.php';
 
 ini_set('display_errors', '0');
 
@@ -31,6 +32,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     echo json_encode(['ok' => false, 'message' => 'POST 만 허용'], JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+admin_deny_write_json('withdrawal');
 
 $raw  = file_get_contents('php://input');
 $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -98,6 +101,12 @@ try {
         $updatedIds = array_map(static fn (array $w): int => (int) $w['db_id'], $withdrawals);
         Withdrawal::markDownloaded($updatedIds);
     }
+
+    AuditLog::record(
+        'withdrawal.export',
+        $filename,
+        count($withdrawals) . '건 · ' . strtoupper($format) . ' 다운로드'
+    );
 
     if ($format === 'xlsx') {
         send_download_response(

@@ -53,9 +53,9 @@ $platformLabels = [
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2 gap-lg-3">
-			<a href="<?= htmlspecialchars(admin_url('settlement/daily-auto'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-success fw-bold">
-				<i class="ki-duotone ki-calendar fs-3"><span class="path1"></span><span class="path2"></span></i>
-				자동 일일정산
+			<a href="<?= htmlspecialchars(admin_url('withdrawal/list'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-success fw-bold">
+				<i class="ki-duotone ki-wallet fs-3"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
+				출금 신청 목록
 			</a>
 			<a href="<?= htmlspecialchars(admin_url('settlement/history'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">
 				<i class="ki-duotone ki-time fs-3"><span class="path1"></span><span class="path2"></span></i>

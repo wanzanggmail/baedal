@@ -1,0 +1,91 @@
+# main/master 브랜치 push 시 실서버에 rsync 배포
+# GitHub 저장소 → Settings → Secrets and variables → Actions 에서 시크릿 등록 (DEPLOY.md 참고)
+
+name: Deploy to server
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deploy secrets
+        run: |
+          test -n "${{ secrets.DEPLOY_HOST }}" || (echo "DEPLOY_HOST secret missing" && exit 1)
+          test -n "${{ secrets.DEPLOY_USER }}" || (echo "DEPLOY_USER secret missing" && exit 1)
+          test -n "${{ secrets.DEPLOY_PATH }}" || (echo "DEPLOY_PATH secret missing" && exit 1)
+          test -n "${{ secrets.DEPLOY_SSH_KEY }}" || (echo "DEPLOY_SSH_KEY secret missing" && exit 1)
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          PORT="${DEPLOY_PORT:-22}"
+          ssh-keyscan -p "$PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Rsync files to server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          PORT="${DEPLOY_PORT:-22}"
+          DEST="${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/"
+          RSYNC_SSH="ssh -i ~/.ssh/deploy_key -p ${PORT} -o StrictHostKeyChecking=yes"
+
+          rsync -az --delete --info=stats2 \
+            -e "$RSYNC_SSH" \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude '!.env.example' \
+            --exclude 'uploads/' \
+            --exclude 'storage/' \
+            --exclude 'vendor/' \
+            --exclude 'node_modules/' \
+            --exclude 'inc/*.flag' \
+            --exclude '.DS_Store' \
+            --exclude 'Thumbs.db' \
+            --exclude '*.log' \
+            --exclude 'check_content_db.php' \
+            --exclude 'migrate_content.php' \
+            --exclude 'migrate_audit.php' \
+            --exclude 'migrate_settlement.php' \
+            --exclude 'seed.php' \
+            --exclude 'seed_content.php' \
+            --exclude 'seed.sql' \
+            --exclude 'seed_riders_from_settlement.php' \
+            ./ "$DEST"
+
+      - name: Fix permissions (optional)
+        if: ${{ secrets.DEPLOY_POST_CMD != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          PORT="${DEPLOY_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key -p "$PORT" -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "${{ secrets.DEPLOY_POST_CMD }}"

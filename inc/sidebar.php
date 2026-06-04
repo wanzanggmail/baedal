@@ -55,19 +55,19 @@ $route = $route ?? '';
 													</a>
 												</div>
 												<div class="menu-item">
+													<a class="menu-link<?= (($route ?? '') === 'settlement/fees' || ($route ?? '') === 'settlement/fee-detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">정산 수수료 내역</span>
+													</a>
+												</div>
+												<div class="menu-item">
 													<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
 															<span class="bullet bullet-dot"></span>
 														</span>
 														<span class="menu-title">파싱 오류 상세</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('settlement/daily-auto') ?>" href="<?= htmlspecialchars(admin_url('settlement/daily-auto'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">자동 일일정산</span>
 													</a>
 												</div>
 											</div>

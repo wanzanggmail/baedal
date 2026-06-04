@@ -131,6 +131,37 @@ if ($riderRoute === 'profile/password' && $_SERVER['REQUEST_METHOD'] === 'POST')
     exit;
 }
 
+if ($riderRoute === 'withdrawal/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once INC_PATH . '/Withdrawal.php';
+
+    $csrf = (string) ($_POST['_token'] ?? '');
+    $expect = (string) ($_SESSION['rider_wd_csrf'] ?? '');
+    if ($expect === '' || !hash_equals($expect, $csrf)) {
+        $_SESSION['rider_flash_error'] = '잘못된 요청입니다. 다시 시도해 주세요.';
+        header('Location: ' . rider_url('withdrawal/apply'), true, 302);
+        exit;
+    }
+    unset($_SESSION['rider_wd_csrf']);
+
+    $ru = rider_current_user();
+    if (!$ru) {
+        header('Location: ' . rider_url('login'), true, 302);
+        exit;
+    }
+
+    try {
+        $row = Withdrawal::applyForRider((int) $ru['id']);
+        $_SESSION['rider_flash_ok'] = '출금 신청이 접수되었습니다. (실지급 ₩' . number_format((int) $row['amount']) . ')';
+    } catch (InvalidArgumentException $e) {
+        $_SESSION['rider_flash_error'] = $e->getMessage();
+    } catch (Throwable) {
+        $_SESSION['rider_flash_error'] = '출금 신청에 실패했습니다.';
+    }
+
+    header('Location: ' . rider_url('withdrawal/apply'), true, 302);
+    exit;
+}
+
 if (!isset($routes[$riderRoute])) {
     http_response_code(404);
     $riderPageTitle = '페이지 없음';

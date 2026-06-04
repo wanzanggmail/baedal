@@ -54,11 +54,91 @@ function admin_has_role(string ...$roles): bool
 function admin_role_label(string $role): string
 {
     return match ($role) {
-        'super'      => '최고관리자',
-        'settlement' => '정산담당',
-        'operation'  => '운영담당',
+        'super'      => '최고 관리자',
+        'admin'      => '조회 전용',
+        'operation'  => '운영',
+        'settlement' => '정산',
         default      => $role,
     };
+}
+
+/**
+ * @return array<string, list<string>>
+ */
+function admin_route_access_rules(): array
+{
+    return [
+        'system/admins' => ['super'],
+        'system/codes'  => ['super'],
+        'system/audit'  => ['super', 'admin'],
+        'settlement/'   => ['super', 'settlement', 'operation'],
+        'promotion/'    => ['super', 'settlement'],
+        'deduction/'    => ['super', 'settlement'],
+        'content/'      => ['super', 'operation'],
+        'riders/'       => ['super', 'operation'],
+        'withdrawal/settings' => ['super'],
+        'withdrawal/'   => ['super', 'admin', 'operation', 'settlement'],
+        'stats/'        => ['super', 'admin', 'operation', 'settlement'],
+        'dashboard'     => ['super', 'admin', 'operation', 'settlement'],
+    ];
+}
+
+function admin_can_access_route(string $route): bool
+{
+    $route = $route === '' ? 'dashboard' : $route;
+    $user  = admin_user();
+    if ($user === null) {
+        return false;
+    }
+    if ($user['role'] === 'super') {
+        return true;
+    }
+
+    $rules = admin_route_access_rules();
+    uksort($rules, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+    foreach ($rules as $prefix => $roles) {
+        if ($route === $prefix || ($prefix !== 'dashboard' && str_starts_with($route, $prefix))) {
+            return in_array($user['role'], $roles, true);
+        }
+    }
+
+    return false;
+}
+
+function admin_can_write(string $area): bool
+{
+    $user = admin_user();
+    if ($user === null) {
+        return false;
+    }
+
+    $role = $user['role'];
+    if ($role === 'super') {
+        return true;
+    }
+    if ($role === 'admin') {
+        return false;
+    }
+
+    return match ($area) {
+        'content', 'riders' => $role === 'operation',
+        'withdrawal'         => $role === 'operation',
+        'settlement', 'promotion', 'deduction' => $role === 'settlement',
+        'system'             => $role === 'super',
+        default              => false,
+    };
+}
+
+function admin_deny_write_json(string $area): void
+{
+    if (admin_can_write($area)) {
+        return;
+    }
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => false, 'message' => '권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 /**

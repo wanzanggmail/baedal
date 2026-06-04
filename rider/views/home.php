@@ -4,26 +4,21 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/Banner.php';
 require_once INC_PATH . '/Notice.php';
-require_once INC_PATH . '/RiderSettlement.php';
+require_once INC_PATH . '/RiderWallet.php';
+
+$riderUser = rider_current_user();
+$riderHomeWithdrawableAmount = 0;
+if ($riderUser) {
+    try {
+        $riderHomeWithdrawableAmount = (int) (RiderWallet::previewWithdrawal((int) $riderUser['id'])['payout_amount'] ?? 0);
+    } catch (Throwable) {
+        $riderHomeWithdrawableAmount = 0;
+    }
+}
 
 $homeBanners = [];
 $homeNotices = [];
 $contentError = null;
-$settlementSummary = [
-    'month_label'        => '이번 달 정산 합계',
-    'month_total'        => 0,
-    'month_line_count'   => 0,
-    'month_status_label' => '내역 없음',
-    'month_status_class' => 'secondary',
-    'withdrawable'       => 0,
-    'withdrawal_hold'    => false,
-    'error'              => null,
-];
-
-$ru = rider_current_user();
-if ($ru) {
-    $settlementSummary = RiderSettlement::homeSummary((int) $ru['id']);
-}
 
 try {
     $homeBanners = Banner::listActiveForRiderHome(20);
@@ -68,27 +63,17 @@ $carouselBg = ['primary', 'success', 'warning', 'info'];
 
 	<div class="card card-flush shadow-sm rider-home-settlement mb-6">
 		<div class="card-body">
-			<?php if ($settlementSummary['error'] !== null) : ?>
-			<div class="alert alert-warning fs-8 py-2 mb-3"><?= htmlspecialchars($settlementSummary['error'], ENT_QUOTES, 'UTF-8') ?></div>
-			<?php endif; ?>
 			<div class="rider-home-settlement-top border-bottom border-gray-200">
-				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0"><?= htmlspecialchars($settlementSummary['month_label'], ENT_QUOTES, 'UTF-8') ?></span>
+				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0">이번 달 정산 합계 (샘플)</span>
 				<div class="d-flex flex-wrap align-items-center gap-2 mt-1">
-					<span class="fs-2 fw-bold text-gray-900">₩ <?= htmlspecialchars(number_format($settlementSummary['month_total']), ENT_QUOTES, 'UTF-8') ?></span>
-					<span class="badge badge-light-<?= htmlspecialchars($settlementSummary['month_status_class'], ENT_QUOTES, 'UTF-8') ?> fs-9"><?= htmlspecialchars($settlementSummary['month_status_label'], ENT_QUOTES, 'UTF-8') ?></span>
+					<span class="fs-2 fw-bold text-gray-900">₩ 3,842,500</span>
+					<span class="badge badge-light-success fs-9">반영 완료</span>
 				</div>
-				<?php if ($settlementSummary['month_line_count'] > 0) : ?>
-				<span class="fs-9 text-muted d-block mt-1"><?= (int) $settlementSummary['month_line_count'] ?>건 (<?= htmlspecialchars($settlementSummary['month_start'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars($settlementSummary['month_end'], ENT_QUOTES, 'UTF-8') ?>)</span>
-				<?php endif; ?>
 			</div>
 			<div class="rider-home-settlement-withdraw">
 				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0">출금 가능 금액</span>
-				<span class="fs-2 fw-bold text-primary d-block mt-1">₩ <?= htmlspecialchars(number_format($settlementSummary['withdrawable']), ENT_QUOTES, 'UTF-8') ?></span>
-				<?php if ($settlementSummary['withdrawal_hold']) : ?>
-				<span class="fs-8 text-danger d-block mt-0">출금이 보류된 계정입니다. 운영센터에 문의하세요.</span>
-				<?php else : ?>
-				<span class="fs-8 text-gray-600 d-block mt-0">정산 누적에서 출금·대기 금액을 반영한 잔액입니다.</span>
-				<?php endif; ?>
+				<span class="fs-2 fw-bold text-primary d-block mt-1">₩ <?= htmlspecialchars(number_format($riderHomeWithdrawableAmount), ENT_QUOTES, 'UTF-8') ?></span>
+				<span class="fs-8 text-gray-600 d-block mt-0">보증금·건당 수수료 차감 후 전액 출금 가능액</span>
 				<a href="<?= htmlspecialchars(rider_url('withdrawal/apply'), ENT_QUOTES, 'UTF-8') ?>" class="fs-8 fw-semibold mt-1 d-inline-block">출금 신청하기</a>
 			</div>
 		</div>
