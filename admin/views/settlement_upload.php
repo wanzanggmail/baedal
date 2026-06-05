@@ -111,7 +111,8 @@ $platformLabels = [
 									<?php if (!$excelConfigReady) : ?>
 									<span class="d-block mt-1 text-danger">DB: <code>php migrate_settlement_excel_config.php</code> · 서버: <code>pip install -r requirements-settlement.txt</code></span>
 									<?php endif; ?>
-									<a class="d-block mt-2 fw-semibold" href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_check.php', ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">엑셀 복호화 환경 진단 (PHP가 쓰는 Python 확인)</a>
+									<a class="d-block mt-2 fw-semibold" href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_check.php', ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener">Python 환경 진단</a>
+									<span class="d-block mt-1 text-muted fs-8">복호화 실패 시 같은 파일을 POST: /admin/api/settlement_excel_test.php (file + excel_password)</span>
 								</div>
 							</div>
 
@@ -119,7 +120,7 @@ $platformLabels = [
 							<div id="uploadResult" class="d-none mb-8"></div>
 							<!--end::결과 영역-->
 
-							<form id="dailyUploadForm" class="form" enctype="multipart/form-data">
+							<form id="dailyUploadForm" class="form" enctype="multipart/form-data" accept-charset="UTF-8">
 								<div class="mb-6">
 									<label class="form-label required">플랫폼</label>
 									<select class="form-select form-select-solid" name="platform">

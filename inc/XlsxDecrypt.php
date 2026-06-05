@@ -136,9 +136,55 @@ final class XlsxDecrypt
 
     /**
      * @param list<string> $passwords
+     * @return array<string, mixed>
+     */
+    public static function testDecrypt(string $filePath, array $passwords): array
+    {
+        $head = is_readable($filePath) ? @file_get_contents($filePath, false, null, 0, 8) : false;
+
+        $result = [
+            'file_size'     => is_file($filePath) ? filesize($filePath) : 0,
+            'file_head_hex' => $head !== false ? bin2hex($head) : '',
+            'is_encrypted'  => self::isEncrypted($filePath),
+            'password_count'=> count($passwords),
+            'attempts'      => [],
+            'success'       => false,
+            'diagnostics'   => self::diagnostics(),
+        ];
+
+        if ($passwords === [] || !self::isExecEnabled()) {
+            return $result;
+        }
+
+        foreach ($passwords as $i => $password) {
+            self::$lastAttempts = [];
+            $out = self::decryptToTemp($filePath, $password);
+            $attempt = [
+                'index'        => $i + 1,
+                'password_len' => strlen($password),
+                'steps'        => self::$lastAttempts,
+                'valid'        => $out !== null ? self::validateDecryptedFile($out) : null,
+            ];
+            if ($out !== null && $attempt['valid'] === 'ok') {
+                $result['success'] = true;
+                $result['attempts'][] = $attempt;
+                self::unlinkTemp($out);
+                break;
+            }
+            if ($out !== null) {
+                self::unlinkTemp($out);
+            }
+            $result['attempts'][] = $attempt;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<string> $passwords
      * @throws RuntimeException
      */
-    public static function prepareForParsing(string $filePath, array $passwords = []): string
+    public static function prepareForParsing(string $filePath, array $passwords = [], string $platform = 'baemin'): string
     {
         if (!is_file($filePath)) {
             throw new RuntimeException('업로드 파일을 찾을 수 없습니다.');
@@ -166,9 +212,9 @@ final class XlsxDecrypt
             );
         }
 
-        $lastError   = '등록된 비밀번호로 파일을 열 수 없습니다.';
-        $sawOleXls   = false;
-        $sawNotZip   = false;
+        $sawOleXls = false;
+        $sawNotZip = false;
+        $attempted = count($passwords);
 
         foreach ($passwords as $password) {
             self::$lastAttempts = [];
@@ -222,7 +268,7 @@ final class XlsxDecrypt
             throw new RuntimeException(self::buildMsoffcryptoHelpMessage());
         }
 
-        throw new RuntimeException($lastError);
+        throw new RuntimeException(self::buildDecryptFailureMessage($attempted, $platform));
     }
 
     public static function cleanupTemps(): void
@@ -255,11 +301,13 @@ final class XlsxDecrypt
         @unlink($out);
         self::$tempFiles[] = $outPath;
 
-        if (self::decryptWithPython($inputPath, $outPath, $password)) {
+        $inputCopy = self::copyToTempReadable($inputPath);
+
+        if (self::decryptWithPython($inputCopy, $outPath, $password)) {
             return $outPath;
         }
 
-        if (self::decryptWithMsoffcryptoCli($inputPath, $outPath, $password)) {
+        if (self::decryptWithMsoffcryptoCli($inputCopy, $outPath, $password)) {
             return $outPath;
         }
 
@@ -268,32 +316,128 @@ final class XlsxDecrypt
         return null;
     }
 
+    private static function copyToTempReadable(string $inputPath): string
+    {
+        $base = tempnam(sys_get_temp_dir(), 'baedal_enc_');
+        if ($base === false) {
+            return $inputPath;
+        }
+        $copy = $base . '.xlsx';
+        @unlink($base);
+        if (!@copy($inputPath, $copy)) {
+            @unlink($copy);
+
+            return $inputPath;
+        }
+        @chmod($copy, 0600);
+        self::$tempFiles[] = $copy;
+
+        return $copy;
+    }
+
+    private static function writePasswordFile(string $password): ?string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'baedal_pw_');
+        if ($path === false) {
+            return null;
+        }
+        if (file_put_contents($path, $password) === false) {
+            @unlink($path);
+
+            return null;
+        }
+        @chmod($path, 0600);
+        self::$tempFiles[] = $path;
+
+        return $path;
+    }
+
     private static function decryptWithPython(string $input, string $output, string $password): bool
     {
         $script = ROOT_PATH . '/scripts/decrypt_xlsx.py';
-
         if (!is_file($script)) {
             return false;
         }
 
-        foreach (self::pythonBinaries() as $py) {
-            $run = self::runCommand(sprintf(
-                '%s %s %s %s %s 2>&1',
-                escapeshellarg($py),
-                escapeshellarg($script),
-                escapeshellarg($input),
-                escapeshellarg($output),
-                escapeshellarg($password)
-            ), $py);
+        $pwFile = self::writePasswordFile($password);
+        if ($pwFile === null) {
+            return false;
+        }
 
-            self::$lastAttempts[] = $run;
+        try {
+            foreach (self::pythonBinaries() as $py) {
+                $run = self::runProcess([
+                    $py,
+                    $script,
+                    $input,
+                    $output,
+                    '--password-file',
+                    $pwFile,
+                    '--verbose',
+                ], $py);
 
-            if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
-                return true;
+                self::$lastAttempts[] = $run;
+
+                if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+                    return true;
+                }
             }
+        } finally {
+            self::unlinkTemp($pwFile);
         }
 
         return false;
+    }
+
+    /**
+     * @param list<string> $argv
+     * @return array{python: string, code: int, output: string}
+     */
+    private static function runProcess(array $argv, string $label): array
+    {
+        if (!function_exists('proc_open')) {
+            return self::runCommandFallback($argv, $label);
+        }
+
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $proc = @proc_open($argv, $descriptors, $pipes, null, null);
+        if (!is_resource($proc)) {
+            return self::runCommandFallback($argv, $label);
+        }
+
+        fclose($pipes[0]);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+
+        $output = trim($stderr !== '' ? $stderr : $stdout);
+
+        return [
+            'python' => $label,
+            'code'   => $code,
+            'output' => $output,
+        ];
+    }
+
+    /**
+     * @param list<string> $argv
+     * @return array{python: string, code: int, output: string}
+     */
+    private static function runCommandFallback(array $argv, string $label): array
+    {
+        $parts = [];
+        foreach ($argv as $arg) {
+            $parts[] = escapeshellarg($arg);
+        }
+
+        return self::runCommand(implode(' ', $parts) . ' 2>&1', $label);
     }
 
     /** @return array{python: string, code: int, output: string} */
@@ -310,6 +454,34 @@ final class XlsxDecrypt
         ];
     }
 
+    private static function buildDecryptFailureMessage(int $attempted, string $platform = 'baemin'): string
+    {
+        $meta = SettlementExcelConfig::storedPasswordMeta($platform);
+
+        $lines = [
+            '등록된 비밀번호로 파일을 열 수 없습니다.',
+            "시도한 암호 후보: {$attempted}개 · DB 저장 암호 길이: {$meta['length']}자"
+                . ($meta['configured'] ? '' : ' (DB에 저장된 암호 없음)'),
+            '숫자-only 암호라면 인코딩 문제는 아닙니다. DB 저장 여부·Python 복호화 호환을 확인하세요.',
+            '「이번만 사용할 열기 암호」에 직접 입력 후 업로드하거나, 하단 진단 API로 확인하세요.',
+        ];
+
+        if ($attempted === 0) {
+            $lines[] = '저장된 암호가 없습니다. 플랫폼별 암호 저장 후 다시 시도하세요.';
+        }
+
+        if (self::$lastAttempts !== []) {
+            $last = self::$lastAttempts[count(self::$lastAttempts) - 1];
+            if ($last['output'] !== '') {
+                $lines[] = '서버 복호화 로그: ' . mb_substr($last['output'], 0, 500);
+            }
+        }
+
+        $lines[] = '진단: ' . rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_test.php (POST file+excel_password)';
+
+        return implode("\n", $lines);
+    }
+
     private static function decryptWithMsoffcryptoCli(string $input, string $output, string $password): bool
     {
         foreach (['msoffcrypto-tool', 'msoffcrypto'] as $bin) {
@@ -318,30 +490,26 @@ final class XlsxDecrypt
                 continue;
             }
 
-            $run = self::runCommand(sprintf(
-                '%s -p %s %s %s 2>&1',
-                escapeshellarg($which),
-                escapeshellarg($password),
-                escapeshellarg($input),
-                escapeshellarg($output)
-            ), $which);
-
+            $run = self::runProcess([
+                $which,
+                '-p',
+                $password,
+                $input,
+                $output,
+            ], $which);
             self::$lastAttempts[] = $run;
-
             if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
                 return true;
             }
 
-            // 일부 버전 CLI: 인자 순서가 다를 수 있음
-            $runAlt = self::runCommand(sprintf(
-                '%s %s %s -p %s 2>&1',
-                escapeshellarg($which),
-                escapeshellarg($input),
-                escapeshellarg($output),
-                escapeshellarg($password)
-            ), $which . ' (alt)');
+            $runAlt = self::runProcess([
+                $which,
+                $input,
+                $output,
+                '-p',
+                $password,
+            ], $which . ' (alt)');
             self::$lastAttempts[] = $runAlt;
-
             if ($runAlt['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
                 return true;
             }

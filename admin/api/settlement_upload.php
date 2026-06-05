@@ -76,7 +76,7 @@ if (count($parts) >= 3) {
 
 $metaJson = json_encode(['team' => $teamName, 'region' => $regionName], JSON_UNESCAPED_UNICODE);
 
-$uploadPassword = trim((string) ($_POST['excel_password'] ?? ''));
+$uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
 $passwords      = SettlementExcelConfig::passwordsToTry(
     $platform,
     $uploadPassword !== '' ? $uploadPassword : null
@@ -85,7 +85,7 @@ $passwords      = SettlementExcelConfig::passwordsToTry(
 $parsePath = $tmpPath;
 $parser    = new XlsxParser();
 try {
-    $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords);
+    $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords, $platform);
     $parser->open($parsePath);
     $parsed     = $parser->parseDailySheet($settlementDate);
     $deductions = $parser->parseDeductionSheet();

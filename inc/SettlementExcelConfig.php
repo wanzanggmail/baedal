@@ -44,6 +44,45 @@ final class SettlementExcelConfig
         return $out;
     }
 
+    /** @return array{length: int, configured: bool} */
+    public static function storedPasswordMeta(string $platform): array
+    {
+        if (!self::tableExists()) {
+            return ['length' => 0, 'configured' => false];
+        }
+
+        $row = db_row(
+            'SELECT open_password FROM settlement_excel_config WHERE platform = ? LIMIT 1',
+            [$platform]
+        );
+        if ($row === null) {
+            return ['length' => 0, 'configured' => false];
+        }
+
+        $pw = self::normalizePassword((string) ($row['open_password'] ?? ''));
+
+        return [
+            'length'      => strlen($pw),
+            'configured'  => $pw !== '',
+        ];
+    }
+
+    public static function normalizePassword(string $password): string
+    {
+        $password = trim($password);
+        if (str_starts_with($password, "\xEF\xBB\xBF")) {
+            $password = substr($password, 3);
+        }
+        if (class_exists('Normalizer')) {
+            $normalized = \Normalizer::normalize($password, \Normalizer::FORM_C);
+            if (is_string($normalized)) {
+                $password = $normalized;
+            }
+        }
+
+        return trim($password, "\r\n\x00\t ");
+    }
+
     /**
      * 업로드 시 시도할 비밀번호 목록 (중복 제거, 빈 값 제외)
      *
@@ -54,7 +93,7 @@ final class SettlementExcelConfig
         $list = [];
 
         if ($uploadPassword !== null && $uploadPassword !== '') {
-            $list[] = $uploadPassword;
+            $list[] = self::normalizePassword($uploadPassword);
         }
 
         if (self::tableExists()) {
@@ -63,31 +102,34 @@ final class SettlementExcelConfig
                 [$platform]
             );
             if ($row !== null) {
-                $pw = trim((string) ($row['open_password'] ?? ''));
+                $pw = self::normalizePassword((string) ($row['open_password'] ?? ''));
                 if ($pw !== '') {
                     $list[] = $pw;
                 }
             }
         }
 
-        $envPlatform = getenv('SETTLEMENT_EXCEL_PASSWORD_' . strtoupper($platform));
-        if (is_string($envPlatform) && $envPlatform !== '') {
-            $list[] = $envPlatform;
+        foreach (self::envValues('SETTLEMENT_EXCEL_PASSWORD_' . strtoupper($platform)) as $v) {
+            $pw = self::normalizePassword($v);
+            if ($pw !== '') {
+                $list[] = $pw;
+            }
         }
 
-        $envGlobal = getenv('SETTLEMENT_EXCEL_PASSWORD');
-        if (is_string($envGlobal) && $envGlobal !== '') {
-            $list[] = $envGlobal;
+        foreach (self::envValues('SETTLEMENT_EXCEL_PASSWORD') as $v) {
+            $pw = self::normalizePassword($v);
+            if ($pw !== '') {
+                $list[] = $pw;
+            }
         }
 
-        // other 플랫폼은 baemin 비밀번호도 시도 (팀에서 동일 암호 쓰는 경우)
         if ($platform !== 'baemin' && self::tableExists()) {
             $baemin = db_row(
                 'SELECT open_password FROM settlement_excel_config WHERE platform = ? LIMIT 1',
                 ['baemin']
             );
             if ($baemin !== null) {
-                $pw = trim((string) ($baemin['open_password'] ?? ''));
+                $pw = self::normalizePassword((string) ($baemin['open_password'] ?? ''));
                 if ($pw !== '') {
                     $list[] = $pw;
                 }
@@ -96,13 +138,25 @@ final class SettlementExcelConfig
 
         $unique = [];
         foreach ($list as $pw) {
-            $pw = trim($pw);
             if ($pw !== '' && !in_array($pw, $unique, true)) {
                 $unique[] = $pw;
             }
         }
 
         return $unique;
+    }
+
+    /** @return list<string> */
+    private static function envValues(string $name): array
+    {
+        $vals = [];
+        foreach ([getenv($name), $_SERVER[$name] ?? '', $_SERVER['REDIRECT_' . $name] ?? ''] as $v) {
+            if (is_string($v) && $v !== '' && !in_array($v, $vals, true)) {
+                $vals[] = $v;
+            }
+        }
+
+        return $vals;
     }
 
     /**
@@ -116,7 +170,7 @@ final class SettlementExcelConfig
         }
 
         foreach (self::PLATFORMS as $platform) {
-            $pw = trim((string) ($passwords[$platform] ?? ''));
+            $pw = self::normalizePassword((string) ($passwords[$platform] ?? ''));
             $exists = db_row(
                 'SELECT platform FROM settlement_excel_config WHERE platform = ? LIMIT 1',
                 [$platform]
