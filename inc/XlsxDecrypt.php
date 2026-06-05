@@ -355,31 +355,71 @@ final class XlsxDecrypt
     private static function decryptWithPython(string $input, string $output, string $password): bool
     {
         $script = ROOT_PATH . '/scripts/decrypt_xlsx.py';
+        $wrapper = ROOT_PATH . '/scripts/run_decrypt.sh';
+
         if (!is_file($script)) {
+            self::$lastAttempts[] = [
+                'python' => '(script)',
+                'code'   => 127,
+                'output' => 'decrypt_xlsx.py 없음: ' . $script,
+            ];
+
             return false;
         }
 
         $pwFile = self::writePasswordFile($password);
         if ($pwFile === null) {
+            self::$lastAttempts[] = [
+                'python' => '(password)',
+                'code'   => 127,
+                'output' => '암호 임시 파일 생성 실패: ' . sys_get_temp_dir(),
+            ];
+
             return false;
         }
 
+        $runners = self::pythonRunners();
+        if ($runners === []) {
+            self::$lastAttempts[] = [
+                'python' => '(none)',
+                'code'   => 127,
+                'output' => 'Python 실행 파일을 찾지 못했습니다. SETTLEMENT_PYTHON_BIN=/usr/bin/python3 설정',
+            ];
+        }
+
         try {
-            foreach (self::pythonBinaries() as $py) {
-                $run = self::runProcess([
-                    $py,
-                    $script,
+            foreach ($runners as $runner) {
+                $argv = [
+                    $runner['bin'],
+                    ...$runner['args'],
                     $input,
                     $output,
                     '--password-file',
                     $pwFile,
                     '--verbose',
-                ], $py);
-
+                ];
+                $run = self::runProcess($argv, $runner['label']);
                 self::$lastAttempts[] = $run;
 
                 if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
                     return true;
+                }
+
+                // 숫자-only 암호: argv 직접 전달도 시도
+                if (preg_match('/^\d+$/', $password)) {
+                    $argvDirect = [
+                        $runner['bin'],
+                        ...$runner['args'],
+                        $input,
+                        $output,
+                        $password,
+                        '--verbose',
+                    ];
+                    $runDirect = self::runProcess($argvDirect, $runner['label'] . ' (direct)');
+                    self::$lastAttempts[] = $runDirect;
+                    if ($runDirect['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+                        return true;
+                    }
                 }
             }
         } finally {
@@ -387,6 +427,26 @@ final class XlsxDecrypt
         }
 
         return false;
+    }
+
+    /**
+     * @return list<array{bin: string, args: list<string>, label: string}>
+     */
+    private static function pythonRunners(): array
+    {
+        $runners = [];
+        $script  = ROOT_PATH . '/scripts/decrypt_xlsx.py';
+        $wrapper = ROOT_PATH . '/scripts/run_decrypt.sh';
+
+        if (is_file($wrapper)) {
+            $runners[] = ['bin' => '/bin/bash', 'args' => [$wrapper], 'label' => 'bash+run_decrypt.sh'];
+        }
+
+        foreach (self::pythonBinaries() as $py) {
+            $runners[] = ['bin' => $py, 'args' => [$script], 'label' => $py];
+        }
+
+        return $runners;
     }
 
     /**
@@ -405,7 +465,7 @@ final class XlsxDecrypt
             2 => ['pipe', 'w'],
         ];
 
-        $proc = @proc_open($argv, $descriptors, $pipes, null, null);
+        $proc = @proc_open($argv, $descriptors, $pipes, null, self::processEnv());
         if (!is_resource($proc)) {
             return self::runCommandFallback($argv, $label);
         }
@@ -454,30 +514,61 @@ final class XlsxDecrypt
         ];
     }
 
+    /** @return array<string, string> */
+    private static function processEnv(): array
+    {
+        $home = sys_get_temp_dir();
+
+        return [
+            'PATH'   => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'HOME'   => $home,
+            'LANG'   => 'C.UTF-8',
+            'LC_ALL' => 'C.UTF-8',
+        ];
+    }
+
     private static function buildDecryptFailureMessage(int $attempted, string $platform = 'baemin'): string
     {
         $meta = SettlementExcelConfig::storedPasswordMeta($platform);
+        $diag = self::diagnostics();
 
         $lines = [
             '등록된 비밀번호로 파일을 열 수 없습니다.',
-            "시도한 암호 후보: {$attempted}개 · DB 저장 암호 길이: {$meta['length']}자"
-                . ($meta['configured'] ? '' : ' (DB에 저장된 암호 없음)'),
-            '숫자-only 암호라면 인코딩 문제는 아닙니다. DB 저장 여부·Python 복호화 호환을 확인하세요.',
-            '「이번만 사용할 열기 암호」에 직접 입력 후 업로드하거나, 하단 진단 API로 확인하세요.',
+            "시도한 암호 후보: {$attempted}개 · DB 저장 암호 길이: {$meta['length']}자",
+            'DB·암호 길이는 정상입니다. Python 실행 또는 msoffcrypto 복호화 단계에서 실패한 상태입니다.',
         ];
 
-        if ($attempted === 0) {
-            $lines[] = '저장된 암호가 없습니다. 플랫폼별 암호 저장 후 다시 시도하세요.';
+        $lines[] = 'exec: ' . ($diag['exec_enabled'] ? '사용 가능' : '비활성(disable_functions)');
+        $lines[] = '스크립트: ' . ($diag['script_exists'] ? '있음' : '없음') . ' · PHP 사용자: ' . ($diag['php_user'] ?: '?');
+
+        foreach ($diag['python_binaries'] as $p) {
+            $lines[] = sprintf(
+                '  %s → msoffcrypto %s',
+                (string) ($p['path'] ?? '?'),
+                !empty($p['msoffcrypto_ok']) ? 'OK' : '없음'
+            );
         }
 
-        if (self::$lastAttempts !== []) {
-            $last = self::$lastAttempts[count(self::$lastAttempts) - 1];
-            if ($last['output'] !== '') {
-                $lines[] = '서버 복호화 로그: ' . mb_substr($last['output'], 0, 500);
+        if ($diag['python_binaries'] === []) {
+            $lines[] = '  (웹에서 Python을 하나도 찾지 못함 — SETTLEMENT_PYTHON_BIN=/usr/bin/python3 설정 후 php-fpm reload)';
+        }
+
+        if (self::$lastAttempts === []) {
+            $lines[] = '복호화 명령 로그 없음: 스크립트 경로·SELinux(httpd→python 실행 차단) 확인';
+            $lines[] = 'CentOS/RHEL: ausearch -m avc -ts recent | grep httpd';
+        } else {
+            foreach (array_slice(self::$lastAttempts, -4) as $a) {
+                $lines[] = sprintf(
+                    '[%s] exit=%d %s',
+                    $a['python'],
+                    $a['code'],
+                    mb_substr($a['output'] !== '' ? $a['output'] : '(출력 없음)', 0, 300)
+                );
             }
         }
 
-        $lines[] = '진단: ' . rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_test.php (POST file+excel_password)';
+        $lines[] = '같은 파일로 POST: ' . rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_test.php';
+        $lines[] = '임시 우회: Excel에서 암호 제거 후 xlsx 저장 → 업로드';
 
         return implode("\n", $lines);
     }
@@ -608,28 +699,18 @@ final class XlsxDecrypt
         $list = [];
 
         foreach (self::envValues('SETTLEMENT_PYTHON_BIN') as $v) {
-            if (is_executable($v) && !in_array($v, $list, true)) {
+            if (!in_array($v, $list, true)) {
                 $list[] = $v;
             }
         }
 
-        $common = [
+        foreach ([
             '/usr/bin/python3',
             '/usr/local/bin/python3',
             '/bin/python3',
-        ];
-        if (PHP_OS_FAMILY === 'Windows') {
-            $common = array_merge(
-                [
-                    'C:\\Python312\\python.exe',
-                    'C:\\Python311\\python.exe',
-                    'C:\\Python310\\python.exe',
-                ],
-                $common
-            );
-        }
-        foreach ($common as $path) {
-            if (is_executable($path) && !in_array($path, $list, true)) {
+            '/usr/bin/python',
+        ] as $path) {
+            if (!in_array($path, $list, true)) {
                 $list[] = $path;
             }
         }

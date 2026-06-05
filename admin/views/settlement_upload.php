@@ -144,7 +144,8 @@ $platformLabels = [
 									<input type="password" class="form-control form-control-solid" name="excel_password" id="excel_password_once"
 										autocomplete="off" placeholder="저장된 암호가 있으면 비워도 됩니다" />
 								</div>
-								<div class="d-flex justify-content-end">
+								<div class="d-flex justify-content-end gap-2">
+									<button type="button" class="btn btn-light" id="testDecryptBtn">복호화 테스트</button>
 									<button type="submit" class="btn btn-primary" id="uploadBtn">
 										<span class="indicator-label">
 											<i class="ki-duotone ki-file-up fs-3"><span class="path1"></span><span class="path2"></span></i>
@@ -426,6 +427,37 @@ $platformLabels = [
 
 	function escHtml(s) {
 		return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+	}
+
+	// 복호화 테스트 (업로드 전)
+	const testBtn = document.getElementById('testDecryptBtn');
+	if (testBtn && form) {
+		testBtn.addEventListener('click', async function () {
+			const file = fileInput?.files[0];
+			if (!file) {
+				showResult('danger', '파일을 선택해 주세요.');
+				return;
+			}
+			testBtn.disabled = true;
+			const fd = new FormData(form);
+			try {
+				const url = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_excel_test.php', ENT_QUOTES, 'UTF-8') ?>';
+				const resp = await fetch(url, { method: 'POST', body: fd });
+				const data = await resp.json();
+				if (data.ok) {
+					showResult('success', '복호화 성공 — 이제 업로드 및 파싱을 진행하세요.');
+				} else {
+					const steps = (data.test && data.test.attempts && data.test.attempts[0] && data.test.attempts[0].steps)
+						? data.test.attempts[0].steps.map(function (s) { return (s.python || '?') + ' exit=' + s.code + ' ' + (s.output || ''); }).join('\n')
+						: (data.message || '');
+					showResult('danger', '복호화 실패\n' + steps);
+				}
+			} catch (err) {
+				showResult('danger', '테스트 오류: ' + err.message);
+			} finally {
+				testBtn.disabled = false;
+			}
+		});
 	}
 
 	// 플랫폼별 엑셀 열기 암호 저장
