@@ -19,7 +19,8 @@ ssh -i "C:\경로\LightsailDefaultKey.pem" ec2-user@서버공인IP "cd /home/ec2
 ```
 
 `admin`, `rider`, `inc` 가 보이는 디렉터리 전체 경로가 **`DEPLOY_PATH`** 입니다.  
-(예: `/home/ec2-user/baedal`, `/home/ec2-user/htdocs/baedal` 등 — 서버마다 다름)
+Apache DocumentRoot가 **`/var/www/html`** 이면 `DEPLOY_PATH`도 **`/var/www/html`** 로 맞춥니다.  
+(예: `/var/www/html`, `/home/ec2-user/baedal` — **Apache가 실제로 읽는 경로**와 동일해야 함)
 
 > 사용자 이름은 Lightsail **Amazon Linux** 기준 **`ec2-user`** 입니다. (`ec-user` 가 아님)
 
@@ -31,7 +32,7 @@ ssh -i "C:\경로\LightsailDefaultKey.pem" ec2-user@서버공인IP "cd /home/ec2
 |--------|----------------|
 | `DEPLOY_HOST` | Lightsail **고정 IP** (콘솔에 표시) |
 | `DEPLOY_USER` | `ec2-user` |
-| `DEPLOY_PATH` | 위에서 확인한 경로 (예: `/home/ec2-user/baedal`) |
+| `DEPLOY_PATH` | Apache DocumentRoot (예: `/var/www/html`) |
 | `DEPLOY_SSH_KEY` | **PEM 파일 내용 전체** (메모장으로 열어 `-----BEGIN…` 부터 `-----END…` 까지 복사) |
 | `DEPLOY_PORT` | `22` (보통 생략 가능) |
 | `DEPLOY_POST_CMD` | (선택) `chmod -R u+rwX uploads 2>/dev/null; true` |
