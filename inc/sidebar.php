@@ -326,6 +326,14 @@ $route = $route ?? '';
 													</a>
 												</div>
 												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/settlement-excel') ?>" href="<?= htmlspecialchars(admin_url('system/settlement-excel'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">정산 엑셀 암호</span>
+													</a>
+												</div>
+												<div class="menu-item">
 													<a class="menu-link<?= nav_active('system/audit') ?>" href="<?= htmlspecialchars(admin_url('system/audit'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
 															<span class="bullet bullet-dot"></span>

@@ -29,5 +29,6 @@ return [
     'riders/detail' => ['title' => '라이더 상세', 'view' => 'riders_detail'],
     'system/admins' => ['title' => '관리자 계정·권한', 'view' => 'system_admins'],
     'system/codes' => ['title' => '코드/마스터', 'view' => 'system_codes'],
+    'system/settlement-excel' => ['title' => '정산 엑셀 열기 암호', 'view' => 'system_settlement_excel'],
     'system/audit' => ['title' => '감사 로그', 'view' => 'system_audit'],
 ];

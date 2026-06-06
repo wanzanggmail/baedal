@@ -74,18 +74,16 @@ final class XlsxDecrypt
             return 'not_zip';
         }
 
-        if (!extension_loaded('zip')) {
-            return 'zip_ext_missing';
-        }
-
-        $zip = new ZipArchive();
-        if ($zip->open($filePath) === true) {
-            $ok = $zip->locateName('_rels/.rels') !== false
-                || $zip->locateName('xl/workbook.xml') !== false
-                || $zip->locateName('[Content_Types].xml') !== false;
-            $zip->close();
-            if ($ok) {
-                return 'ok';
+        if (extension_loaded('zip')) {
+            $zip = new ZipArchive();
+            if ($zip->open($filePath) === true) {
+                $ok = $zip->locateName('_rels/.rels') !== false
+                    || $zip->locateName('xl/workbook.xml') !== false
+                    || $zip->locateName('[Content_Types].xml') !== false;
+                $zip->close();
+                if ($ok) {
+                    return 'ok';
+                }
             }
         }
 
@@ -105,8 +103,22 @@ final class XlsxDecrypt
 
             return 'ok';
         } catch (Throwable) {
-            return 'unreadable';
+            // fall through
         }
+
+        if (!extension_loaded('zip')) {
+            return 'zip_ext_missing';
+        }
+
+        return 'unreadable';
+    }
+
+    /** Python 복호화 성공 판정 — zip 확장 없어도 PK 헤더 xlsx면 성공 */
+    private static function isDecryptedZipOutput(string $filePath): bool
+    {
+        $valid = self::validateDecryptedFile($filePath);
+
+        return $valid === 'ok' || $valid === 'zip_ext_missing';
     }
 
     /**
@@ -173,17 +185,22 @@ final class XlsxDecrypt
         foreach ($passwords as $i => $password) {
             self::$lastAttempts = [];
             $out = self::decryptToTemp($filePath, $password);
+            $valid = $out !== null ? self::validateDecryptedFile($out) : null;
             $attempt = [
                 'index'        => $i + 1,
                 'password_len' => strlen($password),
                 'steps'        => self::$lastAttempts,
-                'valid'        => $out !== null ? self::validateDecryptedFile($out) : null,
+                'valid'        => $valid,
+                'decrypt_ok'   => $out !== null && self::isDecryptedZipOutput($out),
             ];
-            if ($out !== null && $attempt['valid'] === 'ok') {
+            if ($out !== null && $valid === 'ok') {
                 $result['success'] = true;
                 $result['attempts'][] = $attempt;
                 self::unlinkTemp($out);
                 break;
+            }
+            if ($out !== null && $valid === 'zip_ext_missing') {
+                $result['zip_extension_missing'] = true;
             }
             if ($out !== null) {
                 self::unlinkTemp($out);
@@ -280,6 +297,10 @@ final class XlsxDecrypt
 
         if (self::allAttemptsMissingMsoffcrypto()) {
             throw new RuntimeException(self::buildMsoffcryptoHelpMessage());
+        }
+
+        if (self::attemptsIndicateZipExtensionMissing()) {
+            throw new RuntimeException(self::buildZipExtensionHelpMessage());
         }
 
         throw new RuntimeException(self::buildDecryptFailureMessage($attempted, $platform));
@@ -432,7 +453,7 @@ final class XlsxDecrypt
                 $run = self::annotateAttempt($run, $output);
                 self::$lastAttempts[] = $run;
 
-                if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+                if ($run['code'] === 0 && self::isDecryptedZipOutput($output)) {
                     return true;
                 }
 
@@ -449,7 +470,7 @@ final class XlsxDecrypt
                     $runDirect = self::runProcess($argvDirect, $runner['label'] . ' (direct)');
                     $runDirect = self::annotateAttempt($runDirect, $output);
                     self::$lastAttempts[] = $runDirect;
-                    if ($runDirect['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+                    if ($runDirect['code'] === 0 && self::isDecryptedZipOutput($output)) {
                         return true;
                     }
                 }
@@ -683,6 +704,43 @@ final class XlsxDecrypt
         return implode("\n", $lines);
     }
 
+    private static function attemptsIndicateZipExtensionMissing(): bool
+    {
+        if (extension_loaded('zip') || self::$lastAttempts === []) {
+            return false;
+        }
+
+        foreach (self::$lastAttempts as $a) {
+            if ($a['code'] !== 0) {
+                return false;
+            }
+            if (!str_contains($a['output'], '504b0304') && !str_contains($a['output'], 'validate=zip_ext_missing')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function buildZipExtensionHelpMessage(): string
+    {
+        $ini = php_ini_loaded_file() ?: 'php.ini';
+        $ver = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+
+        return implode("\n", [
+            '엑셀 암호 해제는 성공했지만, PHP zip 확장이 없어 xlsx를 읽을 수 없습니다.',
+            '(복호화 로그: exit=0, output_head=504b0304 = 정상 xlsx)',
+            '',
+            'Amazon Linux / RHEL 예:',
+            "  sudo dnf install -y php-zip || sudo yum install -y php-zip",
+            "  # 버전별: sudo dnf install -y php{$ver}-zip",
+            '  sudo systemctl restart httpd',
+            '',
+            "php.ini ({$ini}) 에 extension=zip 이 활성화돼 있는지 확인하세요.",
+            '설치 후: php -m | grep zip',
+        ]);
+    }
+
     private static function decryptWithMsoffcryptoCli(string $input, string $output, string $password): bool
     {
         foreach (['msoffcrypto-tool', 'msoffcrypto'] as $bin) {
@@ -700,7 +758,7 @@ final class XlsxDecrypt
             ], $which);
             $run = self::annotateAttempt($run, $output);
             self::$lastAttempts[] = $run;
-            if ($run['code'] === 0 && !self::isEncrypted($output) && self::validateDecryptedFile($output) === 'ok') {
+            if ($run['code'] === 0 && !self::isEncrypted($output) && self::isDecryptedZipOutput($output)) {
                 return true;
             }
 
@@ -713,7 +771,7 @@ final class XlsxDecrypt
             ], $which . ' (alt)');
             $runAlt = self::annotateAttempt($runAlt, $output);
             self::$lastAttempts[] = $runAlt;
-            if ($runAlt['code'] === 0 && !self::isEncrypted($output) && self::validateDecryptedFile($output) === 'ok') {
+            if ($runAlt['code'] === 0 && !self::isEncrypted($output) && self::isDecryptedZipOutput($output)) {
                 return true;
             }
         }

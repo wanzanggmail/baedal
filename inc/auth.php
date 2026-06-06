@@ -70,6 +70,7 @@ function admin_route_access_rules(): array
     return [
         'system/admins' => ['super'],
         'system/codes'  => ['super'],
+        'system/settlement-excel' => ['super', 'settlement'],
         'system/audit'  => ['super', 'admin'],
         'settlement/'   => ['super', 'settlement', 'operation'],
         'promotion/'    => ['super', 'settlement'],

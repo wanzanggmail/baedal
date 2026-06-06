@@ -92,6 +92,12 @@ cp .env.example .env    # 이미 .env 있으면 생략
 mkdir -p uploads/banners
 chmod -R u+rwX uploads
 php migrate_content.php   # 공지·배너 테이블
+
+# 정산 xlsx 업로드·암호 해제 (필수)
+sudo dnf install -y php-zip || sudo yum install -y php-zip
+sudo systemctl restart httpd
+php -m | grep zip   # "zip" 한 줄 출력되면 OK
+sudo -u apache /usr/bin/python3 -m pip install --user msoffcrypto-tool
 ```
 
 ---

@@ -20,7 +20,7 @@ if (!admin_is_logged_in()) {
     exit;
 }
 
-if (!admin_can_access_route('settlement/upload')) {
+if (!admin_can_access_route('settlement/upload') && !admin_can_access_route('system/settlement-excel')) {
     http_response_code(403);
     echo json_encode(['ok' => false, 'message' => '권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
     exit;
