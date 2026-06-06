@@ -52,7 +52,12 @@ final class XlsxDecrypt
      */
     public static function validateDecryptedFile(string $filePath): string
     {
-        if (!is_readable($filePath) || filesize($filePath) < 4) {
+        if (!is_file($filePath) || !is_readable($filePath)) {
+            return 'unreadable';
+        }
+
+        $size = filesize($filePath);
+        if ($size === false || $size < 4) {
             return 'unreadable';
         }
 
@@ -73,26 +78,35 @@ final class XlsxDecrypt
             return 'zip_ext_missing';
         }
 
+        $zip = new ZipArchive();
+        if ($zip->open($filePath) === true) {
+            $ok = $zip->locateName('_rels/.rels') !== false
+                || $zip->locateName('xl/workbook.xml') !== false
+                || $zip->locateName('[Content_Types].xml') !== false;
+            $zip->close();
+            if ($ok) {
+                return 'ok';
+            }
+        }
+
         try {
             $reader = IOFactory::createReader('Xlsx');
             if ($reader->canRead($filePath)) {
                 return 'ok';
             }
         } catch (Throwable) {
-            // fall through to ZipArchive check
+            // fall through
         }
 
-        $zip = new ZipArchive();
-        if ($zip->open($filePath) !== true) {
+        try {
+            $book = IOFactory::load($filePath);
+            $book->disconnectWorksheets();
+            unset($book);
+
+            return 'ok';
+        } catch (Throwable) {
             return 'unreadable';
         }
-
-        $ok = $zip->locateName('_rels/.rels') !== false
-            || $zip->locateName('xl/workbook.xml') !== false
-            || $zip->locateName('[Content_Types].xml') !== false;
-        $zip->close();
-
-        return $ok ? 'ok' : 'unreadable';
     }
 
     /**
@@ -307,7 +321,8 @@ final class XlsxDecrypt
             return $outPath;
         }
 
-        if (self::decryptWithMsoffcryptoCli($inputCopy, $outPath, $password)) {
+        // Python+msoffcrypto 가 있으면 CLI(버전 불일치 exit=0)는 건너뜀
+        if (!self::hasPythonWithMsoffcrypto() && self::decryptWithMsoffcryptoCli($inputCopy, $outPath, $password)) {
             return $outPath;
         }
 
@@ -379,6 +394,21 @@ final class XlsxDecrypt
         }
 
         $runners = self::pythonRunners();
+        $withMso = [];
+        foreach ($runners as $runner) {
+            if ($runner['label'] === 'bash+run_decrypt.sh') {
+                $withMso[] = $runner;
+                continue;
+            }
+            $probe = self::probePython($runner['bin']);
+            if (!empty($probe['msoffcrypto_ok'])) {
+                $withMso[] = $runner;
+            }
+        }
+        if ($withMso !== []) {
+            $runners = $withMso;
+        }
+
         if ($runners === []) {
             self::$lastAttempts[] = [
                 'python' => '(none)',
@@ -399,6 +429,7 @@ final class XlsxDecrypt
                     '--verbose',
                 ];
                 $run = self::runProcess($argv, $runner['label']);
+                $run = self::annotateAttempt($run, $output);
                 self::$lastAttempts[] = $run;
 
                 if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
@@ -416,6 +447,7 @@ final class XlsxDecrypt
                         '--verbose',
                     ];
                     $runDirect = self::runProcess($argvDirect, $runner['label'] . ' (direct)');
+                    $runDirect = self::annotateAttempt($runDirect, $output);
                     self::$lastAttempts[] = $runDirect;
                     if ($runDirect['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
                         return true;
@@ -436,17 +468,95 @@ final class XlsxDecrypt
     {
         $runners = [];
         $script  = ROOT_PATH . '/scripts/decrypt_xlsx.py';
-        $wrapper = ROOT_PATH . '/scripts/run_decrypt.sh';
-
-        if (is_file($wrapper)) {
-            $runners[] = ['bin' => '/bin/bash', 'args' => [$wrapper], 'label' => 'bash+run_decrypt.sh'];
-        }
+        $scored  = [];
 
         foreach (self::pythonBinaries() as $py) {
-            $runners[] = ['bin' => $py, 'args' => [$script], 'label' => $py];
+            if (!self::isUsablePythonPath($py)) {
+                continue;
+            }
+            $probe = self::probePython($py);
+            if ($probe['version'] === '' && $probe['msoffcrypto_err'] !== '') {
+                continue;
+            }
+            $scored[] = [
+                'bin'   => $py,
+                'args'  => [$script],
+                'label' => $py,
+                'score' => !empty($probe['msoffcrypto_ok']) ? 10 : 0,
+            ];
+        }
+
+        usort($scored, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
+
+        foreach ($scored as $row) {
+            unset($row['score']);
+            $runners[] = $row;
+        }
+
+        $wrapper = ROOT_PATH . '/scripts/run_decrypt.sh';
+        if (is_file($wrapper) && PHP_OS_FAMILY !== 'Windows') {
+            array_unshift($runners, ['bin' => '/bin/bash', 'args' => [$wrapper], 'label' => 'bash+run_decrypt.sh']);
         }
 
         return $runners;
+    }
+
+    private static function hasPythonWithMsoffcrypto(): bool
+    {
+        foreach (self::pythonBinaries() as $py) {
+            if (!self::isUsablePythonPath($py)) {
+                continue;
+            }
+            $probe = self::probePython($py);
+            if (!empty($probe['msoffcrypto_ok'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function isUsablePythonPath(string $path): bool
+    {
+        if ($path === '') {
+            return false;
+        }
+        if (str_contains($path, DIRECTORY_SEPARATOR) || str_contains($path, '/')) {
+            return is_file($path);
+        }
+
+        return self::commandExists($path) !== null;
+    }
+
+    /** @param array{python: string, code: int, output: string} $run */
+    private static function annotateAttempt(array $run, string $outputPath): array
+    {
+        $extra = self::fileProbe($outputPath);
+        if (is_file($outputPath)) {
+            $valid = self::validateDecryptedFile($outputPath);
+            if ($valid !== 'ok') {
+                $extra .= ' validate=' . $valid;
+            }
+            if (self::isEncrypted($outputPath)) {
+                $extra .= ' still_encrypted=1';
+            }
+        }
+        $run['output'] = trim($run['output'] . ' | ' . $extra);
+
+        return $run;
+    }
+
+    private static function fileProbe(string $path): string
+    {
+        if (!is_file($path)) {
+            return 'output=missing';
+        }
+
+        $size = filesize($path);
+        $head = @file_get_contents($path, false, null, 0, 4);
+        $hex  = $head !== false ? bin2hex($head) : '????';
+
+        return 'output_size=' . (string) $size . ' head=' . $hex;
     }
 
     /**
@@ -557,12 +667,12 @@ final class XlsxDecrypt
             $lines[] = '복호화 명령 로그 없음: 스크립트 경로·SELinux(httpd→python 실행 차단) 확인';
             $lines[] = 'CentOS/RHEL: ausearch -m avc -ts recent | grep httpd';
         } else {
-            foreach (array_slice(self::$lastAttempts, -4) as $a) {
+            foreach (self::$lastAttempts as $a) {
                 $lines[] = sprintf(
                     '[%s] exit=%d %s',
                     $a['python'],
                     $a['code'],
-                    mb_substr($a['output'] !== '' ? $a['output'] : '(출력 없음)', 0, 300)
+                    mb_substr($a['output'] !== '' ? $a['output'] : '(출력 없음)', 0, 400)
                 );
             }
         }
@@ -588,8 +698,9 @@ final class XlsxDecrypt
                 $input,
                 $output,
             ], $which);
+            $run = self::annotateAttempt($run, $output);
             self::$lastAttempts[] = $run;
-            if ($run['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+            if ($run['code'] === 0 && !self::isEncrypted($output) && self::validateDecryptedFile($output) === 'ok') {
                 return true;
             }
 
@@ -600,8 +711,9 @@ final class XlsxDecrypt
                 '-p',
                 $password,
             ], $which . ' (alt)');
+            $runAlt = self::annotateAttempt($runAlt, $output);
             self::$lastAttempts[] = $runAlt;
-            if ($runAlt['code'] === 0 && self::validateDecryptedFile($output) === 'ok') {
+            if ($runAlt['code'] === 0 && !self::isEncrypted($output) && self::validateDecryptedFile($output) === 'ok') {
                 return true;
             }
         }
@@ -699,35 +811,73 @@ final class XlsxDecrypt
         $list = [];
 
         foreach (self::envValues('SETTLEMENT_PYTHON_BIN') as $v) {
-            if (!in_array($v, $list, true)) {
+            if (self::isUsablePythonPath($v) && !in_array($v, $list, true)) {
                 $list[] = $v;
             }
         }
 
-        foreach ([
-            '/usr/bin/python3',
-            '/usr/local/bin/python3',
-            '/bin/python3',
-            '/usr/bin/python',
-        ] as $path) {
-            if (!in_array($path, $list, true)) {
+        if (PHP_OS_FAMILY === 'Windows') {
+            foreach (self::discoverWindowsPython() as $path) {
+                if (!in_array($path, $list, true)) {
+                    $list[] = $path;
+                }
+            }
+
+            return $list;
+        }
+
+        foreach (['/usr/bin/python3', '/bin/python3', '/usr/local/bin/python3'] as $path) {
+            if (self::isUsablePythonPath($path) && !in_array($path, $list, true)) {
                 $list[] = $path;
             }
         }
 
         foreach (['python3', 'python'] as $bin) {
             $path = self::commandExists($bin);
-            if ($path !== null && !in_array($path, $list, true)) {
+            if ($path !== null && self::isUsablePythonPath($path) && !in_array($path, $list, true)) {
                 $list[] = $path;
             }
         }
 
-        $which = self::resolveWhich('python3') ?? self::resolveWhich('python');
-        if ($which !== null && !in_array($which, $list, true)) {
-            $list[] = $which;
+        return $list;
+    }
+
+    /** @return list<string> */
+    private static function discoverWindowsPython(): array
+    {
+        $found = [];
+        foreach (['python', 'python3', 'py'] as $cmd) {
+            $path = self::resolveWhich($cmd);
+            if ($path !== null && !in_array($path, $found, true)) {
+                $found[] = $path;
+            }
         }
 
-        return $list;
+        $roots = [
+            getenv('LOCALAPPDATA') . '\\Programs\\Python',
+            'C:\\Python312',
+            'C:\\Python311',
+            'C:\\Python310',
+        ];
+        foreach ($roots as $root) {
+            if ($root === '' || !is_dir($root)) {
+                continue;
+            }
+            $glob = glob($root . '\\python.exe') ?: [];
+            foreach ($glob as $exe) {
+                if (!in_array($exe, $found, true)) {
+                    $found[] = $exe;
+                }
+            }
+            $glob = glob($root . '\\Python*\\python.exe') ?: [];
+            foreach ($glob as $exe) {
+                if (!in_array($exe, $found, true)) {
+                    $found[] = $exe;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /** @return list<string> */
