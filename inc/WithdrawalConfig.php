@@ -47,7 +47,7 @@ final class WithdrawalConfig
     public static function save(array $data, ?int $adminId = null): array
     {
         if (!db_table_exists('withdrawal_config')) {
-            throw new RuntimeException('withdrawal_config 테이블이 없습니다. migrate_withdrawal_wallet.php 를 실행하세요.');
+            throw new RuntimeException('withdrawal_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
         $cfg = [

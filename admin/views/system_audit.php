@@ -88,7 +88,7 @@ function audit_page_url(string $base, int $page, string $q, string $actor, strin
 	<?php if ($needsMigrate) : ?>
 	<div class="alert alert-warning p-5 mb-8">
 		<strong>감사 로그 테이블이 없습니다.</strong>
-		<div class="fs-7 mt-2">서버에서 <code>php migrate_audit.php</code> 를 실행하세요.</div>
+		<div class="fs-7 mt-2">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 	</div>
 	<?php elseif ($listError !== null) : ?>
 	<div class="alert alert-danger p-5 mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>

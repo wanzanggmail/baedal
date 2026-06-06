@@ -1,4 +1,4 @@
--- 콘텐츠: 공지사항 (정산·출금과 무관)
+-- 콘텐츠: 공지·배너 (php migrate.php)
 CREATE TABLE IF NOT EXISTS `content_notices` (
     `id`            INT UNSIGNED    NOT NULL AUTO_INCREMENT,
     `public_id`     VARCHAR(32)     NOT NULL COMMENT '표시용 ID (nt-YYYYMMDD-###)',

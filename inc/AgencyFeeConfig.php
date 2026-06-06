@@ -63,7 +63,7 @@ final class AgencyFeeConfig
     public static function save(array $data, ?int $adminId = null): array
     {
         if (!self::tableReady()) {
-            throw new RuntimeException('deduction_global_config 컬럼이 없습니다. migrate_agency_fee_config.php 를 실행하세요.');
+            throw new RuntimeException('deduction_global_config 컬럼이 없습니다. php migrate.php 를 실행하세요.');
         }
 
         $cfg = [

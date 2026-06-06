@@ -61,12 +61,12 @@
 | `withdrawal/settings` | 출금 정책 | **DB** | `WithdrawalConfig`, `withdrawal_config.php` | super · 보증금·건당 수수료 |
 | `withdrawal/download` | 출금 다운로드 | **DB** | `withdrawal_download_file.php`, `ShinhanTransferFile` | |
 | `withdrawal/complete` | 처리 완료 | **DB** | `Withdrawal` | |
-| `content/notices` | 공지 | **DB** | `Notice`, `notices.php` | migrate: `migrate_content.php` |
+| `content/notices` | 공지 | **DB** | `Notice`, `notices.php` | `php migrate.php` |
 | `content/banners` | 배너 | **DB** | `Banner`, `banners.php`, `banner_upload.php` | |
 | `riders/list`, `riders/detail` | 라이더 | **DB** | `riders.php`, `rider_action.php` | 은행 목록: `system_codes` |
 | `system/admins` | 관리자·권한 | **DB** | `AdminAccount`, `admins.php` | super 전용 |
 | `system/codes` | 코드/마스터 | **DB** | `SystemCode`, `codes.php` | super 전용 |
-| `system/audit` | 감사 로그 | **DB** | `AuditLog` | migrate: `migrate_audit.php` |
+| `system/audit` | 감사 로그 | **DB** | `AuditLog` | `php migrate.php` |
 
 ---
 
@@ -182,7 +182,7 @@
 | platform | `baemin` \| `coupang` \| `other` |
 | 파서 | `inc/XlsxParser.php` |
 | 파일 열기 암호 | `XlsxDecrypt` + `SettlementExcelConfig` (DB·`.env`) · 복호화: `scripts/decrypt_xlsx.py` (`msoffcrypto-tool`) |
-| migrate | `migrate_settlement.php`, `migrate_settlement_excel_config.php` |
+| migrate | `php migrate.php` (`sql/*.sql` 통합) |
 | 권한 | 조회: settlement, operation, super / 업로드: settlement, super |
 
 #### 정산 반영·수수료 내역
@@ -204,14 +204,13 @@
 | 라이더 상세 | `settlement/fee-detail?cycle=` | 본인만 조회 |
 
 | API | `admin/api/settlement_apply.php` (POST upload_id) |
-| migrate | `migrate_settlement_ledger.php`, `sql/settlement_ledger.sql` |
+| migrate | `php migrate.php` |
 | 감사 | `settlement.apply` → `settlement_rider_cycles` |
 
 수수료 산출: **대행** `AgencyFeeConfig`(적립일수·건당 정액) + `deduction_global_config` 비율(원천·고용보험) + 동일 `applied_date` 의 `deduction_entries`.
 
 ### 5.5 정산·출금 일원화
 
-> **자동 일일정산 메뉴는 제거됨.** `DailySettlement` / `settlement_daily_auto.php` 코드는 레거시로 남아 있으나 UI·route에서 사용하지 않음.  
 > 정산 데이터 → 지갑 반영은 **`SettlementLedger::applyUpload()` → `RiderWallet::credit()`** 로 처리.
 
 #### 지갑 (`rider_wallets`)
@@ -221,7 +220,7 @@
 | `balance` | 누적 잔액 (정산 반영 전 임시·수동 credit 가능) |
 | `accrued_days` | 쌓인 정산 **일수** (출금 수수료 구간 판단) |
 
-migrate: `migrate_withdrawal_wallet.php`
+스키마: `php migrate.php`
 
 #### 출금 정책 (`withdrawal_config` — 단일 row)
 
@@ -306,17 +305,10 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 
 | 스크립트 | 대상 |
 |----------|------|
-| `seed.php` / `seed.sql` | admins, system_codes, deduction/daily 설정 초기값 |
-| `migrate_content.php` | content_notices, content_banners |
-| `migrate_settlement.php` | settlement_daily_riders 등 |
-| `migrate_settlement_ledger.php` | settlement_rider_cycles, settlement_fee_items |
-| `migrate_settlement_excel_config.php` | settlement_excel_config (플랫폼별 열기 암호) |
-| `migrate_agency_fee_config.php` | deduction_global_config 대행 수수료 컬럼 |
-| `migrate_daily_settlement.php` | withdrawal_requests (구) |
-| `migrate_withdrawal_wallet.php` | withdrawal_config, rider_wallets, accrued_days 컬럼 |
-| `migrate_audit.php` | audit_logs (있으면 SKIP) |
+| `php migrate.php` | `sql/*.sql` — 콘텐츠·정산·출금 지갑·엑셀 암호·감사 로그 등 (멱등) |
+| `php seed.php` / `seed.sql` | admins, system_codes, deduction_global_config 초기값 |
 
-운영 배포 후 seed/migrate 스크립트 **접근 차단** 권장.
+운영 배포 후 `migrate.php`·`seed.php` **웹 접근 차단** 권장 (GitHub Actions rsync에서 제외).
 
 ---
 

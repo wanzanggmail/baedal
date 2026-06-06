@@ -1,5 +1,5 @@
 -- 정산 완료·수수료 내역 (라이더별 정산 사이클)
--- 실행: php migrate_settlement_ledger.php
+-- 실행: php migrate.php
 
 CREATE TABLE IF NOT EXISTS `settlement_rider_cycles` (
     `id`               INT UNSIGNED     NOT NULL AUTO_INCREMENT,

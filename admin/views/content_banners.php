@@ -48,7 +48,7 @@ $needsMigrate = $listError !== null
 
 	<?php if ($needsMigrate) : ?>
 	<div class="alert alert-warning mb-8">
-		<strong>DB 테이블이 없습니다.</strong> 서버에서 <code>php migrate_content.php</code> 를 실행한 뒤 새로고침하세요.
+		<strong>DB 테이블이 없습니다.</strong> 서버에서 <code>php migrate.php</code> 를 실행한 뒤 새로고침하세요.
 	</div>
 	<?php elseif ($listError !== null) : ?>
 	<div class="alert alert-danger mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>

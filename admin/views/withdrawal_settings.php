@@ -31,7 +31,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
 	<?php if ($needsMigrate) : ?>
-	<div class="alert alert-warning mb-8">서버에서 <code>php migrate_withdrawal_wallet.php</code> 를 실행하세요.</div>
+	<div class="alert alert-warning mb-8">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 	<?php else : ?>
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-wallet fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>

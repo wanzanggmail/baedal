@@ -35,13 +35,9 @@ rsync "${RSYNC_OPTS[@]}" \
   --exclude '.DS_Store' \
   --exclude 'Thumbs.db' \
   --exclude '*.log' \
-  --exclude 'check_content_db.php' \
-  --exclude 'migrate_content.php' \
-  --exclude 'migrate_settlement.php' \
+  --exclude 'migrate.php' \
   --exclude 'seed.php' \
-  --exclude 'seed_content.php' \
   --exclude 'seed.sql' \
-  --exclude 'seed_riders_from_settlement.php' \
   ./ "${DEST%/}/"
 
 echo "Done: $DEST"

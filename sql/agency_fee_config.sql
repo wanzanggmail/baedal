@@ -1,5 +1,5 @@
 -- 정산 선공제(대행 수수료) — 적립 일수 구간별 건당 정액 (신규 DB용)
--- 실행: php migrate_agency_fee_config.php
+-- 실행: php migrate.php
 
 CREATE TABLE IF NOT EXISTS `deduction_global_config` (
     `id`                       TINYINT UNSIGNED NOT NULL DEFAULT 1,

@@ -268,7 +268,7 @@ try {
 } catch (Throwable $e) {
     $msg = $e->getMessage();
     if (str_contains($msg, 'settlement_daily_riders')) {
-        $msg .= ' — migrate_settlement.php 를 한 번 실행해 주세요.';
+        $msg .= ' — php migrate.php 를 한 번 실행해 주세요.';
     }
     echo json_encode(['ok' => false, 'error' => 'DB 저장 오류: ' . $msg], JSON_UNESCAPED_UNICODE);
     exit;

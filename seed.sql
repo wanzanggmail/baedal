@@ -101,21 +101,9 @@ VALUES
   (1, 3.30, 9.12, 2.00);
 
 
--- ============================================================
--- 4. 자동 일일정산 설정 초기값
--- ============================================================
-INSERT IGNORE INTO daily_auto_config
-  (id, tax_withhold_pct, refund_reserve_pct, refund_reserve_fixed,
-   min_retain_amount, round_unit, skip_dup, skip_manual_pending)
-VALUES
-  (1, 3.30, 1.00, 30000, 50000, 1000, 1, 0);
-
-
 -- 완료 확인
 SELECT '✔ admins'               AS tbl, COUNT(*) AS rows FROM admins
 UNION ALL
 SELECT '✔ system_codes',                 COUNT(*)        FROM system_codes
 UNION ALL
-SELECT '✔ deduction_global_config',      COUNT(*)        FROM deduction_global_config
-UNION ALL
-SELECT '✔ daily_auto_config',            COUNT(*)        FROM daily_auto_config;
+SELECT '✔ deduction_global_config',      COUNT(*)        FROM deduction_global_config;

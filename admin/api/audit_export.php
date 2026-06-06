@@ -11,7 +11,7 @@ admin_require_login();
 if (!AuditLog::tableExists()) {
     http_response_code(503);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'audit_logs 테이블이 없습니다. migrate_audit.php 를 실행하세요.';
+    echo 'audit_logs 테이블이 없습니다. php migrate.php 를 실행하세요.';
     exit;
 }
 

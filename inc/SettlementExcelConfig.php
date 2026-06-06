@@ -166,7 +166,7 @@ final class SettlementExcelConfig
     public static function save(array $passwords, ?int $adminId = null): array
     {
         if (!self::tableExists()) {
-            throw new RuntimeException('settlement_excel_config 테이블이 없습니다. migrate_settlement_excel_config.php 를 실행하세요.');
+            throw new RuntimeException('settlement_excel_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
         foreach (self::PLATFORMS as $platform) {

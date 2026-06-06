@@ -405,10 +405,10 @@ final class Withdrawal
         }
 
         if (!db_table_exists('withdrawal_requests')) {
-            throw new RuntimeException('출금 테이블이 없습니다. migrate_daily_settlement.php 를 실행하세요.');
+            throw new RuntimeException('출금 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
         if (!db_table_exists('rider_wallets')) {
-            throw new RuntimeException('지갑 테이블이 없습니다. migrate_withdrawal_wallet.php 를 실행하세요.');
+            throw new RuntimeException('지갑 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
         $rider = db_row(

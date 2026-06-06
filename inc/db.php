@@ -7,11 +7,11 @@ declare(strict_types=1);
  * 환경 변수 > 아래 기본값 순으로 적용됩니다.
  * 운영 서버에서는 Apache SetEnv 또는 .env 파일(별도 로더)로 덮어 쓰세요.
  */
-define('DB_HOST',    getenv('DB_HOST')    ?: '13.124.45.107');
+define('DB_HOST',    getenv('DB_HOST')    ?: '127.0.0.1');
 define('DB_PORT',    (int)(getenv('DB_PORT')    ?: 3306));
 define('DB_NAME',    getenv('DB_NAME')    ?: 'my_web_db');
-define('DB_USER',    getenv('DB_USER')    ?: 'dev_user');
-define('DB_PASS',    getenv('DB_PASS')    ?: 'ehRoql1!');
+define('DB_USER',    getenv('DB_USER')    ?: 'root');
+define('DB_PASS',    getenv('DB_PASS')    ?: '');
 define('DB_CHARSET', getenv('DB_CHARSET') ?: 'utf8mb4');
 
 /**

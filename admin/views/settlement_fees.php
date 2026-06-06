@@ -59,7 +59,7 @@ $detailBase .= str_contains($detailBase, '?') ? '&' : '?';
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
 	<?php if ($needsMigrate) : ?>
-	<div class="alert alert-warning mb-8">서버에서 <code>php migrate_settlement_ledger.php</code> 를 실행하세요.</div>
+	<div class="alert alert-warning mb-8">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 	<?php elseif ($listError !== null) : ?>
 	<div class="alert alert-danger mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>
 	<?php else : ?>

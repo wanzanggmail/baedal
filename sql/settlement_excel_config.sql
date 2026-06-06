@@ -1,5 +1,5 @@
 -- 정산 엑셀 파일 열기 암호 (플랫폼별)
--- 실행: php migrate_settlement_excel_config.php
+-- 실행: php migrate.php
 
 CREATE TABLE IF NOT EXISTS `settlement_excel_config` (
     `platform`      VARCHAR(20)  NOT NULL COMMENT 'baemin|coupang|other',

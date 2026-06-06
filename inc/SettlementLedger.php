@@ -30,7 +30,7 @@ final class SettlementLedger
     public static function applyUpload(int $uploadId, ?int $adminId = null): array
     {
         if (!self::tableExists()) {
-            throw new RuntimeException('정산 수수료 테이블이 없습니다. migrate_settlement_ledger.php 를 실행하세요.');
+            throw new RuntimeException('정산 수수료 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
         $upload = db_row(

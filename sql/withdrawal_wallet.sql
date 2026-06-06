@@ -1,5 +1,5 @@
 -- 출금 지갑·설정 (정산 일원화 전 출금 전용)
--- 실행: php migrate_withdrawal_wallet.php
+-- 실행: php migrate.php
 
 CREATE TABLE IF NOT EXISTS `withdrawal_config` (
     `id`                  TINYINT UNSIGNED NOT NULL DEFAULT 1,

@@ -91,7 +91,8 @@ Apache/가상호스트·DB(RDS) 설정은 그대로 두고, **코드만** Git과
 cp .env.example .env    # 이미 .env 있으면 생략
 mkdir -p uploads/banners
 chmod -R u+rwX uploads
-php migrate_content.php   # 공지·배너 테이블
+php migrate.php   # 스키마 (멱등, base_schema.sql 포함)
+php seed.php      # 초기 관리자·코드 (최초 1회)
 
 # 정산 xlsx 업로드·암호 해제 (필수)
 sudo dnf install -y php-zip || sudo yum install -y php-zip
@@ -99,6 +100,16 @@ sudo systemctl restart httpd
 php -m | grep zip   # "zip" 한 줄 출력되면 OK
 sudo -u apache /usr/bin/python3 -m pip install --user msoffcrypto-tool
 ```
+
+---
+
+## DB 데이터가 비었을 때 (복구)
+
+1. MySQL/RDS에서 **새 DB·계정** 생성 후 서버 `.env` 갱신 (유출된 비밀번호는 즉시 폐기)
+2. `DEPLOY_PATH`에서 `php migrate.php` → `php seed.php`
+3. 관리자 로그인 (`admin` / `Admin1234!`) → **시스템 관리 → 정산 엑셀 암호** 재등록
+4. 라이더·정산 엑셀 **재업로드** (백업 없으면 수동 재입력)
+5. `seed.php` 실행 후 **파일 삭제**
 
 ---
 

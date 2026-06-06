@@ -162,23 +162,6 @@ if ($dgc) {
 }
 
 // ================================================================
-// 4. 자동 일일정산 설정 초기값 (없을 때만)
-// ================================================================
-seed_log("\n[4] 자동 일일정산 설정 초기값");
-$dac = db_row('SELECT id FROM daily_auto_config LIMIT 1');
-if ($dac) {
-    seed_log("  SKIP  daily_auto_config (이미 존재)");
-} else {
-    db_insert(
-        'INSERT INTO daily_auto_config
-            (tax_withhold_pct, refund_reserve_pct, refund_reserve_fixed,
-             min_retain_amount, round_unit, skip_dup, skip_manual_pending)
-         VALUES (3.30, 1.00, 30000, 50000, 1000, 1, 0)'
-    );
-    seed_log("  OK    daily_auto_config 초기값 삽입");
-}
-
-// ================================================================
 // 완료
 // ================================================================
 seed_log("\n====================================");
