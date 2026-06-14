@@ -1,101 +1,78 @@
-# 배달 정산 — 관리자(백오피스) 개발
+# 도깨비 배달 — 관리자·라이더 백오피스
+
+Metronic 8.3.3 + PHP + MariaDB/MySQL.  
+**기능·권한·DB 규칙의 기준 문서는 [LOGIC.md](LOGIC.md)** 입니다. 화면/API를 바꿀 때 해당 섹션도 함께 갱신하세요.
+
+---
+
+## 문서 맵
+
+| 문서 | 내용 |
+|------|------|
+| **[LOGIC.md](LOGIC.md)** | 메뉴별 구현 상태, RBAC, 정산·출금·지갑 규칙, API·테이블, migrate/seed |
+| **[DEPLOY.md](DEPLOY.md)** | GitHub Actions → rsync 배포, `.env`, 서버 최초 설정, DB 복구 |
+| **`.env.example`** | DB·정산 엑셀 암호 환경 변수 예시 (실제 값은 `.env`, Git 제외) |
+
+아래 Phase 체크리스트는 **초기 기획용**이며, 실제 진행 상황은 **LOGIC.md §3** 표가 더 정확합니다.
+
+---
+
+## 로컬·서버 공통 — DB 준비
+
+```bash
+# 프로젝트 루트
+cp .env.example .env          # 필요 시 DB 접속 정보 입력 (없으면 inc/db.php 기본값)
+php migrate.php               # sql/base_schema.sql → 확장 테이블 (멱등)
+php seed.php                  # 관리자·system_codes·차감 기본값 (최초 1회)
+```
+
+- 개발 로그인: `admin` / `Admin1234!` (seed 후 비밀번호 변경 권장)
+- DB 연결: `inc/env.php`가 루트 `.env` 로드 → `inc/db.php`
+- 정산 xlsx: `php-zip` + `msoffcrypto-tool` (DEPLOY.md 참고)
+
+---
 
 ## GitHub → 실서버 배포
 
-`main` / `master`에 push하면 GitHub Actions가 서버로 파일을 동기화합니다.  
-설정 방법: **[DEPLOY.md](DEPLOY.md)** (SSH 시크릿, `.env`는 서버에만 둠).
+`main` / `master` push 시 GitHub Actions가 rsync로 동기화.  
+SSH 시크릿·경로·`.env` 유지: **[DEPLOY.md](DEPLOY.md)**
+
+배포 시 **제외**: `.env`, `uploads/`, `migrate.php`, `seed.php` (서버에만 둠)
 
 ---
 
-## 전제
+## 디렉터리 요약
 
-- **관리자 UI**: 이 저장소의 **Metronic 8.3.3 HTML** 레이아웃을 그대로 사용한다. (`assets/` 정적 리소스 + PHP로 레이아웃 분할)
-- **라이더용**: 별도 구성(추후). 본 README는 **관리자 프로그램** 진행 순서만 다룬다.
-- **인프라 목표**: AWS EC2(Apache, PHP), RDS MariaDB
-- **정산 업로드**: 우선 **플랫폼 1종** 엑셀부터 (쿠팡 또는 배민, 컬럼 매핑은 착수 초반에 확정)
+| 경로 | 역할 |
+|------|------|
+| `admin/` | 관리자 UI·API |
+| `rider/` | 라이더 PWA |
+| `inc/` | bootstrap, auth, 도메인 클래스, `MigrateRunner.php` |
+| `sql/` | `base_schema.sql` + 기능별 DDL |
+| `scripts/` | rsync, `decrypt_xlsx.py` |
+| `migrate.php` / `seed.php` | CLI 스키마·초기 데이터 |
+| `index.html` | 공개 랜딩 (Metronic 데모 HTML 폴더는 **제거됨**) |
+| `assets/` | Metronic **빌드 결과물** + `custom/landing.js`, `typedjs` |
 
-개발은 아래 **Phase 순서**대로 하나씩 끝내고 다음으로 넘어간다.
-
----
-
-## Phase 0 — 착수 전
-
-- [ ] RDS 스키마 초안 확정
-- [ ] 엑셀 1종 **컬럼 ↔ DB 매핑** 확정
-- [ ] Metronic에서 쓸 **관리자 마스터 페이지** 1개를 PHP 템플릿(헤더/사이드/푸터 include) 구조로 옮기는 방식 합의
+> Metronic `authentication/`, `apps/`, `src/` 등 데모·소스 트리는 용량만 차지해 삭제했습니다. 상세: **LOGIC.md §2 저장소 구조**.
 
 ---
 
-## Phase 1 — 뼈대
+## Metronic
 
-- [ ] EC2 / Apache / PHP / RDS 연결, 배포 경로·`base href`·`assets` 서빙 확인
-- [ ] DB 마이그레이션: 관리자, 라이더, 공통 코드 등 **최소 테이블**
-- [ ] 관리자 **로그인·세션** (Metronic 인증 화면 1종 연동)
-- [ ] **공통 레이아웃**: 헤더 / 사이드 / 푸터 PHP 분할 + **메뉴 골격**만 구성
+- 버전 **8.3.3** — `assets/css/style.bundle.css`, `assets/plugins/global/plugins.bundle.js`
+- 레이아웃: `inc/header.php`, `sidebar.php`, `shell_*.php`
 
 ---
 
-## Phase 2 — 라이더·마스터 (업로드 전에 필요)
+## Phase 로드맵 (초기 기획 — 상세는 LOGIC.md)
 
-- [ ] **라이더 관리**: 목록·등록·수정·상태, 엑셀과 연결할 **식별 키** 필드
-- [ ] **선공제(대행 수수료)** 등 단순 설정 화면
+**환경·로그인·레이아웃 → 라이더·설정 → 엑셀·집계 → 차감 → 프로모션 → 출금·공지·배너 → 통계**
 
----
-
-## Phase 3 — 정산 업로드 (핵심)
-
-- [ ] **엑셀 업로드** (1개 플랫폼): 저장 → 파싱 → 검증 → 오류 표시
-- [ ] **일·기사 단위 집계** 저장 및 관리자 **조회** (목록·필터·합계)
-
----
-
-## Phase 4 — 차감
-
-- [ ] **차감 내역 등록** (기사별, 반영 일자/월 기준은 정책대로)
-- [ ] 정산·잔액 조회에 **차감 반영**
-
----
-
-## Phase 5 — 프로모션 배치
-
-- [ ] 적용 **기간** + **구간별 건당 단가** 입력 UI (수동 입력 후 배치 실행)
-- [ ] **배치 실행·결과·이력** (재실행 정책은 화면/문서에 명시)
-
----
-
-## Phase 6 — 출금·운영
-
-- [ ] **출금 신청 목록**, **다운로드**(엑셀/CSV), **처리 완료**
-- [ ] **공지** 관리 (팝업 여부·기간)
-- [ ] **배너** 관리 (순서·기간·링크)
-
-*(라이더 앱이 없으면 이 단계에서 테스트 데이터로 검증 가능)*
-
----
-
-## Phase 7 — 통계·마무리
-
-- [ ] **통계** 페이지 (MVP: 기간·기사·플랫폼, 합계 위주)
-- [ ] **대시보드 요약** (선택)
-- [ ] 감사 로그·권한 세분화 (필요 시)
-- [ ] 통합 테스트, 운영 체크리스트
-
----
-
-## 순서 한 줄 요약
-
-**환경·로그인·레이아웃 → 라이더·설정 → 엑셀·집계 → 차감 → 프로모션 배치 → 출금·공지·배너 → 통계·다듬기**
-
----
-
-## Metronic 패키지 참고
-
-- 버전: **8.3.3** (HTML 데모)
-- 공통 스타일: `assets/plugins/global/plugins.bundle.css`, `assets/css/style.bundle.css`
-- 공통 스크립트: `assets/plugins/global/plugins.bundle.js`, `assets/js/scripts.bundle.js`
-
----
-
-## 라이더용(PWA 등)
-
-별도 레이아웃·저장소 또는 하위 경로에서 진행. 관리자 Phase가 어느 정도 안정된 뒤 연동하는 것을 권장한다.
+| Phase | 주요 항목 | LOGIC 참고 |
+|-------|-----------|------------|
+| 1 | 로그인, 레이아웃, migrate | §4, §7 |
+| 2 | 라이더, 선공제 설정 | §5.3, §5.6 |
+| 3 | 정산 업로드·이력·반영·선공제 | §5.4, §5.6 |
+| 4~6 | 출금, 공지, 배너, 라이더 | §5.5~§5.7 |
+| (예정) | 프로모션 배치, 통계·내보내기, 수동 차감 UI | §8 #10 — 구현 시 §9 |

@@ -13,6 +13,8 @@
 | **§4 교차 규칙**(역할, 코드 마스터, 감사)과 충돌 없는지 확인 | **§6 주의·미결**에 새 리스크가 있으면 추가 |
 | 목업 화면을 DB 연동할 때 §3 표의 상태를 `DB`로 바꿈 | migrate/seed 필요 여부 기록 |
 
+**에이전트·개발 공통:** 화면/API/DB/권한을 수정하는 **모든 작업**은 같은 변경 안에서 **본 문서(`LOGIC.md`)도 함께 갱신**한다. (프로젝트 규칙: `.cursor/rules/logic-md-sync.mdc`)
+
 **상태 표기**
 
 - **DB** — 실 DB + PHP 도메인 클래스/API 사용
@@ -38,7 +40,18 @@
 | `system_codes` | 은행·상태 등 **표시명/선택지** 마스터 (코드 값은 앱 전역에서 동일해야 함) |
 | `audit_logs` | 관리자 행위 기록 (실패 시 기능은 계속, 로그만 생략) |
 
-**DB 연결:** `inc/db.php` — `db_table_exists()`는 `information_schema` 사용 (`SHOW TABLES LIKE ?`는 사용 금지).
+**저장소 구조 (2026-05 정리):** Metronic **데모 HTML·`src/` 빌드 소스는 제거**됨. 런타임은 아래만 사용.
+
+| 경로 | 용도 |
+|------|------|
+| `admin/`, `rider/`, `inc/`, `sql/` | PHP 앱 |
+| `index.html` | 공개 랜딩 |
+| `assets/plugins/global/`, `assets/css/style.bundle.css`, `assets/js/scripts.bundle.js` | Metronic 번들 |
+| `assets/js/custom/landing.js`, `assets/plugins/custom/typedjs/` | 랜딩 전용 |
+| `assets/css/rider-mobile.css`, `rider-settlement-calendar.css`, `js/admin-datepickers.js` | admin·rider |
+| `assets/media/logos/`, `auth/`, `favicon/`, `banners/`, `svg/illustrations/landing.svg`, `svg/misc/octagon.svg` | UI·랜딩 이미지 |
+
+**DB 연결:** `inc/env.php` (루트 `.env`) → `inc/db.php` — Apache `SetEnv`가 있으면 `.env`보다 우선. `db_table_exists()`는 `information_schema` 사용 (`SHOW TABLES LIKE ?`는 사용 금지).
 
 ---
 
@@ -47,16 +60,12 @@
 | route | 화면 | 상태 | 도메인/API | 비고 |
 |-------|------|------|------------|------|
 | `dashboard` | 대시보드 | **DB** | `AdminDashboard` | `settlement_daily_riders`, `withdrawal_requests` 등 테이블 없으면 일부 0 |
-| `settlement/upload` | 엑셀 업로드 | **DB** | `settlement_upload.php`, `XlsxParser`, `XlsxDecrypt` | 파일 열기 암호 자동 해제 후 파싱 |
-| `settlement/upload-detail` | 업로드 상세 | **DB** | SQL 직접 | |
-| `settlement/history` | 업로드 이력 | **DB** | SQL 직접 | |
+| `settlement/upload` | 엑셀 업로드 | **DB** | `settlement_upload.php`, `XlsxParser`, `XlsxDecrypt` | 암호 자동 해제 · **중복 업로드 거부** (§5.4) |
+| `settlement/upload-detail` | 업로드 상세 | **DB** | SQL 직접 | 정산 반영·수수료·지갑 |
+| `settlement/history` | 업로드 이력 | **DB** | `settlement_history.php` | 기간·플랫폼·파일명 검색, 페이지네이션 |
 | `settlement/fees` | 정산 수수료 내역 | **DB** | `SettlementLedger::listAdmin` | 정산 반영 후 생성 |
 | `settlement/fee-detail` | 정산 수수료 상세 | **DB** | `SettlementLedger::find` | 항목별 차감 |
-| `settlement/parse-errors` | 파싱 오류 | **목업** | — | UI·샘플만 |
-| `promotion/*` | 프로모션 | **목업** | — | 규칙·배치·이력 UI만 |
-| `deduction/agency-fee` | 선공제(대행 수수료) | **DB** | `AgencyFeeConfig` | 적립일수·건당 정액 |
-| `stats/summary` | 종합 통계 | **목업** | — | |
-| `stats/export` | 데이터 내보내기 | **목업** | — | 다운로드 미구현 |
+| `deduction/agency-fee` | 선공제(대행 수수료) | **DB** | `AgencyFeeConfig` | 적립일수·건당 정액 · 전역 비율(`deduction_global_config`) |
 | `withdrawal/list` | 출금 목록 | **DB** | `Withdrawal`, `withdrawals.php` | 라이더 신청 → `pending` |
 | `withdrawal/settings` | 출금 정책 | **DB** | `WithdrawalConfig`, `withdrawal_config.php` | super · 보증금·건당 수수료 |
 | `withdrawal/download` | 출금 다운로드 | **DB** | `withdrawal_download_file.php`, `ShinhanTransferFile` | |
@@ -66,6 +75,7 @@
 | `riders/list`, `riders/detail` | 라이더 | **DB** | `riders.php`, `rider_action.php` | 은행 목록: `system_codes` |
 | `system/admins` | 관리자·권한 | **DB** | `AdminAccount`, `admins.php` | super 전용 |
 | `system/codes` | 코드/마스터 | **DB** | `SystemCode`, `codes.php` | super 전용 |
+| `system/settlement-excel` | 정산 엑셀 열기 암호 | **DB** | `SettlementExcelConfig`, `settlement_excel_config.php` | super, settlement |
 | `system/audit` | 감사 로그 | **DB** | `AuditLog` | `php migrate.php` |
 
 ---
@@ -86,12 +96,12 @@
 | role (DB enum) | 라벨 | 메뉴 접근 | 데이터 쓰기 |
 |----------------|------|-----------|-------------|
 | `super` | 최고 관리자 | 전체 | 전체 |
-| `operation` | 운영 | 대시보드, 통계, 정산(조회), 출금, 라이더, 콘텐츠 | `content`, `riders`, `withdrawal` |
-| `settlement` | 정산 | 대시보드, 통계, 정산, 프로모션, 차감, 출금(조회) | `settlement`, `promotion`, `deduction` |
+| `operation` | 운영 | 대시보드, 정산(조회), 출금, 라이더, 콘텐츠 | `content`, `riders`, `withdrawal` |
+| `settlement` | 정산 | 대시보드, 정산, 선공제(대행), 출금(조회) | `settlement`, `deduction` |
 | `admin` | 조회 전용 | 위 조회 가능 메뉴 + **감사 로그** | **없음** (모든 POST API 403) |
 
 - **페이지:** `admin/index.php` → `admin_can_access_route($route)` (`inc/auth.php`)
-- **API:** POST 시 `admin_deny_write_json('영역')` — 영역: `content` \| `riders` \| `withdrawal` \| `settlement` \| `promotion` \| `deduction` \| `system`
+- **API:** POST 시 `admin_deny_write_json('영역')` — 영역: `content` \| `riders` \| `withdrawal` \| `settlement` \| `deduction` \| `system`
 - **규칙 정의:** `admin_route_access_rules()`, `admin_can_write()` — **변경 시 이 문서 §4.2도 수정**
 
 ### 4.3 시스템 코드 (`system_codes`)
@@ -179,11 +189,15 @@
 
 | 항목 | 규칙 |
 |------|------|
-| platform | `baemin` \| `coupang` \| `other` |
-| 파서 | `inc/XlsxParser.php` |
-| 파일 열기 암호 | `XlsxDecrypt` + `SettlementExcelConfig` (DB·`.env`) · 복호화: `scripts/decrypt_xlsx.py` (`msoffcrypto-tool`) |
-| migrate | `php migrate.php` (`sql/*.sql` 통합) |
-| 권한 | 조회: settlement, operation, super / 업로드: settlement, super |
+| platform | `baemin` \| `coupang` \| `other` — **현재 파서·업로드 검증은 쿠팡이츠 일간 정산서만** (배민 미지원) |
+| 파서 | `inc/XlsxParser.php` (쿠팡이츠 일간 형식) |
+| 파일 열기 암호 | `SettlementExcelConfig` (DB `settlement_excel_config` · `.env`) · **설정 UI:** `system/settlement-excel` · 복호화: `scripts/decrypt_xlsx.py` |
+| **중복 업로드** | 동일 **귀속일+플랫폼** 이미 있으면 거부. 동일 **파일명** 또는 **SHA256(`file_hash`)** 도 거부. 덮어쓰기 없음 — 재업로드 시 기존 건 삭제 후 |
+| **플랫폼 자동 감지** | 파일 선택 시 `settlement_upload_preview.php` → `SettlementPlatformDetect`. **파싱 성공 = 쿠팡이츠** 로 판단 (현재 파서 기준). 파일명·헤더·내용 키워드 보조 |
+| **플랫폼 불일치 차단** | 선택 platform ≠ 감지 결과(신뢰도 medium 이상)면 업로드 거부. `confirm_platform_mismatch=1` 로 강제 업로드 가능. `other`는 검증 생략 |
+| 이력 화면 | `settlement/history` — 필터·목록·상세 링크 |
+| migrate | `php migrate.php` (`sql/base_schema.sql` → 확장 SQL) |
+| 권한 | 조회: settlement, operation, super / 업로드 POST: settlement, super |
 
 #### 정산 반영·수수료 내역
 
@@ -305,7 +319,7 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 
 | 스크립트 | 대상 |
 |----------|------|
-| `php migrate.php` | `sql/*.sql` — 콘텐츠·정산·출금 지갑·엑셀 암호·감사 로그 등 (멱등) |
+| `php migrate.php` | `inc/MigrateRunner.php` — **`sql/base_schema.sql`** (admins, riders, settlement_uploads, …) → `content_tables`, `settlement_*`, `withdrawal_wallet`, `agency_fee_config`, `audit_tables` + ALTER (멱등) |
 | `php seed.php` / `seed.sql` | admins, system_codes, deduction_global_config 초기값 |
 
 운영 배포 후 `migrate.php`·`seed.php` **웹 접근 차단** 권장 (GitHub Actions rsync에서 제외).
@@ -315,14 +329,14 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 ## 8. 주의·미결 (로직 리스크)
 
 1. **상태값 이중 정의** — `Withdrawal::STATUS_LABELS`, `Notice` 상태, `system_codes`가 따로 있음. **코드 값 변경 시 세 곳을 함께 확인.**
-2. **목업 화면의 상태명** — `promotion`, `deduction`, `stats` UI는 DB enum과 다를 수 있음. 연동 시 §5와 맞출 것.
-3. **operation의 정산 메뉴** — route 접근은 허용, 업로드 POST는 settlement만.
-4. **settlement 역할의 출금** — 목록·다운로드 화면은 열리나 상태 변경 POST는 operation만.
-5. **지갑 잔액** — 정산 반영은 업로드 상세 「정산 반영 · 수수료·지갑」 또는 `SettlementLedger::applyUpload()`. 테스트용 수동 반영: `RiderWallet::credit()` 또는 DB 직접.
-6. **적립 일수(`accrued_days`)** — 정산 반영 시 `RiderWallet::credit($net, true)` 로 +1.
-7. **감사 로그** — `before_value` 미사용(대부분 after JSON만).
-8. **코드 마스터 vs PHP enum** — DB enum과 `system_codes` 불일치 시 JOIN/라벨 깨짐.
-9. **sidebar** — 권한 없는 메뉴 링크는 403 (숨김 optional).
+2. **operation의 정산 메뉴** — route 접근은 허용, 업로드 POST는 settlement만.
+3. **settlement 역할의 출금** — 목록·다운로드 화면은 열리나 상태 변경 POST는 operation만.
+4. **지갑 잔액** — 정산 반영은 업로드 상세 「정산 반영 · 수수료·지갑」 또는 `SettlementLedger::applyUpload()`. 테스트용 수동 반영: `RiderWallet::credit()` 또는 DB 직접.
+5. **적립 일수(`accrued_days`)** — 정산 반영 시 `RiderWallet::credit($net, true)` 로 +1.
+6. **감사 로그** — `before_value` 미사용(대부분 after JSON만).
+7. **코드 마스터 vs PHP enum** — DB enum과 `system_codes` 불일치 시 JOIN/라벨 깨짐.
+8. **sidebar** — 권한 없는 메뉴 링크는 403 (숨김 optional).
+9. **미구현(메뉴 없음)** — 프로모션 배치, 종합 통계·엑셀 내보내기, 파싱 오류 전용 화면, 수동 차감 등록·자동 차감·할부 UI는 **목업 제거됨**. 필요 시 §9 체크리스트로 새로 추가.
 
 ---
 
@@ -342,5 +356,7 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-05-24 | 목업 화면 제거: 프로모션·통계·파싱 오류·차감(수동/자동/할부) UI — `deduction/agency-fee`만 유지 |
+| 2026-05-24 | 저장소 정리: Metronic 데모 HTML·`src/`·미사용 assets 제거, `rider_shell_end.php` 복구 |
 | 2026-05-24 | 출금 일원화: 자동 일일정산 메뉴 제거, 라이더 전액 출금·건당 수수료·보증금·withdrawal_config |
 | 2026-05-24 | 초안: RBAC, 감사, 코드 마스터, 콘텐츠·라이더·정산·출금·시스템 연동 상태 정리 |

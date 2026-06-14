@@ -86,7 +86,7 @@ $platformLabels = [
 						<div class="card-header pt-7">
 							<h3 class="card-title align-items-start flex-column">
 								<span class="card-label fw-bold text-gray-900">일간 정산서 업로드</span>
-								<span class="text-gray-500 mt-1 fw-semibold fs-6">배달의민족 일별 정산서(.xlsx) → DB 저장</span>
+								<span class="text-gray-500 mt-1 fw-semibold fs-6">쿠팡이츠 일별 정산서(.xlsx) → DB 저장</span>
 							</h3>
 						</div>
 						<div class="card-body pt-5">
@@ -104,22 +104,30 @@ $platformLabels = [
 
 							<form id="dailyUploadForm" class="form" enctype="multipart/form-data" accept-charset="UTF-8">
 								<div class="mb-6">
+									<label class="form-label required">파일</label>
+									<input type="file" class="form-control form-control-solid" name="file" id="xlsxFileInput" accept=".xlsx" />
+									<div class="form-text">xlsx 파일만 가능합니다. (최대 20MB) · 선택 시 플랫폼을 자동 감지합니다.</div>
+								</div>
+								<div id="platformDetectBanner" class="d-none mb-6"></div>
+								<div class="mb-6">
 									<label class="form-label required">플랫폼</label>
-									<select class="form-select form-select-solid" name="platform">
-										<option value="baemin" selected>배달의민족</option>
-										<option value="coupang">쿠팡이츠</option>
+									<select class="form-select form-select-solid" name="platform" id="platformSelect">
+										<option value="coupang" selected>쿠팡이츠</option>
+										<option value="baemin">배달의민족</option>
 										<option value="other">기타</option>
 									</select>
+									<div class="form-text">파일 분석 결과에 따라 자동 선택됩니다. 잘못 감지된 경우에만 수동으로 변경하세요.</div>
+								</div>
+								<div id="platformMismatchConfirmWrap" class="d-none mb-6">
+									<label class="form-check form-check-custom form-check-solid">
+										<input class="form-check-input" type="checkbox" name="confirm_platform_mismatch" id="confirmPlatformMismatch" value="1" />
+										<span class="form-check-label text-warning fw-semibold">플랫폼이 맞습니다 (감지 결과와 다를 때 강제 업로드)</span>
+									</label>
 								</div>
 								<div class="mb-6">
 									<label class="form-label">정산 귀속일 <span class="text-muted fs-7">(파일명 날짜로 자동 입력)</span></label>
 									<input type="date" class="form-control form-control-solid" name="settlement_date" id="settlementDateInput" />
 									<div class="form-text">파일명에 날짜가 없는 경우에만 수동 입력하세요.</div>
-								</div>
-								<div class="mb-6">
-									<label class="form-label required">파일</label>
-									<input type="file" class="form-control form-control-solid" name="file" id="xlsxFileInput" accept=".xlsx" />
-									<div class="form-text">xlsx 파일만 가능합니다. (최대 20MB)</div>
 								</div>
 								<div class="d-flex justify-content-end">
 									<button type="submit" class="btn btn-primary" id="uploadBtn">
@@ -157,7 +165,7 @@ $platformLabels = [
 									<tbody>
 										<?php
 										$cols = [
-											['B','라이선스 ID','배달의민족 라이더 외부 ID'],
+											['B','라이선스 ID','쿠팡이츠 라이더 ID'],
 											['C','이름','라이더명+코드'],
 											['E','총 정산예정 금액','(원)'],
 											['F','총 정산 오더수','건'],
@@ -199,12 +207,15 @@ $platformLabels = [
 			</div>
 
 			<!--begin::업로드 이력-->
-			<?php if (!empty($recentUploads)) : ?>
 			<div class="card card-flush mt-8">
-				<div class="card-header pt-7">
+				<div class="card-header pt-7 d-flex flex-stack">
 					<h3 class="card-title">최근 업로드 이력</h3>
+					<a href="<?= htmlspecialchars(admin_url('settlement/history'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">전체 보기</a>
 				</div>
 				<div class="card-body pt-0">
+					<?php if ($recentUploads === []) : ?>
+					<div class="text-center text-muted py-10">아직 업로드 이력이 없습니다.</div>
+					<?php else : ?>
 					<div class="table-responsive">
 						<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-3">
 							<thead>
@@ -250,9 +261,9 @@ $platformLabels = [
 							</tbody>
 						</table>
 					</div>
+					<?php endif; ?>
 				</div>
 			</div>
-			<?php endif; ?>
 			<!--end::업로드 이력-->
 		</div>
 		<!--end::업로드 탭-->
@@ -279,9 +290,138 @@ $platformLabels = [
 (function () {
 	'use strict';
 
-	// 파일 선택 시 날짜 자동 추출
-	const fileInput = document.getElementById('xlsxFileInput');
-	const dateInput = document.getElementById('settlementDateInput');
+	const platformLabels = {
+		baemin: '배달의민족',
+		coupang: '쿠팡이츠',
+		other: '기타',
+	};
+
+	const fileInput   = document.getElementById('xlsxFileInput');
+	const dateInput   = document.getElementById('settlementDateInput');
+	const platformSel = document.getElementById('platformSelect');
+	const detectBanner = document.getElementById('platformDetectBanner');
+	const mismatchWrap = document.getElementById('platformMismatchConfirmWrap');
+	const mismatchChk  = document.getElementById('confirmPlatformMismatch');
+	const form    = document.getElementById('dailyUploadForm');
+	const btn     = document.getElementById('uploadBtn');
+	const result  = document.getElementById('uploadResult');
+
+	const previewApiUrl = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload_preview.php', ENT_QUOTES, 'UTF-8') ?>';
+	const uploadApiUrl  = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload.php', ENT_QUOTES, 'UTF-8') ?>';
+
+	let lastDetected = null;
+	let lastConfidence = 'none';
+	let previewToken = 0;
+
+	function resetPlatformDetect() {
+		lastDetected = null;
+		lastConfidence = 'none';
+		if (detectBanner) {
+			detectBanner.className = 'd-none mb-6';
+			detectBanner.innerHTML = '';
+		}
+		updateMismatchUi();
+	}
+
+	function updateMismatchUi() {
+		if (!platformSel || !mismatchWrap || !mismatchChk) return;
+
+		const selected = platformSel.value;
+		const showMismatch = lastDetected !== null
+			&& lastDetected !== 'other'
+			&& selected !== lastDetected
+			&& lastConfidence !== 'none';
+
+		mismatchWrap.classList.toggle('d-none', !showMismatch);
+		if (!showMismatch) {
+			mismatchChk.checked = false;
+		}
+	}
+
+	function renderDetectBanner(data) {
+		if (!detectBanner) return;
+
+		if (!data.ok) {
+			detectBanner.className = 'alert alert-danger d-flex align-items-start p-5 mb-6';
+			detectBanner.innerHTML = `<i class="ki-duotone ki-cross-circle fs-2hx text-danger me-4"><span class="path1"></span><span class="path2"></span></i>
+				<div><span class="fw-bold">파일 분석 실패</span><div class="text-gray-700 fs-7 mt-1">${escHtml(data.error || '알 수 없는 오류')}</div></div>`;
+			return;
+		}
+
+		const detected = data.detected_platform;
+		const label = data.detected_label || (detected ? platformLabels[detected] : '');
+		const conf = data.confidence || 'none';
+		const rows = data.parse_row_count || 0;
+		const mismatch = !!data.mismatch;
+
+		if (!detected) {
+			detectBanner.className = 'alert alert-warning d-flex align-items-start p-5 mb-6';
+			detectBanner.innerHTML = `<i class="ki-duotone ki-information-5 fs-2hx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+				<div><span class="fw-bold">플랫폼을 자동으로 판별하지 못했습니다</span>
+				<div class="text-gray-700 fs-7 mt-1">플랫폼을 직접 선택한 뒤 업로드해 주세요.${rows > 0 ? ` (파싱 가능 ${rows}명)` : ''}</div></div>`;
+			return;
+		}
+
+		const alertClass = mismatch ? 'alert-warning' : (conf === 'high' ? 'alert-success' : 'alert-primary');
+		const iconClass  = mismatch ? 'text-warning' : (conf === 'high' ? 'text-success' : 'text-primary');
+		const title = mismatch
+			? `감지: ${escHtml(label)} — 선택한 플랫폼과 다릅니다`
+			: `이 파일은 ${escHtml(label)} 정산서로 감지되었습니다`;
+
+		let reasonsHtml = '';
+		if (Array.isArray(data.reasons) && data.reasons.length > 0) {
+			reasonsHtml = `<ul class="mb-0 mt-2 ps-5 fs-7 text-gray-700">${data.reasons.slice(0, 4).map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>`;
+		}
+
+		detectBanner.className = `alert ${alertClass} d-flex align-items-start p-5 mb-6`;
+		detectBanner.innerHTML = `<i class="ki-duotone ki-shield-tick fs-2hx ${iconClass} me-4"><span class="path1"></span><span class="path2"></span></i>
+			<div><span class="fw-bold">${title}</span>
+			<div class="text-gray-700 fs-7 mt-1">${rows > 0 ? `파싱 가능 라이더 ${rows}명 · ` : ''}신뢰도 ${escHtml(conf)}</div>
+			${reasonsHtml}</div>`;
+	}
+
+	async function runPreview() {
+		const file = fileInput?.files[0];
+		resetPlatformDetect();
+		if (!file) return;
+
+		const token = ++previewToken;
+		if (detectBanner) {
+			detectBanner.className = 'alert alert-light d-flex align-items-center p-5 mb-6';
+			detectBanner.innerHTML = '<span class="spinner-border spinner-border-sm me-3"></span><span class="text-gray-700">파일 분석 중…</span>';
+		}
+
+		const fd = new FormData();
+		fd.append('file', file);
+		if (platformSel) {
+			fd.append('platform', platformSel.value);
+		}
+
+		try {
+			const resp = await fetch(previewApiUrl, { method: 'POST', body: fd });
+			const data = await resp.json();
+			if (token !== previewToken) return;
+
+			if (data.ok && data.settlement_date && dateInput && !dateInput.value) {
+				dateInput.value = data.settlement_date;
+			}
+
+			if (data.ok && data.detected_platform && platformSel) {
+				lastDetected = data.detected_platform;
+				lastConfidence = data.confidence || 'none';
+				if (lastConfidence !== 'none') {
+					platformSel.value = data.detected_platform;
+				}
+			}
+
+			renderDetectBanner(data);
+			updateMismatchUi();
+		} catch (err) {
+			if (token !== previewToken) return;
+			renderDetectBanner({ ok: false, error: err.message });
+		}
+	}
+
 	if (fileInput && dateInput) {
 		fileInput.addEventListener('change', function () {
 			const name = this.files[0]?.name || '';
@@ -289,13 +429,23 @@ $platformLabels = [
 			if (m) {
 				dateInput.value = `${m[1]}-${m[2]}-${m[3]}`;
 			}
+			runPreview();
 		});
 	}
 
-	// 업로드 폼 제출
-	const form    = document.getElementById('dailyUploadForm');
-	const btn     = document.getElementById('uploadBtn');
-	const result  = document.getElementById('uploadResult');
+	if (platformSel) {
+		platformSel.addEventListener('change', function () {
+			updateMismatchUi();
+			const file = fileInput?.files[0];
+			if (file) {
+				runPreview();
+			}
+		});
+	}
+
+	if (mismatchChk) {
+		mismatchChk.addEventListener('change', updateMismatchUi);
+	}
 
 	if (!form) return;
 
@@ -315,8 +465,7 @@ $platformLabels = [
 		const fd = new FormData(form);
 
 		try {
-			const apiUrl = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload.php', ENT_QUOTES, 'UTF-8') ?>';
-			const resp = await fetch(apiUrl, {
+			const resp = await fetch(uploadApiUrl, {
 				method: 'POST',
 				body: fd,
 			});
@@ -339,8 +488,21 @@ $platformLabels = [
 				html += `</ul></div>`;
 				showResult('', html, true);
 
-				// 페이지 새로고침으로 이력 갱신
 				setTimeout(() => location.reload(), 2500);
+			} else if (data.code === 'platform_mismatch') {
+				lastDetected = data.detected_platform || null;
+				lastConfidence = data.confidence || 'high';
+				updateMismatchUi();
+				if (mismatchWrap) {
+					mismatchWrap.classList.remove('d-none');
+					mismatchWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+				}
+				let msg = data.error || '플랫폼이 일치하지 않습니다.';
+				if (data.detected_label) {
+					msg += ` (감지: ${data.detected_label})`;
+				}
+				msg += ' 아래 「플랫폼 확인 후 강제 업로드」를 체크하거나 플랫폼을 변경해 주세요.';
+				showResult('danger', msg);
 			} else {
 				showResult('danger', '오류: ' + (data.error || '알 수 없는 오류'));
 			}

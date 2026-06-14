@@ -13,6 +13,7 @@ require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/XlsxParser.php';
 require_once INC_PATH . '/XlsxDecrypt.php';
 require_once INC_PATH . '/SettlementExcelConfig.php';
+require_once INC_PATH . '/SettlementPlatformDetect.php';
 require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -27,11 +28,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 admin_deny_write_json('settlement');
 
-$platform  = trim((string) ($_POST['platform'] ?? 'baemin'));
+$platform  = trim((string) ($_POST['platform'] ?? 'coupang'));
 $dateInput = trim((string) ($_POST['settlement_date'] ?? ''));
 
 if (!in_array($platform, ['baemin', 'coupang', 'other'], true)) {
-    $platform = 'baemin';
+    $platform = 'coupang';
 }
 
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
@@ -74,7 +75,17 @@ if (count($parts) >= 3) {
     $regionName = implode('_', array_slice($parts, 1, -1));
 }
 
-$metaJson = json_encode(['team' => $teamName, 'region' => $regionName], JSON_UNESCAPED_UNICODE);
+$fileHash = hash_file('sha256', $tmpPath) ?: '';
+$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash);
+if ($dupError !== null) {
+    echo json_encode(['ok' => false, 'error' => $dupError, 'duplicate' => true], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$metaJson = json_encode(
+    ['team' => $teamName, 'region' => $regionName, 'file_hash' => $fileHash],
+    JSON_UNESCAPED_UNICODE
+);
 
 $uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
 $passwords      = SettlementExcelConfig::passwordsToTry(
@@ -97,6 +108,29 @@ try {
     echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+$analysis     = SettlementPlatformDetect::analyze($parser, $origName, $settlementDate);
+$forceConfirm = (string) ($_POST['confirm_platform_mismatch'] ?? '') === '1';
+$mismatchErr  = SettlementPlatformDetect::mismatchError($platform, $analysis, $forceConfirm);
+if ($mismatchErr !== null) {
+    $parser->close();
+    XlsxDecrypt::cleanupTemps();
+    $labels = SettlementPlatformDetect::labels();
+    echo json_encode([
+        'ok'                => false,
+        'error'             => $mismatchErr,
+        'code'              => 'platform_mismatch',
+        'detected_platform' => $analysis['platform'],
+        'detected_label'    => $analysis['platform'] !== null
+            ? ($labels[$analysis['platform']] ?? $analysis['platform'])
+            : '',
+        'selected_platform' => $platform,
+        'confidence'        => $analysis['confidence'],
+        'reasons'           => $analysis['reasons'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $parser->close();
 XlsxDecrypt::cleanupTemps();
 
@@ -117,40 +151,24 @@ try {
         $settlementDate,
         $origName,
         $metaJson,
+        $fileHash,
         $rows,
         $deductions,
         $adminId
     ): array {
-        // 동일 일자·플랫폼 일간 업로드가 있으면 덮어쓰기
-        $existing = db_row(
-            'SELECT id FROM settlement_uploads
-              WHERE kind = ? AND platform = ? AND settlement_date = ?
-              ORDER BY id DESC LIMIT 1',
-            ['daily', $platform, $settlementDate]
-        );
+        $dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash);
+        if ($dupError !== null) {
+            throw new RuntimeException($dupError);
+        }
 
         $totalRows = count($rows);
-
-        if ($existing) {
-            $uploadId = (int) $existing['id'];
-            db_execute(
-                'UPDATE settlement_uploads
-                    SET original_filename = ?, stored_path = ?, total_rows = ?,
-                        status = ?, operator_id = ?, updated_at = NOW()
-                  WHERE id = ?',
-                [$origName, $metaJson, $totalRows, 'parsed', $adminId, $uploadId]
-            );
-            db_execute('DELETE FROM settlement_daily_riders WHERE upload_id = ?', [$uploadId]);
-            db_execute('DELETE FROM settlement_weekly_deductions WHERE upload_id = ?', [$uploadId]);
-        } else {
-            $uploadId = db_insert(
-                'INSERT INTO settlement_uploads
-                    (kind, platform, original_filename, stored_path, settlement_date,
-                     total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
-                 VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
-                ['daily', $platform, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
-            );
-        }
+        $uploadId  = db_insert(
+            'INSERT INTO settlement_uploads
+                (kind, platform, original_filename, stored_path, settlement_date,
+                 total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
+            ['daily', $platform, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
+        );
 
         $inserted  = 0;
         $matched   = 0;
@@ -270,7 +288,8 @@ try {
     if (str_contains($msg, 'settlement_daily_riders')) {
         $msg .= ' — php migrate.php 를 한 번 실행해 주세요.';
     }
-    echo json_encode(['ok' => false, 'error' => 'DB 저장 오류: ' . $msg], JSON_UNESCAPED_UNICODE);
+    $isDup = str_contains($msg, '이미 업로드') || str_contains($msg, '이미 등록');
+    echo json_encode(['ok' => false, 'error' => $msg, 'duplicate' => $isDup], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -309,6 +328,56 @@ function settlement_parse_date($value): ?string
     $s = trim((string) $value);
     if (preg_match('/^\d{4}-\d{2}-\d{2}/', $s)) {
         return substr($s, 0, 10);
+    }
+
+    return null;
+}
+
+/**
+ * 동일 파일·동일 일자 정산 중복 업로드 여부
+ */
+function settlement_upload_duplicate_error(
+    string $platform,
+    string $settlementDate,
+    string $origName,
+    string $fileHash
+): ?string {
+    if (!db_table_exists('settlement_uploads')) {
+        return null;
+    }
+
+    $rows = db_rows(
+        'SELECT id, original_filename, stored_path
+           FROM settlement_uploads
+          WHERE kind = ? AND platform = ? AND settlement_date = ?
+          ORDER BY id DESC',
+        ['daily', $platform, $settlementDate]
+    );
+
+    foreach ($rows as $row) {
+        $existingId   = (int) ($row['id'] ?? 0);
+        $existingName = (string) ($row['original_filename'] ?? '');
+
+        if ($existingName === $origName) {
+            return "이미 업로드된 파일입니다. ({$origName}, 귀속일 {$settlementDate}, 업로드 #{$existingId}) "
+                . '수정이 필요하면 기존 업로드를 삭제한 뒤 다시 올려 주세요.';
+        }
+
+        if ($fileHash !== '') {
+            $meta = json_decode((string) ($row['stored_path'] ?? ''), true);
+            if (is_array($meta) && ($meta['file_hash'] ?? '') === $fileHash) {
+                return "동일한 파일 내용이 이미 등록되어 있습니다. (기존: {$existingName}, 업로드 #{$existingId})";
+            }
+        }
+    }
+
+    if ($rows !== []) {
+        $first     = $rows[0];
+        $existingId   = (int) ($first['id'] ?? 0);
+        $existingName = (string) ($first['original_filename'] ?? '');
+
+        return "해당 일자·플랫폼 정산이 이미 등록되어 있습니다. ({$settlementDate}, 기존: {$existingName}, 업로드 #{$existingId}) "
+            . '다른 파일로 교체하려면 기존 업로드를 삭제한 뒤 다시 업로드하세요.';
     }
 
     return null;

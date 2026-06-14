@@ -225,7 +225,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 						<span class="text-gray-500 pt-2 fw-semibold fs-6">이번 주 · 일간 정산서 반영분</span>
 					</h3>
 					<div class="card-toolbar">
-						<a href="<?= htmlspecialchars(admin_url('stats/summary'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">통계로 이동</a>
+						<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">수수료 내역</a>
 					</div>
 				</div>
 				<div class="card-body pt-5">

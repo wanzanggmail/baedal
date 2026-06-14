@@ -62,137 +62,20 @@ $route = $route ?? '';
 														<span class="menu-title">정산 수수료 내역</span>
 													</a>
 												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">파싱 오류 상세</span>
-													</a>
-												</div>
 											</div>
 										</div>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
-										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('promotion/') ?>">
-											<span class="menu-link">
-												<span class="menu-icon">
-													<i class="ki-duotone ki-discount fs-2">
-														<span class="path1"></span>
-														<span class="path2"></span>
-													</i>
-												</span>
-												<span class="menu-title">프로모션</span>
-												<span class="menu-arrow"></span>
-											</span>
-											<div class="menu-sub menu-sub-accordion">
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('promotion/rules') ?>" href="<?= htmlspecialchars(admin_url('promotion/rules'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">프로모션 규칙</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('promotion/batch') ?>" href="<?= htmlspecialchars(admin_url('promotion/batch'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">배치 실행</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('promotion/history') ?>" href="<?= htmlspecialchars(admin_url('promotion/history'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">실행 이력</span>
-													</a>
-												</div>
-											</div>
-										</div>
-										<!--end:Menu item-->
-										<!--begin:Menu item-->
-										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('deduction/') ?>">
-											<span class="menu-link">
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
 													<i class="ki-duotone ki-minus-circle fs-2">
 														<span class="path1"></span>
 														<span class="path2"></span>
 													</i>
 												</span>
-												<span class="menu-title">차감·수수료</span>
-												<span class="menu-arrow"></span>
-											</span>
-											<div class="menu-sub menu-sub-accordion">
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('deduction/entries') ?>" href="<?= htmlspecialchars(admin_url('deduction/entries'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">차감 내역 등록</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">선공제(대행 수수료) 설정</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('deduction/auto') ?>" href="<?= htmlspecialchars(admin_url('deduction/auto'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">자동 차감 설정</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('deduction/installment') ?>" href="<?= htmlspecialchars(admin_url('deduction/installment'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">할부 관리</span>
-													</a>
-												</div>
-											</div>
-										</div>
-										<!--end:Menu item-->
-										<!--begin:Menu item-->
-										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('stats/') ?>">
-											<span class="menu-link">
-												<span class="menu-icon">
-													<i class="ki-duotone ki-chart-simple fs-2">
-														<span class="path1"></span>
-														<span class="path2"></span>
-														<span class="path3"></span>
-														<span class="path4"></span>
-													</i>
-												</span>
-												<span class="menu-title">통계</span>
-												<span class="menu-arrow"></span>
-											</span>
-											<div class="menu-sub menu-sub-accordion">
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('stats/summary') ?>" href="<?= htmlspecialchars(admin_url('stats/summary'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">종합 통계</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('stats/export') ?>" href="<?= htmlspecialchars(admin_url('stats/export'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">기초데이터 내보내기</span>
-													</a>
-												</div>
-											</div>
+												<span class="menu-title">선공제(대행 수수료)</span>
+											</a>
 										</div>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->

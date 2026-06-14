@@ -57,50 +57,12 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 													<span class="menu-title">정산 수수료 내역</span>
 												</a>
 											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('settlement/parse-errors') ?>" href="<?= htmlspecialchars(admin_url('settlement/parse-errors'), ENT_QUOTES, 'UTF-8') ?>">
-													<span class="menu-icon"><i class="ki-duotone ki-information-2 fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i></span>
-													<span class="menu-title">파싱 오류 상세</span>
-												</a>
-											</div>
 										</div>
 									</div>
 									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">
-										<span class="menu-link<?= nav_header_menu_active('promotion/') ?>">
-											<span class="menu-title">프로모션</span>
-											<span class="menu-arrow d-lg-none"></span>
-										</span>
-										<div class="menu-sub menu-sub-lg-down-accordion menu-sub-lg-dropdown px-lg-3 py-lg-4 w-lg-250px">
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('promotion/rules') ?>" href="<?= htmlspecialchars(admin_url('promotion/rules'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">프로모션 규칙</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('promotion/batch') ?>" href="<?= htmlspecialchars(admin_url('promotion/batch'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">배치 실행</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('promotion/history') ?>" href="<?= htmlspecialchars(admin_url('promotion/history'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">실행 이력</span></a>
-											</div>
-										</div>
-									</div>
-									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">
-										<span class="menu-link<?= nav_header_menu_active('deduction/') ?>">
-											<span class="menu-title">차감·수수료</span>
-											<span class="menu-arrow d-lg-none"></span>
-										</span>
-										<div class="menu-sub menu-sub-lg-down-accordion menu-sub-lg-dropdown px-lg-3 py-lg-4 w-lg-275px">
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('deduction/entries') ?>" href="<?= htmlspecialchars(admin_url('deduction/entries'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">차감 내역 등록</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">선공제(대행 수수료)</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('deduction/auto') ?>" href="<?= htmlspecialchars(admin_url('deduction/auto'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">자동 차감 설정</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('deduction/installment') ?>" href="<?= htmlspecialchars(admin_url('deduction/installment'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">할부 관리</span></a>
-											</div>
-										</div>
+										<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
+											<span class="menu-title">선공제(대행)</span>
+										</a>
 									</div>
 									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">
 										<span class="menu-link<?= nav_header_menu_active('withdrawal/') ?>">
@@ -120,19 +82,13 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 										</div>
 									</div>
 									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">
-										<span class="menu-link<?= nav_header_menu_active_any(['riders/', 'content/', 'stats/', 'system/']) ?>">
+										<span class="menu-link<?= nav_header_menu_active_any(['riders/', 'content/', 'system/']) ?>">
 											<span class="menu-title">운영</span>
 											<span class="menu-arrow d-lg-none"></span>
 										</span>
 										<div class="menu-sub menu-sub-lg-down-accordion menu-sub-lg-dropdown px-lg-3 py-lg-4 w-lg-250px">
 											<div class="menu-item">
 												<a class="menu-link<?= (($route ?? '') === 'riders/list' || ($route ?? '') === 'riders/detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(admin_url('riders/list'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">라이더 관리</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('stats/summary') ?>" href="<?= htmlspecialchars(admin_url('stats/summary'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">종합 통계</span></a>
-											</div>
-											<div class="menu-item">
-												<a class="menu-link<?= nav_active('stats/export') ?>" href="<?= htmlspecialchars(admin_url('stats/export'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">기초데이터 내보내기</span></a>
 											</div>
 											<div class="menu-item">
 												<a class="menu-link<?= nav_active('content/notices') ?>" href="<?= htmlspecialchars(admin_url('content/notices'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">공지 관리</span></a>

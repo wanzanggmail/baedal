@@ -73,13 +73,11 @@ function admin_route_access_rules(): array
         'system/settlement-excel' => ['super', 'settlement'],
         'system/audit'  => ['super', 'admin'],
         'settlement/'   => ['super', 'settlement', 'operation'],
-        'promotion/'    => ['super', 'settlement'],
         'deduction/'    => ['super', 'settlement'],
         'content/'      => ['super', 'operation'],
         'riders/'       => ['super', 'operation'],
         'withdrawal/settings' => ['super'],
         'withdrawal/'   => ['super', 'admin', 'operation', 'settlement'],
-        'stats/'        => ['super', 'admin', 'operation', 'settlement'],
         'dashboard'     => ['super', 'admin', 'operation', 'settlement'],
     ];
 }
@@ -125,7 +123,7 @@ function admin_can_write(string $area): bool
     return match ($area) {
         'content', 'riders' => $role === 'operation',
         'withdrawal'         => $role === 'operation',
-        'settlement', 'promotion', 'deduction' => $role === 'settlement',
+        'settlement', 'deduction' => $role === 'settlement',
         'system'             => $role === 'super',
         default              => false,
     };

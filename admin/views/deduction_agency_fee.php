@@ -25,8 +25,7 @@ $canWrite     = admin_can_write('deduction');
 			</ul>
 		</div>
 		<div class="d-flex gap-2">
-			<a href="<?= htmlspecialchars(admin_url('deduction/entries'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">차감 내역</a>
-			<a href="<?= htmlspecialchars(admin_url('deduction/auto'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">자동 차감 설정</a>
+			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">정산 수수료 내역</a>
 		</div>
 	</div>
 </div>

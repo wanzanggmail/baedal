@@ -146,6 +146,25 @@ final class SettlementExcelConfig
         return $unique;
     }
 
+    /**
+     * 플랫폼 미지정·자동 감지 시 모든 플랫폼 암호를 순서대로 시도
+     *
+     * @return list<string>
+     */
+    public static function allPasswordsToTry(?string $uploadPassword = null): array
+    {
+        $unique = [];
+        foreach (self::PLATFORMS as $platform) {
+            foreach (self::passwordsToTry($platform, $uploadPassword) as $pw) {
+                if ($pw !== '' && !in_array($pw, $unique, true)) {
+                    $unique[] = $pw;
+                }
+            }
+        }
+
+        return $unique;
+    }
+
     /** @return list<string> */
     private static function envValues(string $name): array
     {

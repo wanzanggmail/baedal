@@ -8,7 +8,7 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /**
- * 배달의민족 일별 정산서(.xlsx) 파서 — PhpSpreadsheet 사용
+ * 쿠팡이츠 일별 정산서(.xlsx) 파서 — PhpSpreadsheet 사용
  */
 class XlsxParser
 {

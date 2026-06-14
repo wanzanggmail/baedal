@@ -82,6 +82,7 @@ if (is_file($composerAutoload)) {
     require_once $composerAutoload;
 }
 
+require_once INC_PATH . '/env.php';
 require_once INC_PATH . '/helpers.php';
 require_once INC_PATH . '/db.php';
 
