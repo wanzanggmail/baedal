@@ -7,7 +7,7 @@ declare(strict_types=1);
  * 환경 변수 > 아래 기본값 순으로 적용됩니다.
  * 운영: 프로젝트 루트 .env (inc/env.php) 또는 Apache SetEnv
  */
-define('DB_HOST',    getenv('DB_HOST')    ?: '13.124.45.107');
+define('DB_HOST',    getenv('DB_HOST')    ?: '');
 define('DB_PORT',    (int)(getenv('DB_PORT')    ?: 3306));
 define('DB_NAME',    getenv('DB_NAME')    ?: 'my_web_db');
 define('DB_USER',    getenv('DB_USER')    ?: 'dev_user');
