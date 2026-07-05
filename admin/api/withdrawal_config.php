@@ -20,9 +20,15 @@ if (!admin_is_logged_in()) {
     exit;
 }
 
-if (!admin_has_role('super')) {
+// 멀티테넌시: 본사(super)=전역 기본 / 대리점=자기 설정
+require_once INC_PATH . '/Org.php';
+$isAgency  = admin_org_level() === Org::LEVEL_AGENCY;
+$cfgOrgId  = $isAgency ? admin_org_id() : null;
+$myRole    = (string) (admin_user()['role'] ?? '');
+
+if (!admin_has_role('super') && !$isAgency) {
     http_response_code(403);
-    echo json_encode(['ok' => false, 'message' => '최고 관리자만 변경할 수 있습니다.'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => false, 'message' => '출금 정책을 변경할 권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -36,7 +42,11 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
     try {
-        echo json_encode(['ok' => true, 'config' => WithdrawalConfig::get()], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'ok'     => true,
+            'config' => WithdrawalConfig::get($cfgOrgId),
+            'scope'  => $isAgency ? 'agency' : 'global',
+        ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         $err('조회 실패: ' . $e->getMessage(), 500);
     }
@@ -47,7 +57,10 @@ if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
 }
 
-admin_deny_write_json('system');
+// 쓰기 권한: 본사(super) 또는 대리점 운영/정산 역할
+if (!admin_has_role('super') && !($isAgency && in_array($myRole, ['operation', 'settlement'], true))) {
+    $err('출금 정책을 저장할 권한이 없습니다.', 403);
+}
 
 $raw  = file_get_contents('php://input');
 $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -61,7 +74,7 @@ if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
 
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
-    $cfg = WithdrawalConfig::save($body, $adminId > 0 ? $adminId : null);
+    $cfg = WithdrawalConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
     AuditLog::record(
         'withdrawal.config.save',
         'withdrawal_config',

@@ -192,6 +192,16 @@ $route = $route ?? '';
 												<span class="menu-arrow"></span>
 											</span>
 											<div class="menu-sub menu-sub-accordion">
+												<?php if (admin_can_manage_orgs()) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/orgs') ?>" href="<?= htmlspecialchars(admin_url('system/orgs'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">조직 관리(총판·대리점)</span>
+													</a>
+												</div>
+												<?php endif; ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('system/admins') ?>" href="<?= htmlspecialchars(admin_url('system/admins'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">

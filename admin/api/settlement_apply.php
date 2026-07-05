@@ -40,6 +40,20 @@ if ($uploadId < 1) {
     exit;
 }
 
+// 멀티테넌시: 업로드 소유 대리점 스코프 밖이면 차단
+require_once INC_PATH . '/Org.php';
+$uploadRow = db_row('SELECT agency_id FROM settlement_uploads WHERE id = ? LIMIT 1', [$uploadId]);
+if ($uploadRow === null) {
+    http_response_code(404);
+    echo json_encode(['ok' => false, 'message' => '업로드를 찾을 수 없습니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+if (!Org::canAccessAgency((int) ($uploadRow['agency_id'] ?? 0))) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'message' => '이 업로드에 접근할 권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
     $result  = SettlementLedger::applyUpload($uploadId, $adminId > 0 ? $adminId : null);

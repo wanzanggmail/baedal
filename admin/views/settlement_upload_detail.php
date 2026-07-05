@@ -27,6 +27,14 @@ if (!$upload) {
     return;
 }
 
+// 멀티테넌시: 업로드 소유 대리점 스코프 밖이면 차단
+if (!Org::canAccessAgency((int) ($upload['agency_id'] ?? 0))) {
+    require_once INC_PATH . '/app_content_open.php';
+    echo '<div class="alert alert-danger">이 업로드에 접근할 권한이 없습니다.</div>';
+    require_once INC_PATH . '/app_content_close.php';
+    return;
+}
+
 $filterQ     = trim((string) ($_GET['q'] ?? ''));
 $filterMatch = trim((string) ($_GET['match'] ?? ''));
 

@@ -109,11 +109,17 @@ final class Banner
      */
     public static function listAdmin(): array
     {
+        // 멀티테넌시: 작성 조직 스코프
+        [$scopeSql, $params] = Org::orgScopeClause('b.org_id');
+        $whereSql = $scopeSql !== '' ? 'WHERE ' . $scopeSql : '';
+
         $rows = db_rows(
             'SELECT b.*, a.name AS created_by_name
              FROM content_banners b
              LEFT JOIN admins a ON a.id = b.created_by
-             ORDER BY b.slot ASC, b.sort_order ASC, b.id DESC'
+             ' . $whereSql . '
+             ORDER BY b.slot ASC, b.sort_order ASC, b.id DESC',
+            $params
         );
 
         return array_map([self::class, 'mapAdminRow'], $rows);
@@ -123,7 +129,7 @@ final class Banner
      * @param list<string> $slots
      * @return list<array<string, mixed>>
      */
-    public static function listActiveForRider(array $slots, int $limit = 20): array
+    public static function listActiveForRider(array $slots, int $limit = 20, int $agencyId = 0): array
     {
         $slots = array_values(array_filter($slots, static fn (string $s): bool => in_array($s, self::slots(), true)));
         if ($slots === []) {
@@ -131,12 +137,27 @@ final class Banner
         }
         $placeholders = implode(',', array_fill(0, count($slots), '?'));
         $params = $slots;
+
+        // 멀티테넌시: 라이더 대리점 + 상위(총판·본사) broadcast + 전역(NULL)
+        $orgCond = '';
+        if ($agencyId > 0) {
+            $orgIds = Org::ancestorOrgIds($agencyId);
+            if ($orgIds === []) {
+                $orgCond = ' AND org_id IS NULL';
+            } else {
+                $ph = implode(',', array_fill(0, count($orgIds), '?'));
+                $orgCond = " AND (org_id IS NULL OR org_id IN ({$ph}))";
+                $params  = array_merge($params, $orgIds);
+            }
+        }
+
         $sql = "SELECT id, public_id, title, subtitle, link_url, image_url, slot, sort_order
                 FROM content_banners
                 WHERE status = 'active'
                   AND slot IN ({$placeholders})
                   AND (start_at IS NULL OR start_at <= CURDATE())
                   AND (end_at IS NULL OR end_at >= CURDATE())
+                  {$orgCond}
                 ORDER BY sort_order ASC, id DESC
                 LIMIT " . max(1, min(50, $limit));
 
@@ -150,9 +171,9 @@ final class Banner
      *
      * @return list<array<string, mixed>>
      */
-    public static function listActiveForRiderHome(int $limit = 20): array
+    public static function listActiveForRiderHome(int $limit = 20, int $agencyId = 0): array
     {
-        return self::listActiveForRider([self::RIDER_HOME_CAROUSEL_SLOT], $limit);
+        return self::listActiveForRider([self::RIDER_HOME_CAROUSEL_SLOT], $limit, $agencyId);
     }
 
     /**
@@ -197,9 +218,12 @@ final class Banner
         }
 
         if ($id) {
-            $prev = db_row('SELECT image_url FROM content_banners WHERE id = ?', [$id]);
+            $prev = db_row('SELECT image_url, org_id FROM content_banners WHERE id = ?', [$id]);
             if (!$prev) {
                 throw new InvalidArgumentException('광고를 찾을 수 없습니다.');
+            }
+            if (!Org::canAccessOrg((int) ($prev['org_id'] ?? 0))) {
+                throw new InvalidArgumentException('이 배너를 수정할 권한이 없습니다.');
             }
             db_execute(
                 'UPDATE content_banners
@@ -218,10 +242,11 @@ final class Banner
         }
 
         $publicId = self::generatePublicId();
+        $orgId    = admin_org_id();
         $newId = db_insert(
             'INSERT INTO content_banners
-                (public_id, title, subtitle, link_url, image_url, slot, sort_order, status, start_at, end_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (public_id, title, subtitle, link_url, image_url, slot, sort_order, status, start_at, end_at, created_by, org_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $publicId,
                 $title,
@@ -234,6 +259,7 @@ final class Banner
                 $startAt,
                 $endAt,
                 $adminId > 0 ? $adminId : null,
+                $orgId > 0 ? $orgId : null,
             ]
         );
 
@@ -245,9 +271,12 @@ final class Banner
         if ($id < 1) {
             throw new InvalidArgumentException('잘못된 ID입니다.');
         }
-        $row = db_row('SELECT image_url FROM content_banners WHERE id = ?', [$id]);
+        $row = db_row('SELECT image_url, org_id FROM content_banners WHERE id = ?', [$id]);
         if (!$row) {
             throw new InvalidArgumentException('광고를 찾을 수 없습니다.');
+        }
+        if (!Org::canAccessOrg((int) ($row['org_id'] ?? 0))) {
+            throw new InvalidArgumentException('이 배너를 삭제할 권한이 없습니다.');
         }
         db_execute('DELETE FROM content_banners WHERE id = ?', [$id]);
         require_once INC_PATH . '/BannerUpload.php';

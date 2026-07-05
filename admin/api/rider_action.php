@@ -39,6 +39,12 @@ $rider = db_row(
 );
 if (!$rider) $err('라이더를 찾을 수 없습니다.', 404);
 
+// 멀티테넌시: 소속 대리점 스코프 밖이면 차단
+require_once INC_PATH . '/Org.php';
+if (!Org::canAccessAgency((int) ($rider['agency_id'] ?? 0))) {
+    $err('이 라이더에 접근할 권한이 없습니다.', 403);
+}
+
 // ── GET ────────────────────────────────────────────────────────
 if ($method === 'GET') {
     $platforms = db_rows(

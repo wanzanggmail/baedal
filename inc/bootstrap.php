@@ -91,3 +91,4 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once INC_PATH . '/auth.php';
+require_once INC_PATH . '/Org.php';

@@ -26,14 +26,17 @@ final class SettlementExcelConfig
      *
      * @return array<string, string> platform => password
      */
-    public static function allStored(): array
+    public static function allStored(?int $orgId = null): array
     {
         $out = array_fill_keys(self::PLATFORMS, '');
         if (!self::tableExists()) {
             return $out;
         }
 
-        $rows = db_rows('SELECT platform, open_password FROM settlement_excel_config');
+        // 표시용은 스코프 정확히 (대리점 행만 또는 전역 NULL 행만)
+        $rows = ($orgId !== null && $orgId > 0)
+            ? db_rows('SELECT platform, open_password FROM settlement_excel_config WHERE org_id = ?', [$orgId])
+            : db_rows('SELECT platform, open_password FROM settlement_excel_config WHERE org_id IS NULL');
         foreach ($rows as $row) {
             $p = (string) ($row['platform'] ?? '');
             if (in_array($p, self::PLATFORMS, true)) {
@@ -45,16 +48,15 @@ final class SettlementExcelConfig
     }
 
     /** @return array{length: int, configured: bool} */
-    public static function storedPasswordMeta(string $platform): array
+    public static function storedPasswordMeta(string $platform, ?int $orgId = null): array
     {
         if (!self::tableExists()) {
             return ['length' => 0, 'configured' => false];
         }
 
-        $row = db_row(
-            'SELECT open_password FROM settlement_excel_config WHERE platform = ? LIMIT 1',
-            [$platform]
-        );
+        $row = ($orgId !== null && $orgId > 0)
+            ? db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id = ? LIMIT 1', [$platform, $orgId])
+            : db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id IS NULL LIMIT 1', [$platform]);
         if ($row === null) {
             return ['length' => 0, 'configured' => false];
         }
@@ -88,7 +90,7 @@ final class SettlementExcelConfig
      *
      * @return list<string>
      */
-    public static function passwordsToTry(string $platform, ?string $uploadPassword = null): array
+    public static function passwordsToTry(string $platform, ?string $uploadPassword = null, ?int $orgId = null): array
     {
         $list = [];
 
@@ -96,17 +98,9 @@ final class SettlementExcelConfig
             $list[] = self::normalizePassword($uploadPassword);
         }
 
-        if (self::tableExists()) {
-            $row = db_row(
-                'SELECT open_password FROM settlement_excel_config WHERE platform = ? LIMIT 1',
-                [$platform]
-            );
-            if ($row !== null) {
-                $pw = self::normalizePassword((string) ($row['open_password'] ?? ''));
-                if ($pw !== '') {
-                    $list[] = $pw;
-                }
-            }
+        // 대리점 저장값 → 전역 저장값 순 (복호화 폴백)
+        foreach (self::storedPasswordList($platform, $orgId) as $pw) {
+            $list[] = $pw;
         }
 
         foreach (self::envValues('SETTLEMENT_EXCEL_PASSWORD_' . strtoupper($platform)) as $v) {
@@ -123,16 +117,9 @@ final class SettlementExcelConfig
             }
         }
 
-        if ($platform !== 'baemin' && self::tableExists()) {
-            $baemin = db_row(
-                'SELECT open_password FROM settlement_excel_config WHERE platform = ? LIMIT 1',
-                ['baemin']
-            );
-            if ($baemin !== null) {
-                $pw = self::normalizePassword((string) ($baemin['open_password'] ?? ''));
-                if ($pw !== '') {
-                    $list[] = $pw;
-                }
+        if ($platform !== 'baemin') {
+            foreach (self::storedPasswordList('baemin', $orgId) as $pw) {
+                $list[] = $pw;
             }
         }
 
@@ -151,11 +138,11 @@ final class SettlementExcelConfig
      *
      * @return list<string>
      */
-    public static function allPasswordsToTry(?string $uploadPassword = null): array
+    public static function allPasswordsToTry(?string $uploadPassword = null, ?int $orgId = null): array
     {
         $unique = [];
         foreach (self::PLATFORMS as $platform) {
-            foreach (self::passwordsToTry($platform, $uploadPassword) as $pw) {
+            foreach (self::passwordsToTry($platform, $uploadPassword, $orgId) as $pw) {
                 if ($pw !== '' && !in_array($pw, $unique, true)) {
                     $unique[] = $pw;
                 }
@@ -163,6 +150,37 @@ final class SettlementExcelConfig
         }
 
         return $unique;
+    }
+
+    /**
+     * 복호화 시도용 저장 비밀번호: 대리점(org) 행 → 전역(NULL) 행 순 (빈 값 제외).
+     *
+     * @return list<string>
+     */
+    private static function storedPasswordList(string $platform, ?int $orgId): array
+    {
+        if (!self::tableExists()) {
+            return [];
+        }
+        $out = [];
+        if ($orgId !== null && $orgId > 0) {
+            $r = db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id = ? LIMIT 1', [$platform, $orgId]);
+            if ($r !== null) {
+                $pw = self::normalizePassword((string) ($r['open_password'] ?? ''));
+                if ($pw !== '') {
+                    $out[] = $pw;
+                }
+            }
+        }
+        $r = db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id IS NULL LIMIT 1', [$platform]);
+        if ($r !== null) {
+            $pw = self::normalizePassword((string) ($r['open_password'] ?? ''));
+            if ($pw !== '') {
+                $out[] = $pw;
+            }
+        }
+
+        return $out;
     }
 
     /** @return list<string> */
@@ -182,31 +200,33 @@ final class SettlementExcelConfig
      * @param array<string, string> $passwords platform => open_password
      * @return array<string, string>
      */
-    public static function save(array $passwords, ?int $adminId = null): array
+    public static function save(array $passwords, ?int $orgId = null, ?int $adminId = null): array
     {
         if (!self::tableExists()) {
             throw new RuntimeException('settlement_excel_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
+        $hasOrg   = $orgId !== null && $orgId > 0;
+        $updatedBy = ($adminId !== null && $adminId > 0) ? $adminId : null;
+
         foreach (self::PLATFORMS as $platform) {
             $pw = self::normalizePassword((string) ($passwords[$platform] ?? ''));
-            $exists = db_row(
-                'SELECT platform FROM settlement_excel_config WHERE platform = ? LIMIT 1',
-                [$platform]
-            );
+            $exists = $hasOrg
+                ? db_row('SELECT id FROM settlement_excel_config WHERE platform = ? AND org_id = ? LIMIT 1', [$platform, $orgId])
+                : db_row('SELECT id FROM settlement_excel_config WHERE platform = ? AND org_id IS NULL LIMIT 1', [$platform]);
             if ($exists) {
                 db_execute(
-                    'UPDATE settlement_excel_config SET open_password = ?, updated_by = ? WHERE platform = ?',
-                    [$pw, ($adminId !== null && $adminId > 0) ? $adminId : null, $platform]
+                    'UPDATE settlement_excel_config SET open_password = ?, updated_by = ? WHERE id = ?',
+                    [$pw, $updatedBy, (int) $exists['id']]
                 );
             } else {
                 db_insert(
-                    'INSERT INTO settlement_excel_config (platform, open_password, updated_by) VALUES (?, ?, ?)',
-                    [$platform, $pw, ($adminId !== null && $adminId > 0) ? $adminId : null]
+                    'INSERT INTO settlement_excel_config (platform, org_id, open_password, updated_by) VALUES (?, ?, ?, ?)',
+                    [$platform, $hasOrg ? $orgId : null, $pw, $updatedBy]
                 );
             }
         }
 
-        return self::allStored();
+        return self::allStored($orgId);
     }
 }

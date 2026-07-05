@@ -28,12 +28,28 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 admin_deny_write_json('settlement');
 
+// 멀티테넌시: 업로드 소유 대리점 결정 (대리점 계정은 자기 대리점, 본사/총판은 선택)
+require_once INC_PATH . '/Org.php';
+if (admin_org_level() === Org::LEVEL_AGENCY) {
+    $agencyId = admin_org_id();
+} else {
+    $agencyId  = (int) ($_POST['agency_id'] ?? 0);
+    $agencyOrg = $agencyId > 0 ? Org::find($agencyId) : null;
+    if ($agencyOrg === null || (string) $agencyOrg['level'] !== Org::LEVEL_AGENCY || !Org::canAccessAgency($agencyId)) {
+        echo json_encode(['ok' => false, 'error' => '업로드할 대리점을 선택하세요.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 $platform  = trim((string) ($_POST['platform'] ?? 'coupang'));
 $dateInput = trim((string) ($_POST['settlement_date'] ?? ''));
 
 if (!in_array($platform, ['baemin', 'coupang', 'other'], true)) {
     $platform = 'coupang';
 }
+
+// 미리보기(파싱+매칭만, 저장 안 함) 모드
+$dryRun = (string) ($_POST['mode'] ?? '') === 'preview';
 
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
     $errCode = $_FILES['file']['error'] ?? 'N/A';
@@ -76,10 +92,16 @@ if (count($parts) >= 3) {
 }
 
 $fileHash = hash_file('sha256', $tmpPath) ?: '';
-$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash);
+$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId);
+$dupWarning = null;
 if ($dupError !== null) {
-    echo json_encode(['ok' => false, 'error' => $dupError, 'duplicate' => true], JSON_UNESCAPED_UNICODE);
-    exit;
+    if ($dryRun) {
+        // 미리보기에서는 막지 않고 경고만 (확정 시 차단)
+        $dupWarning = $dupError;
+    } else {
+        echo json_encode(['ok' => false, 'error' => $dupError, 'duplicate' => true], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 }
 
 $metaJson = json_encode(
@@ -90,7 +112,8 @@ $metaJson = json_encode(
 $uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
 $passwords      = SettlementExcelConfig::passwordsToTry(
     $platform,
-    $uploadPassword !== '' ? $uploadPassword : null
+    $uploadPassword !== '' ? $uploadPassword : null,
+    $agencyId
 );
 
 $parsePath = $tmpPath;
@@ -140,6 +163,61 @@ if ($rows === []) {
     exit;
 }
 
+// ── 미리보기 모드: 파싱+매칭 결과만 반환 (저장 안 함) ──────────────
+if ($dryRun) {
+    $previewRows = [];
+    $matchedCnt = 0;
+    $unmatchedCnt = 0;
+    foreach ($rows as $row) {
+        $rid = settlement_match_rider_id($platform, (string) $row['license_id'], (string) $row['name'], $agencyId);
+        $rInfo = null;
+        if ($rid !== null) {
+            $rInfo = db_row('SELECT name, rider_code FROM riders WHERE id = ? LIMIT 1', [$rid]);
+            $matchedCnt++;
+        } else {
+            $unmatchedCnt++;
+        }
+        $previewRows[] = [
+            'license_id'    => (string) $row['license_id'],
+            'name_raw'      => (string) $row['name_raw'],
+            'name'          => (string) $row['name'],
+            'order_count'   => (int) $row['order_count'],
+            'gross_amount'  => (int) $row['gross_amount'],
+            'payout_amount' => (int) $row['payout_amount'],
+            'matched'       => $rid !== null,
+            'rider_id'      => $rid,
+            'rider_name'    => (string) ($rInfo['name'] ?? ''),
+            'rider_code'    => (string) ($rInfo['rider_code'] ?? ''),
+        ];
+    }
+
+    $dedCount = 0;
+    foreach ($deductions as $ded) {
+        if (!($ded['order_no'] === '' && $ded['amount'] === 0)) {
+            $dedCount++;
+        }
+    }
+
+    echo json_encode([
+        'ok'                => true,
+        'preview'           => true,
+        'settlement_date'   => $settlementDate,
+        'platform'          => $platform,
+        'agency_id'         => $agencyId,
+        'team'              => $teamName,
+        'region'            => $regionName,
+        'summary'           => [
+            'total'      => count($rows),
+            'matched'    => $matchedCnt,
+            'unmatched'  => $unmatchedCnt,
+            'deductions' => $dedCount,
+        ],
+        'rows'              => $previewRows,
+        'duplicate_warning' => $dupWarning,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $adminId = (int) ($_SESSION['admin_id'] ?? 0);
 if ($adminId <= 0) {
     $adminId = null;
@@ -154,9 +232,10 @@ try {
         $fileHash,
         $rows,
         $deductions,
-        $adminId
+        $adminId,
+        $agencyId
     ): array {
-        $dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash);
+        $dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId);
         if ($dupError !== null) {
             throw new RuntimeException($dupError);
         }
@@ -164,10 +243,10 @@ try {
         $totalRows = count($rows);
         $uploadId  = db_insert(
             'INSERT INTO settlement_uploads
-                (kind, platform, original_filename, stored_path, settlement_date,
+                (kind, platform, agency_id, original_filename, stored_path, settlement_date,
                  total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
-             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
-            ['daily', $platform, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
+            ['daily', $platform, $agencyId, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
         );
 
         $inserted  = 0;
@@ -175,24 +254,7 @@ try {
         $unmatched = [];
 
         foreach ($rows as $row) {
-            $riderId = null;
-
-            if ($row['license_id'] !== '') {
-                $rp = db_row(
-                    'SELECT rider_id FROM rider_platforms WHERE platform = ? AND external_id = ?',
-                    [$platform, (string) $row['license_id']]
-                );
-                if ($rp) {
-                    $riderId = (int) $rp['rider_id'];
-                }
-            }
-
-            if ($riderId === null && $row['name'] !== '') {
-                $r = db_row('SELECT id FROM riders WHERE name = ? LIMIT 1', [$row['name']]);
-                if ($r) {
-                    $riderId = (int) $r['id'];
-                }
-            }
+            $riderId = settlement_match_rider_id($platform, (string) $row['license_id'], (string) $row['name'], $agencyId);
 
             if ($riderId !== null) {
                 $matched++;
@@ -334,24 +396,52 @@ function settlement_parse_date($value): ?string
 }
 
 /**
+ * 정산 행 라이더 매칭 (대리점 범위 내). 라이선스 ID → 이름 순.
+ */
+function settlement_match_rider_id(string $platform, string $licenseId, string $name, int $agencyId): ?int
+{
+    if ($licenseId !== '') {
+        $rp = db_row(
+            'SELECT rp.rider_id FROM rider_platforms rp
+               INNER JOIN riders r ON r.id = rp.rider_id
+              WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ?',
+            [$platform, $licenseId, $agencyId]
+        );
+        if ($rp) {
+            return (int) $rp['rider_id'];
+        }
+    }
+    if ($name !== '') {
+        $r = db_row('SELECT id FROM riders WHERE name = ? AND agency_id = ? LIMIT 1', [$name, $agencyId]);
+        if ($r) {
+            return (int) $r['id'];
+        }
+    }
+
+    return null;
+}
+
+/**
  * 동일 파일·동일 일자 정산 중복 업로드 여부
  */
 function settlement_upload_duplicate_error(
     string $platform,
     string $settlementDate,
     string $origName,
-    string $fileHash
+    string $fileHash,
+    int $agencyId
 ): ?string {
     if (!db_table_exists('settlement_uploads')) {
         return null;
     }
 
+    // 중복 판정은 같은 대리점 범위 내에서 (대리점마다 같은 날짜 파일을 각각 업로드)
     $rows = db_rows(
         'SELECT id, original_filename, stored_path
            FROM settlement_uploads
-          WHERE kind = ? AND platform = ? AND settlement_date = ?
+          WHERE kind = ? AND platform = ? AND settlement_date = ? AND agency_id = ?
           ORDER BY id DESC',
-        ['daily', $platform, $settlementDate]
+        ['daily', $platform, $settlementDate, $agencyId]
     );
 
     foreach ($rows as $row) {

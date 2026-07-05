@@ -49,6 +49,15 @@ if ($ids === []) {
     exit;
 }
 
+// 멀티테넌시: 스코프 밖 출금 건 제거
+$ids = Withdrawal::scopeFilterIds($ids);
+if ($ids === []) {
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => false, 'message' => '다운로드 권한이 있는 출금 건이 없습니다.'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $format = strtolower(trim((string) ($body['format'] ?? 'xlsx')));
 if (!in_array($format, ['xlsx', 'txt', 'csv'], true)) {
     $format = 'xlsx';

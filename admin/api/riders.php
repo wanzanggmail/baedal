@@ -50,6 +50,21 @@ if ($method === 'POST') {
         $err('이미 사용 중인 로그인 ID입니다.');
     }
 
+    // 멀티테넌시: 소속 대리점 결정 (대리점 계정은 자기 대리점, 본사/총판은 선택)
+    require_once INC_PATH . '/Organization.php';
+    if (admin_org_level() === Org::LEVEL_AGENCY) {
+        $agencyId = admin_org_id();
+    } else {
+        $agencyId = (int) ($body['agency_id'] ?? 0);
+        if ($agencyId < 1) {
+            $err('소속 대리점을 선택하세요.');
+        }
+        $agencyOrg = Org::find($agencyId);
+        if ($agencyOrg === null || (string) $agencyOrg['level'] !== Org::LEVEL_AGENCY || !Org::canAccessAgency($agencyId)) {
+            $err('선택한 대리점에 접근할 수 없습니다.');
+        }
+    }
+
     // rider_code 생성
     $customCode = trim((string) ($body['rider_code'] ?? ''));
     if ($customCode !== '') {
@@ -80,14 +95,14 @@ if ($method === 'POST') {
     $newId = db_transaction(static function () use (
         $riderCode, $loginId, $passwordHash, $name, $phone, $email,
         $birth, $teamCode, $vehicle, $address,
-        $bankCode, $bankAccount, $accHolder, $platform
+        $bankCode, $bankAccount, $accHolder, $platform, $agencyId
     ): int {
         $id = db_insert(
             'INSERT INTO riders
                 (rider_code, login_id, password_hash, name, phone, email, birth_date,
                  status, team_code, vehicle_type, address,
-                 bank_code, bank_account, account_holder)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?)',
+                 bank_code, bank_account, account_holder, agency_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderCode, $loginId, $passwordHash, $name, $phone, $email,
                 $birth !== '' ? $birth : null,
@@ -95,6 +110,7 @@ if ($method === 'POST') {
                 $bankCode !== '' ? $bankCode : null,
                 $bankAccount !== '' ? $bankAccount : null,
                 $accHolder !== '' ? $accHolder : null,
+                $agencyId,
             ]
         );
 
@@ -137,6 +153,14 @@ if ($method === 'GET') {
     }
     if ($team   !== '') { $where[] = 'r.team_code = ?'; $params[] = $team; }
     if ($status !== '') { $where[] = 'r.status = ?';    $params[] = $status; }
+
+    // 멀티테넌시: 소속 대리점 스코프
+    require_once INC_PATH . '/Org.php';
+    [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+    if ($scopeSql !== '') {
+        $where[] = $scopeSql;
+        $params  = array_merge($params, $scopeParams);
+    }
 
     $whereStr = implode(' AND ', $where);
     $total    = (int) (db_row("SELECT COUNT(*) AS cnt FROM riders r WHERE {$whereStr}", $params)['cnt'] ?? 0);

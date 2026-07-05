@@ -81,7 +81,7 @@ if ($riderRoute === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         require_once INC_PATH . '/Notice.php';
-        $popupQueue = Notice::loginPopupQueue();
+        $popupQueue = Notice::loginPopupQueue(rider_current_agency_id());
         if ($popupQueue !== []) {
             $_SESSION['rider_notice_popup_queue'] = $popupQueue;
         }

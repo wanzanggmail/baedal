@@ -79,6 +79,12 @@ if ($method === 'POST') {
         $err('처리할 출금 건을 선택하세요.');
     }
 
+    // 멀티테넌시: 스코프 밖 출금 건 제거
+    $ids = Withdrawal::scopeFilterIds($ids);
+    if ($ids === []) {
+        $err('처리 권한이 있는 출금 건이 없습니다.', 403);
+    }
+
     try {
         if ($action === 'mark_downloaded') {
             $n = Withdrawal::markDownloaded($ids);

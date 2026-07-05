@@ -18,6 +18,7 @@ return [
     'content/banners' => ['title' => '광고 배너', 'view' => 'content_banners'],
     'riders/list' => ['title' => '라이더 관리', 'view' => 'riders_list'],
     'riders/detail' => ['title' => '라이더 상세', 'view' => 'riders_detail'],
+    'system/orgs' => ['title' => '조직 관리(총판·대리점)', 'view' => 'system_orgs'],
     'system/admins' => ['title' => '관리자 계정·권한', 'view' => 'system_admins'],
     'system/codes' => ['title' => '코드/마스터', 'view' => 'system_codes'],
     'system/settlement-excel' => ['title' => '정산 엑셀 열기 암호', 'view' => 'system_settlement_excel'],

@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/SettlementExcelConfig.php';
 
-$excelPasswords   = SettlementExcelConfig::allStored();
+// 멀티테넌시: 대리점=자기 암호 / 그 외=전역 기본
+$cfgOrgId         = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+$cfgScopeLabel    = $cfgOrgId !== null ? '우리 대리점 전용' : '전역 기본(미설정 대리점에 적용)';
+$excelPasswords   = SettlementExcelConfig::allStored($cfgOrgId);
 $excelConfigReady = SettlementExcelConfig::tableExists();
 $excelConfigApi   = ADMIN_BASE . '/api/settlement_excel_config.php';
 $canWrite         = admin_can_write('settlement');
@@ -60,13 +63,13 @@ $platformLabels = [
 		<div class="col-xl-7">
 			<div class="card card-flush">
 				<div class="card-header pt-5">
-					<h3 class="card-title fw-bold">플랫폼별 열기 암호</h3>
+					<h3 class="card-title fw-bold">플랫폼별 열기 암호 <span class="badge badge-light-info ms-2 fs-8"><?= htmlspecialchars($cfgScopeLabel, ENT_QUOTES, 'UTF-8') ?></span></h3>
 				</div>
 				<div class="card-body pt-0 fs-7">
 					<form id="excel_pw_form" class="row g-4">
 						<?php foreach (SettlementExcelConfig::platforms() as $pf) :
 						    $pfLabel = $platformLabels[$pf] ?? $pf;
-						    $meta = SettlementExcelConfig::storedPasswordMeta($pf);
+						    $meta = SettlementExcelConfig::storedPasswordMeta($pf, $cfgOrgId);
 						    ?>
 						<div class="col-md-4">
 							<label class="form-label" for="excel_pw_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>">

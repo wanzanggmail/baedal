@@ -32,13 +32,18 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
+// 멀티테넌시: 대리점=자기 암호 / 그 외=전역 기본
+require_once INC_PATH . '/Org.php';
+$cfgOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
     echo json_encode([
         'ok'          => true,
         'table_ready' => SettlementExcelConfig::tableExists(),
-        'passwords'   => SettlementExcelConfig::allStored(),
+        'passwords'   => SettlementExcelConfig::allStored($cfgOrgId),
+        'scope'       => $cfgOrgId !== null ? 'agency' : 'global',
         'python_hint' => 'pip install -r requirements-settlement.txt',
     ], JSON_UNESCAPED_UNICODE);
     exit;
@@ -64,7 +69,7 @@ $passwords = (array) ($body['passwords'] ?? $body);
 $adminId   = (int) ($_SESSION['admin_id'] ?? 0);
 
 try {
-    $saved = SettlementExcelConfig::save($passwords, $adminId > 0 ? $adminId : null);
+    $saved = SettlementExcelConfig::save($passwords, $cfgOrgId, $adminId > 0 ? $adminId : null);
     AuditLog::record(
         'settlement.excel_password.save',
         'settlement_excel_config',

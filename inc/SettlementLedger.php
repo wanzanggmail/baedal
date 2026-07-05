@@ -34,12 +34,16 @@ final class SettlementLedger
         }
 
         $upload = db_row(
-            'SELECT id, platform, settlement_date, status FROM settlement_uploads WHERE id = ? LIMIT 1',
+            'SELECT id, platform, agency_id, settlement_date, status FROM settlement_uploads WHERE id = ? LIMIT 1',
             [$uploadId]
         );
         if ($upload === null) {
             throw new InvalidArgumentException('업로드를 찾을 수 없습니다.');
         }
+
+        // 멀티테넌시: 업로드 소유 대리점 설정으로 수수료 산출
+        $agencyId = (int) ($upload['agency_id'] ?? 0);
+        $orgId    = $agencyId > 0 ? $agencyId : null;
 
         $rows = db_rows(
             'SELECT * FROM settlement_daily_riders
@@ -52,12 +56,12 @@ final class SettlementLedger
             throw new InvalidArgumentException('매칭된 라이더 정산 데이터가 없습니다.');
         }
 
-        $cfg = self::globalDeductionConfig();
+        $cfg = self::globalDeductionConfig($orgId);
         $applied = 0;
         $skipped = 0;
         $errors  = [];
 
-        db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, &$applied, &$skipped, &$errors): void {
+        db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, &$applied, &$skipped, &$errors): void {
             foreach ($rows as $row) {
                 $riderId = (int) $row['rider_id'];
                 if ($riderId < 1) {
@@ -79,7 +83,7 @@ final class SettlementLedger
                 }
 
                 try {
-                    self::createCycleFromDailyRow($row, $uploadId, $cfg, $adminId);
+                    self::createCycleFromDailyRow($row, $uploadId, $cfg, $adminId, $orgId);
                     $applied++;
                 } catch (Throwable $e) {
                     $errors[] = ($row['rider_name_raw'] ?? $riderId) . ': ' . $e->getMessage();
@@ -163,6 +167,13 @@ final class SettlementLedger
         if ($riderId !== null && $riderId > 0) {
             $riderSql = ' AND c.rider_id = ?';
             $params[] = $riderId;
+        } else {
+            // 멀티테넌시: 관리자 조회 시 소속 대리점 스코프
+            [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+            if ($scopeSql !== '') {
+                $riderSql .= ' AND ' . $scopeSql;
+                $params    = array_merge($params, $scopeParams);
+            }
         }
 
         $row = db_row(
@@ -190,14 +201,14 @@ final class SettlementLedger
      * @param array<string, mixed> $dailyRow settlement_daily_riders row
      * @param array<string, float> $cfg
      */
-    private static function createCycleFromDailyRow(array $dailyRow, int $uploadId, array $cfg, ?int $adminId): void
+    private static function createCycleFromDailyRow(array $dailyRow, int $uploadId, array $cfg, ?int $adminId, ?int $orgId = null): void
     {
         $riderId = (int) $dailyRow['rider_id'];
         $gross   = (int) ($dailyRow['gross_amount'] ?? 0);
         $payout  = (int) ($dailyRow['payout_amount'] ?? 0);
         $base    = $payout > 0 ? $payout : $gross;
 
-        $fees = self::buildFeeItems($base, $riderId, (string) $dailyRow['settlement_date'], $cfg);
+        $fees = self::buildFeeItems($base, $riderId, (string) $dailyRow['settlement_date'], $cfg, $orgId);
         $totalFee = array_sum(array_column($fees, 'amount'));
         $net      = max(0, $base - $totalFee);
 
@@ -242,13 +253,13 @@ final class SettlementLedger
      * @param array<string, float> $cfg
      * @return list<array{fee_code: string, label: string, amount: int}>
      */
-    private static function buildFeeItems(int $base, int $riderId, string $settlementDate, array $cfg): array
+    private static function buildFeeItems(int $base, int $riderId, string $settlementDate, array $cfg, ?int $orgId = null): array
     {
         $items = [];
 
         $wallet  = RiderWallet::get($riderId);
         $accrued = (int) $wallet['accrued_days'];
-        $agency  = AgencyFeeConfig::feeForAccruedDays($accrued);
+        $agency  = AgencyFeeConfig::feeForAccruedDays($accrued, $orgId);
         if ($agency > 0) {
             $items[] = ['fee_code' => 'agency_fee', 'label' => '정산 수수료(대행)', 'amount' => $agency];
         }
@@ -288,7 +299,7 @@ final class SettlementLedger
     }
 
     /** @return array<string, float> */
-    private static function globalDeductionConfig(): array
+    private static function globalDeductionConfig(?int $orgId = null): array
     {
         if (!db_table_exists('deduction_global_config')) {
             return [
@@ -297,7 +308,14 @@ final class SettlementLedger
             ];
         }
 
-        $row = db_row('SELECT withholding_tax_pct, employment_ins_pct FROM deduction_global_config LIMIT 1');
+        // 대리점(org) 행 → 전역 기본(org_id NULL) 순 폴백
+        $row = null;
+        if ($orgId !== null && $orgId > 0) {
+            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId]);
+        }
+        if ($row === null) {
+            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+        }
 
         return [
             'withholding_tax_pct' => (float) ($row['withholding_tax_pct'] ?? 3.3),
@@ -384,6 +402,15 @@ final class SettlementLedger
             $like = '%' . $q . '%';
             $params[] = $like;
             $params[] = $like;
+        }
+
+        // 멀티테넌시: 관리자 조회는 소속 대리점 스코프 (라이더 앱은 rider_id로 이미 제한)
+        if (!$riderScoped) {
+            [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+            if ($scopeSql !== '') {
+                $where[] = $scopeSql;
+                $params  = array_merge($params, $scopeParams);
+            }
         }
 
         return [implode(' AND ', $where), $params];

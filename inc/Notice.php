@@ -63,11 +63,17 @@ final class Notice
      */
     public static function listAdmin(): array
     {
+        // 멀티테넌시: 작성 조직 스코프 (자기 + 하위)
+        [$scopeSql, $params] = Org::orgScopeClause('n.org_id');
+        $whereSql = $scopeSql !== '' ? 'WHERE ' . $scopeSql : '';
+
         $rows = db_rows(
             'SELECT n.*, a.name AS created_by_name
              FROM content_notices n
              LEFT JOIN admins a ON a.id = n.created_by
-             ORDER BY n.pinned DESC, COALESCE(n.published_at, n.updated_at) DESC, n.id DESC'
+             ' . $whereSql . '
+             ORDER BY n.pinned DESC, COALESCE(n.published_at, n.updated_at) DESC, n.id DESC',
+            $params
         );
 
         return array_map([self::class, 'mapAdminRow'], $rows);
@@ -76,33 +82,67 @@ final class Notice
     /**
      * @return list<array<string, mixed>>
      */
-    public static function listPublishedForRider(int $limit = 50): array
+    public static function listPublishedForRider(int $limit = 50, int $agencyId = 0): array
     {
+        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())'];
+        $params = [];
+        [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
+        if ($orgSql !== '') {
+            $where[] = $orgSql;
+            $params  = array_merge($params, $orgParams);
+        }
+
         $rows = db_rows(
             'SELECT id, public_id, title, body, category, pinned, status, published_at, updated_at
              FROM content_notices
-             WHERE status = \'published\'
-               AND (published_at IS NULL OR published_at <= NOW())
+             WHERE ' . implode(' AND ', $where) . '
              ORDER BY pinned DESC, published_at DESC, id DESC
              LIMIT ' . max(1, min(100, $limit)),
-            []
+            $params
         );
 
         return array_map([self::class, 'mapRiderRow'], $rows);
     }
 
-    public static function findForRider(int $id): ?array
+    public static function findForRider(int $id, int $agencyId = 0): ?array
     {
+        $where  = ['id = ?', "status = 'published'", '(published_at IS NULL OR published_at <= NOW())'];
+        $params = [$id];
+        [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
+        if ($orgSql !== '') {
+            $where[] = $orgSql;
+            $params  = array_merge($params, $orgParams);
+        }
+
         $row = db_row(
             'SELECT id, public_id, title, body, category, pinned, status, published_at, updated_at
              FROM content_notices
-             WHERE id = ? AND status = \'published\'
-               AND (published_at IS NULL OR published_at <= NOW())
+             WHERE ' . implode(' AND ', $where) . '
              LIMIT 1',
-            [$id]
+            $params
         );
 
         return $row ? self::mapRiderRow($row) : null;
+    }
+
+    /**
+     * 라이더(대리점 소속)가 볼 수 있는 공지 org 범위: 자기 대리점 + 상위(총판·본사) + 전역(NULL).
+     * agencyId 0 이면 제한 없음(레거시·전역).
+     *
+     * @return array{0:string,1:list<int>}
+     */
+    private static function riderOrgVisibility(int $agencyId): array
+    {
+        if ($agencyId < 1) {
+            return ['', []];
+        }
+        $orgIds = Org::ancestorOrgIds($agencyId);
+        if ($orgIds === []) {
+            return ['org_id IS NULL', []];
+        }
+        $ph = implode(',', array_fill(0, count($orgIds), '?'));
+
+        return ["(org_id IS NULL OR org_id IN ({$ph}))", array_values($orgIds)];
     }
 
     /**
@@ -110,16 +150,23 @@ final class Notice
      *
      * @return list<array<string, mixed>>
      */
-    public static function loginPopupQueue(): array
+    public static function loginPopupQueue(int $agencyId = 0): array
     {
+        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', "(pinned = 1 OR category = '긴급')"];
+        $params = [];
+        [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
+        if ($orgSql !== '') {
+            $where[] = $orgSql;
+            $params  = array_merge($params, $orgParams);
+        }
+
         $rows = db_rows(
             'SELECT id, public_id, title, body, category, pinned, published_at
              FROM content_notices
-             WHERE status = \'published\'
-               AND (published_at IS NULL OR published_at <= NOW())
-               AND (pinned = 1 OR category = \'긴급\')
+             WHERE ' . implode(' AND ', $where) . '
              ORDER BY pinned DESC, published_at DESC, id DESC
-             LIMIT 10'
+             LIMIT 10',
+            $params
         );
 
         return array_map([self::class, 'mapRiderRow'], $rows);
@@ -169,9 +216,12 @@ final class Notice
         }
 
         if ($id) {
-            $exists = db_row('SELECT id, public_id FROM content_notices WHERE id = ?', [$id]);
+            $exists = db_row('SELECT id, public_id, org_id FROM content_notices WHERE id = ?', [$id]);
             if (!$exists) {
                 throw new InvalidArgumentException('공지를 찾을 수 없습니다.');
+            }
+            if (!Org::canAccessOrg((int) ($exists['org_id'] ?? 0))) {
+                throw new InvalidArgumentException('이 공지를 수정할 권한이 없습니다.');
             }
             db_execute(
                 'UPDATE content_notices
@@ -184,10 +234,11 @@ final class Notice
         }
 
         $publicId = self::generatePublicId();
+        $orgId    = admin_org_id();
         $newId = db_insert(
             'INSERT INTO content_notices
-                (public_id, title, body, category, pinned, status, published_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (public_id, title, body, category, pinned, status, published_at, created_by, org_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $publicId,
                 $title,
@@ -197,6 +248,7 @@ final class Notice
                 $status,
                 $publishedAt,
                 $adminId > 0 ? $adminId : null,
+                $orgId > 0 ? $orgId : null,
             ]
         );
 
@@ -208,10 +260,14 @@ final class Notice
         if ($id < 1) {
             throw new InvalidArgumentException('잘못된 ID입니다.');
         }
-        $n = db_execute('DELETE FROM content_notices WHERE id = ?', [$id]);
-        if ($n < 1) {
+        $exists = db_row('SELECT org_id FROM content_notices WHERE id = ? LIMIT 1', [$id]);
+        if (!$exists) {
             throw new InvalidArgumentException('공지를 찾을 수 없습니다.');
         }
+        if (!Org::canAccessOrg((int) ($exists['org_id'] ?? 0))) {
+            throw new InvalidArgumentException('이 공지를 삭제할 권한이 없습니다.');
+        }
+        db_execute('DELETE FROM content_notices WHERE id = ?', [$id]);
     }
 
     public static function findAdminById(int $id): ?array

@@ -42,13 +42,17 @@ final class AdminDashboard
         ];
 
         try {
+            // 멀티테넌시: 소속 대리점 스코프
+            [$rScope, $rScopeParams] = Org::agencyScopeClause('agency_id');
+            $rScopeSql = $rScope !== '' ? ' AND ' . $rScope : '';
             $data['active_riders'] = (int) (db_row(
-                "SELECT COUNT(*) AS c FROM riders WHERE status = 'active'"
+                "SELECT COUNT(*) AS c FROM riders WHERE status = 'active'" . $rScopeSql,
+                $rScopeParams
             )['c'] ?? 0);
             $data['riders_new_week'] = (int) (db_row(
                 "SELECT COUNT(*) AS c FROM riders
-                 WHERE status = 'active' AND created_at >= ?",
-                [$weekStart . ' 00:00:00']
+                 WHERE status = 'active' AND created_at >= ?" . $rScopeSql,
+                array_merge([$weekStart . ' 00:00:00'], $rScopeParams)
             )['c'] ?? 0);
         } catch (Throwable $e) {
             $data['errors'][] = '라이더: ' . $e->getMessage();
@@ -98,13 +102,16 @@ final class AdminDashboard
 
         try {
             $data['timeline'] = self::buildTimeline();
+            [$uScope, $uScopeParams] = Org::agencyScopeClause('u.agency_id');
+            $uCond = $uScope !== '' ? ' AND ' . $uScope : '';
             $data['recent_uploads'] = db_rows(
                 "SELECT u.id, u.settlement_date, u.platform, u.original_filename,
                         u.total_rows, u.ok_rows, u.error_rows, u.status, u.created_at
                    FROM settlement_uploads u
-                  WHERE u.kind = 'daily'
+                  WHERE u.kind = 'daily'{$uCond}
                   ORDER BY u.created_at DESC
-                  LIMIT 8"
+                  LIMIT 8",
+                $uScopeParams
             );
         } catch (Throwable $e) {
             $data['errors'][] = '업로드 이력: ' . $e->getMessage();
@@ -143,12 +150,15 @@ final class AdminDashboard
         if (!self::tableExists('settlement_daily_riders')) {
             return ['payout' => 0, 'orders' => 0];
         }
+        [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
         $row = db_row(
-            'SELECT COALESCE(SUM(payout_amount), 0) AS payout,
-                    COALESCE(SUM(order_count), 0) AS orders
-               FROM settlement_daily_riders
-              WHERE settlement_date >= ? AND settlement_date <= ?',
-            [$from, $to]
+            "SELECT COALESCE(SUM(sdr.payout_amount), 0) AS payout,
+                    COALESCE(SUM(sdr.order_count), 0) AS orders
+               FROM settlement_daily_riders sdr {$join}
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}",
+            array_merge([$from, $to], $scopeParams)
         );
 
         return [
@@ -170,13 +180,16 @@ final class AdminDashboard
             'coupang' => '쿠팡이츠',
             'other'   => '기타',
         ];
+        [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
         $rows = db_rows(
-            'SELECT platform, COALESCE(SUM(payout_amount), 0) AS amount
-               FROM settlement_daily_riders
-              WHERE settlement_date >= ? AND settlement_date <= ?
-              GROUP BY platform
-              ORDER BY amount DESC',
-            [$from, $to]
+            "SELECT sdr.platform, COALESCE(SUM(sdr.payout_amount), 0) AS amount
+               FROM settlement_daily_riders sdr {$join}
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
+              GROUP BY sdr.platform
+              ORDER BY amount DESC",
+            array_merge([$from, $to], $scopeParams)
         );
         $total = 0;
         foreach ($rows as $r) {
@@ -202,11 +215,14 @@ final class AdminDashboard
         if (!self::tableExists('settlement_weekly_deductions')) {
             return 0;
         }
+        [$scope, $scopeParams] = Org::agencyScopeClause('u.agency_id');
+        $join = $scope !== '' ? 'INNER JOIN settlement_uploads u ON u.id = swd.upload_id' : '';
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
         $row = db_row(
-            'SELECT COALESCE(SUM(ABS(amount)), 0) AS total
-               FROM settlement_weekly_deductions
-              WHERE week_start >= ? AND week_start <= ?',
-            [$from, $to]
+            "SELECT COALESCE(SUM(ABS(swd.amount)), 0) AS total
+               FROM settlement_weekly_deductions swd {$join}
+              WHERE swd.week_start >= ? AND swd.week_start <= ?{$cond}",
+            array_merge([$from, $to], $scopeParams)
         );
 
         return (int) ($row['total'] ?? 0);
@@ -220,14 +236,17 @@ final class AdminDashboard
         $events = [];
 
         if (self::tableExists('settlement_uploads')) {
+            [$uScope, $uScopeParams] = Org::agencyScopeClause('u.agency_id');
+            $uCond = $uScope !== '' ? ' AND ' . $uScope : '';
             $uploads = db_rows(
                 "SELECT u.original_filename, u.platform, u.total_rows, u.ok_rows, u.error_rows,
                         u.status, u.created_at
                    FROM settlement_uploads u
                   WHERE u.kind = 'daily'
-                    AND u.created_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
+                    AND u.created_at >= DATE_SUB(NOW(), INTERVAL 3 DAY){$uCond}
                   ORDER BY u.created_at DESC
-                  LIMIT 6"
+                  LIMIT 6",
+                $uScopeParams
             );
             $plat = ['baemin' => '배민', 'coupang' => '쿠팡', 'other' => '기타'];
             foreach ($uploads as $u) {
@@ -251,13 +270,16 @@ final class AdminDashboard
         }
 
         if (self::tableExists('withdrawal_requests')) {
+            [$wScope, $wScopeParams] = Org::agencyScopeClause('r.agency_id');
+            $wCond = $wScope !== '' ? ' AND ' . $wScope : '';
             $wds = db_rows(
                 "SELECT wr.requested_at, wr.amount, r.name AS rider_name
                    FROM withdrawal_requests wr
                    INNER JOIN riders r ON r.id = wr.rider_id
-                  WHERE wr.requested_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
+                  WHERE wr.requested_at >= DATE_SUB(NOW(), INTERVAL 3 DAY){$wCond}
                   ORDER BY wr.requested_at DESC
-                  LIMIT 5"
+                  LIMIT 5",
+                $wScopeParams
             );
             foreach ($wds as $w) {
                 $events[] = [

@@ -229,6 +229,7 @@ final class AuditLog
             str_starts_with($action, 'deduction.') => 'deduction_global_config',
             str_starts_with($action, 'rider.') => 'riders',
             str_starts_with($action, 'admin.') => 'admins',
+            str_starts_with($action, 'org.') => 'organizations',
             str_starts_with($action, 'codes.') => 'system_codes',
             default => '',
         };

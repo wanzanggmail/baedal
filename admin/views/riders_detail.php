@@ -31,6 +31,14 @@ if (!$rider) {
     return;
 }
 
+// 멀티테넌시: 소속 대리점 스코프 밖이면 차단
+if (!Org::canAccessAgency((int) ($rider['agency_id'] ?? 0))) {
+    require_once INC_PATH . '/app_content_open.php';
+    echo '<div class="alert alert-danger p-5">이 라이더에 접근할 권한이 없습니다. <a href="' . htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') . '" class="btn btn-sm btn-light-primary ms-3">목록으로</a></div>';
+    require_once INC_PATH . '/app_content_close.php';
+    return;
+}
+
 $platforms = db_rows(
     'SELECT platform, external_id FROM rider_platforms WHERE rider_id = ? AND is_connected = 1 ORDER BY id',
     [$riderId]

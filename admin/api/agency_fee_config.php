@@ -32,14 +32,19 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
+// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
+require_once INC_PATH . '/Org.php';
+$cfgOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
     try {
         echo json_encode([
             'ok'           => true,
-            'config'       => AgencyFeeConfig::get(),
+            'config'       => AgencyFeeConfig::get($cfgOrgId),
             'table_ready'  => AgencyFeeConfig::tableReady(),
+            'scope'        => $cfgOrgId !== null ? 'agency' : 'global',
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         $err('조회 실패: ' . $e->getMessage(), 500);
@@ -65,7 +70,7 @@ if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
 
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
-    $cfg = AgencyFeeConfig::save($body, $adminId > 0 ? $adminId : null);
+    $cfg = AgencyFeeConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
     AuditLog::record(
         'deduction.agency_fee.save',
         'deduction_global_config',

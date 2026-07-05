@@ -55,6 +55,13 @@ if (!$needsMigrate) {
             $params[] = $like;
         }
 
+        // 멀티테넌시: 업로드 소유 대리점 스코프
+        [$scopeSql, $scopeParams] = Org::agencyScopeClause('u.agency_id');
+        if ($scopeSql !== '') {
+            $where[] = $scopeSql;
+            $params  = array_merge($params, $scopeParams);
+        }
+
         $whereSql = implode(' AND ', $where);
 
         $countRow = db_row(

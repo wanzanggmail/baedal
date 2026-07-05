@@ -43,12 +43,18 @@ if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
 
 $tmpPath = (string) ($_FILES['file']['tmp_name'] ?? '');
 $uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
+
+// 멀티테넌시: 대리점=자기 암호 우선 / 그 외=전역
+require_once INC_PATH . '/Org.php';
+$testOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+
 $passwords = SettlementExcelConfig::passwordsToTry(
     $platform,
-    $uploadPassword !== '' ? $uploadPassword : null
+    $uploadPassword !== '' ? $uploadPassword : null,
+    $testOrgId
 );
 
-$storedMeta = SettlementExcelConfig::storedPasswordMeta($platform);
+$storedMeta = SettlementExcelConfig::storedPasswordMeta($platform, $testOrgId);
 
 try {
     $test = XlsxDecrypt::testDecrypt($tmpPath, $passwords);

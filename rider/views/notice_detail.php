@@ -9,7 +9,7 @@ if ($noticeId === null) {
     header('Location: ' . rider_url('notices'), true, 302);
     exit;
 }
-$notice = Notice::findForRider($noticeId);
+$notice = Notice::findForRider($noticeId, rider_current_agency_id());
 ?>
 <div class="card card-flush shadow-sm">
 	<div class="card-body">

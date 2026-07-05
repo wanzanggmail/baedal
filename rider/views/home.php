@@ -21,8 +21,9 @@ $homeNotices = [];
 $contentError = null;
 
 try {
-    $homeBanners = Banner::listActiveForRiderHome(20);
-    $homeNotices = Notice::listPublishedForRider(5);
+    $riderAgencyId = rider_current_agency_id();
+    $homeBanners = Banner::listActiveForRiderHome(20, $riderAgencyId);
+    $homeNotices = Notice::listPublishedForRider(5, $riderAgencyId);
 } catch (Throwable $e) {
     $contentError = $e->getMessage();
 }

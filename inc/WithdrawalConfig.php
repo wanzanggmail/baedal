@@ -18,14 +18,24 @@ final class WithdrawalConfig
         ];
     }
 
-    /** @return array<string, int> */
-    public static function get(): array
+    /**
+     * 대리점(org)별 출금 정책. 해당 org 행 → 전역 기본(org_id NULL) → PHP 기본 순 폴백.
+     *
+     * @return array<string, int>
+     */
+    public static function get(?int $orgId = null): array
     {
         if (!db_table_exists('withdrawal_config')) {
             return self::defaults();
         }
 
-        $row = db_row('SELECT * FROM withdrawal_config WHERE id = 1 LIMIT 1');
+        $row = null;
+        if ($orgId !== null && $orgId > 0) {
+            $row = db_row('SELECT * FROM withdrawal_config WHERE org_id = ? LIMIT 1', [$orgId]);
+        }
+        if ($row === null) {
+            $row = db_row('SELECT * FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+        }
         if ($row === null) {
             return self::defaults();
         }
@@ -44,7 +54,7 @@ final class WithdrawalConfig
      * @param array<string, mixed> $data
      * @return array<string, int>
      */
-    public static function save(array $data, ?int $adminId = null): array
+    public static function save(array $data, ?int $orgId = null, ?int $adminId = null): array
     {
         if (!db_table_exists('withdrawal_config')) {
             throw new RuntimeException('withdrawal_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
@@ -57,27 +67,33 @@ final class WithdrawalConfig
             'fee_per_tx_long'   => max(0, (int) ($data['fee_per_tx_long'] ?? 0)),
         ];
 
-        $exists = db_row('SELECT id FROM withdrawal_config WHERE id = 1 LIMIT 1');
+        $hasOrg  = $orgId !== null && $orgId > 0;
+        $exists  = $hasOrg
+            ? db_row('SELECT id FROM withdrawal_config WHERE org_id = ? LIMIT 1', [$orgId])
+            : db_row('SELECT id FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+
         if ($exists) {
             db_execute(
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
                      updated_by = ?, updated_at = NOW()
-                 WHERE id = 1',
+                 WHERE id = ?',
                 [
                     $cfg['reserve_amount'],
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
                     $cfg['fee_per_tx_long'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
+                    (int) $exists['id'],
                 ]
             );
         } else {
             db_insert(
                 'INSERT INTO withdrawal_config
-                    (id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long, updated_by)
-                 VALUES (1, ?, ?, ?, ?, ?)',
+                    (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?)',
                 [
+                    $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
@@ -87,12 +103,12 @@ final class WithdrawalConfig
             );
         }
 
-        return self::get();
+        return self::get($orgId);
     }
 
-    public static function feeForAccruedDays(int $accruedDays): int
+    public static function feeForAccruedDays(int $accruedDays, ?int $orgId = null): int
     {
-        $cfg = self::get();
+        $cfg = self::get($orgId);
 
         return $accruedDays < $cfg['fee_day_threshold']
             ? $cfg['fee_per_tx_short']

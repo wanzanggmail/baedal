@@ -36,11 +36,23 @@ $origName = (string) ($_FILES['file']['name'] ?? 'upload.xlsx');
 $tmpPath  = (string) ($_FILES['file']['tmp_name'] ?? '');
 $platform = trim((string) ($_POST['platform'] ?? ''));
 
+// 멀티테넌시: 미리보기 복호화 시 대리점 암호 우선 (대리점=자기, 그 외=선택 대리점 또는 전역)
+require_once INC_PATH . '/Org.php';
+if (admin_org_level() === Org::LEVEL_AGENCY) {
+    $previewAgencyId = admin_org_id();
+} else {
+    $previewAgencyId = (int) ($_POST['agency_id'] ?? 0);
+    if ($previewAgencyId < 1 || !Org::canAccessAgency($previewAgencyId)) {
+        $previewAgencyId = 0;
+    }
+}
+
 $result = settlement_upload_inspect(
     $tmpPath,
     $origName,
     $platform !== '' ? $platform : null,
-    (string) ($_POST['excel_password'] ?? '')
+    (string) ($_POST['excel_password'] ?? ''),
+    $previewAgencyId > 0 ? $previewAgencyId : null
 );
 
 echo json_encode($result, JSON_UNESCAPED_UNICODE);

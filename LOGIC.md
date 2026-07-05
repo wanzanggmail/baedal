@@ -55,6 +55,71 @@
 
 ---
 
+## 2.5 멀티테넌시 — 조직 계층 (어드민 → 총판 → 대리점)
+
+> **2026-06-30 도입.** 기존 시스템은 "운영 주체 = 단일 대리점" 전제(소유 컬럼 없음)였으나, **3계층 멀티테넌시**로 확장한다. **구현 진행 중** — 각 절의 "상태"는 Phase 진척에 따라 갱신.
+
+### 2.5.1 조직 트리 (`organizations`)
+
+```
+어드민(admin, 루트 1개)
+ └─ 총판(distributor, N)
+     └─ 대리점(agency, N)
+         └─ 라이더(riders)
+```
+
+| 컬럼 | 의미 |
+|------|------|
+| `id` | PK |
+| `parent_id` | 상위 조직 (루트 admin은 NULL) |
+| `level` | `admin` \| `distributor` \| `agency` |
+| `name` / `code` | 조직명 / 식별 코드(유일) |
+| `is_active` | 사용 여부 |
+
+- **계정 ≠ 조직.** 로그인 계정은 `admins.org_id` 로 조직에 소속. 한 조직에 여러 계정 가능(예: 총판 사장 + 정산 직원).
+- **라이더는 대리점 소속:** `riders.agency_id` → `organizations.id` (level=agency).
+
+### 2.5.2 데이터 스코프 규칙
+
+| 로그인 조직 level | 볼 수 있는 데이터 |
+|-------------------|-------------------|
+| `admin` (루트) | **전체** (스코프 필터 없음) |
+| `distributor` | 자기 + **하위 모든 대리점** |
+| `agency` | **자기 대리점만** |
+
+- 구현: 로그인 시 현재 계정이 볼 수 있는 **agency id 집합**을 산출(`admin_scope_agency_ids()` — `inc/Org.php`), 모든 목록 쿼리에 `WHERE agency_id IN (:scope)` 주입.
+- 어드민(루트)은 필터 생략(전체).
+
+### 2.5.3 권한 = 2축 (범위 × 기능)
+
+- **범위(scope)** = 계정의 `org_id` 트리 위치 → *어떤 데이터 행*이 보이는가. (신규 축)
+- **기능(role)** = 기존 `admins.role`(super/operation/settlement/admin) → 그 범위 *안에서* 무엇을 읽고/쓰는가. (기존 §4.2 RBAC 재활용)
+- 예: "B대리점-settlement" 계정 = 범위 B대리점, 기능 정산 → B대리점 정산만 쓰기.
+- POST API는 (1) 기능 역할(`admin_can_write`) **+** (2) 대상 행이 자기 스코프 내인지 **둘 다** 검사.
+
+### 2.5.4 테넌트화 대상 테이블 (싱글톤 → 조직별)
+
+기존 단일행 설정은 **조직별**로 전환(`org_id` 키 추가):
+
+| 테이블 | 변경 |
+|--------|------|
+| `withdrawal_config` | PK `(org_id)` — 대리점별 보증금·건당 수수료 |
+| `deduction_global_config` | PK `(org_id)` — 대리점별 원천세·고용보험·대행 수수료 |
+| `settlement_excel_config` | PK `(org_id, platform)` — 대리점별 엑셀 암호 |
+| `agency_fee_config` | `org_id` 추가 |
+| `settlement_uploads` | `agency_id` 추가(업로드 소유 대리점) |
+| `content_notices` / `content_banners` | `org_id` 추가(작성 조직, broadcast 범위) |
+
+라이더 통해 간접 스코프되는 테이블(`settlement_rider_cycles`, `withdrawal_requests`, `rider_wallets`, `deduction_entries`)은 `riders.agency_id` JOIN으로 범위 판정.
+
+### 2.5.5 도메인 규칙
+
+- **정산 업로드:** 각 **대리점이 자기 정산서**를 업로드 → `agency_id = 업로더 대리점`. 중복 검사(§5.4)는 **대리점 범위 내**에서 판정.
+- **공지·배너:** **조직별 + 상위 broadcast.** 대리점은 자기 라이더에게만 노출. 어드민/총판은 하위 전체 broadcast 가능. 라이더는 자기 `agency_id` + 상위 broadcast 공지·배너만 조회.
+- **조직 관리 화면:** `system/orgs`(`Organization`/`admin/api/orgs.php`/`admin/views/system_orgs.php`). 본사는 총판·대리점 전체, 총판은 자기 하위 대리점만. **생성 시 로그인 계정 동시 발급**(트랜잭션). 접근 권한 `admin_can_manage_orgs()`=본사·총판 레벨 + 최고/운영 역할. 조직 계정 역할은 operation/settlement/admin (super는 플랫폼 루트 전용). 조직 중지 시 소속 계정 로그인도 함께 차단.
+
+---
+
 ## 3. 관리자 메뉴별 구현 상태
 
 | route | 화면 | 상태 | 도메인/API | 비고 |
@@ -73,9 +138,10 @@
 | `content/notices` | 공지 | **DB** | `Notice`, `notices.php` | `php migrate.php` |
 | `content/banners` | 배너 | **DB** | `Banner`, `banners.php`, `banner_upload.php` | |
 | `riders/list`, `riders/detail` | 라이더 | **DB** | `riders.php`, `rider_action.php` | 은행 목록: `system_codes` |
+| `system/orgs` | 조직 관리(총판·대리점) | **DB** | `Organization`, `orgs.php` | 본사·총판 레벨(운영/최고) · 조직 생성 시 로그인 계정 동시 발급 |
 | `system/admins` | 관리자·권한 | **DB** | `AdminAccount`, `admins.php` | super 전용 |
 | `system/codes` | 코드/마스터 | **DB** | `SystemCode`, `codes.php` | super 전용 |
-| `system/settlement-excel` | 정산 엑셀 열기 암호 | **DB** | `SettlementExcelConfig`, `settlement_excel_config.php` | super, settlement |
+| `system/settlement-excel` | 정산 엑셀 열기 암호 | **DB** | `SettlementExcelConfig`, `settlement_excel_config.php` | super(전역)·settlement / **대리점별 암호**(org_id), 업로드 시 직접 입력 가능 |
 | `system/audit` | 감사 로그 | **DB** | `AuditLog` | `php migrate.php` |
 
 ---
@@ -85,7 +151,8 @@
 ### 4.1 관리자 인증
 
 - 로그인: `admin/index.php?route=login` → `admins` 테이블, `password_verify`, `is_active = 1`
-- 세션: `admin_auth`, `admin_id`, `admin_login_id`, `admin_name`, `admin_role`
+- 세션: `admin_auth`, `admin_id`, `admin_login_id`, `admin_name`, `admin_role`, **`admin_org_id`** (멀티테넌시; 구 세션은 `admin_org_id()`가 DB에서 1회 보충)
+- 멀티테넌시 헬퍼(`inc/auth.php`): `admin_org_id()`, `admin_org()`, `admin_org_level()`, `admin_scope_agency_ids()` → 스코프 계산 본체는 **`inc/Org.php`**(`Org::scopeAgencyIds`/`scopeOrgIds`/`agencyScopeClause`/`canAccessAgency`)
 - 브루트포스: 10분 내 5회 실패 시 잠금
 - 성공 시 `last_login_at` 갱신 + `AuditLog::record('auth.login', ...)`
 
@@ -138,6 +205,7 @@
 | `content.notice.save` / `.delete` | 공지 |
 | `content.banner.save` / `.delete` | 배너 |
 | `admin.create` / `.update` / `.activate` / `.deactivate` | 관리자 |
+| `org.create` / `.update` / `.activate` / `.deactivate` | 조직(총판·대리점) → `organizations` |
 | `codes.create` / `.update` / `.delete` | 코드 마스터 |
 | `rider.status` / `.memo` / … | 라이더 |
 | `settlement.upload` | 정산 업로드 | |
@@ -195,6 +263,7 @@
 | **중복 업로드** | 동일 **귀속일+플랫폼** 이미 있으면 거부. 동일 **파일명** 또는 **SHA256(`file_hash`)** 도 거부. 덮어쓰기 없음 — 재업로드 시 기존 건 삭제 후 |
 | **플랫폼 자동 감지** | 파일 선택 시 `settlement_upload_preview.php` → `SettlementPlatformDetect`. **파싱 성공 = 쿠팡이츠** 로 판단 (현재 파서 기준). 파일명·헤더·내용 키워드 보조 |
 | **플랫폼 불일치 차단** | 선택 platform ≠ 감지 결과(신뢰도 medium 이상)면 업로드 거부. `confirm_platform_mismatch=1` 로 강제 업로드 가능. `other`는 검증 생략 |
+| **업로드 2단계** | 파일 제출 = `settlement_upload.php?mode=preview`(파싱+매칭만, **저장 안 함**) → 미리보기 모달로 행·매칭 확인. 미매칭 라이더는 모달에서 **빠른 등록**(`settlement_register_rider.php` — 최소 정보 + `rider_platforms.external_id=license_id` 연동, 업로드 대리점 귀속) → 「확정 업로드」가 파일 재전송으로 커밋(이때 신규 라이더 매칭). 매칭 헬퍼 `settlement_match_rider_id()`(license→이름, 대리점 범위). 중복은 미리보기에선 경고, 확정 시 차단 |
 | 이력 화면 | `settlement/history` — 필터·목록·상세 링크 |
 | migrate | `php migrate.php` (`sql/base_schema.sql` → 확장 SQL) |
 | 권한 | 조회: settlement, operation, super / 업로드 POST: settlement, super |
@@ -313,14 +382,18 @@ fee_per_tx = accrued_days < fee_day_threshold ? fee_per_tx_short : fee_per_tx_lo
 
 PWA: `rider/service-worker.js`, `manifest.php`.
 
+**멀티테넌시(§2.5):** 라이더는 `riders.agency_id` 로 대리점 소속. 공지·배너는 자기 대리점 + 상위(총판·본사) broadcast + 전역(org_id NULL)만 노출 — `rider_current_agency_id()`(inc/rider_auth.php)를 `Notice::listPublishedForRider/findForRider/loginPopupQueue`·`Banner::listActiveForRiderHome`에 전달. 정산·지갑·출금은 `rider_id` 기준이라 자동 격리(출금 정책은 라이더 소속 대리점 설정 사용).
+
 ---
 
 ## 7. 마이그레이션·시드
 
 | 스크립트 | 대상 |
 |----------|------|
-| `php migrate.php` | `inc/MigrateRunner.php` — **`sql/base_schema.sql`** (admins, riders, settlement_uploads, …) → `content_tables`, `settlement_*`, `withdrawal_wallet`, `agency_fee_config`, `audit_tables` + ALTER (멱등) |
-| `php seed.php` / `seed.sql` | admins, system_codes, deduction_global_config 초기값 |
+| `php migrate.php` | `inc/MigrateRunner.php` — **`sql/base_schema.sql`** (admins, riders, settlement_uploads, …) → `content_tables`, `settlement_*`, `withdrawal_wallet`, `agency_fee_config`, **`organizations`**, `audit_tables` + ALTER (멱등). 멀티테넌시: `migrateOrgColumns()`(admins.org_id, riders.agency_id, settlement_uploads.agency_id, content_*.org_id) · `migrateTenantConfig()`(설정 테이블 org_id화) |
+| `php seed.php` / `seed.sql` | 조직 트리(HQ→DIST-01→AG-01), admins(org_id 소속·백필), 기존 riders.agency_id 백필, system_codes, deduction_global_config 초기값 |
+
+**멀티테넌시 시드 계정 (개발):** `admin`/super @본사(HQ) · `operation01`/operation @총판(DIST-01) · `settlement01`/settlement @대리점(AG-01) — 계층별 스코프 테스트용. 비밀번호 전부 `Admin1234!`.
 
 운영 배포 후 `migrate.php`·`seed.php` **웹 접근 차단** 권장 (GitHub Actions rsync에서 제외).
 
@@ -356,6 +429,13 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-06-30 | **멀티테넌시 설계 도입(§2.5)** — 어드민>총판>대리점 3계층 `organizations` 트리, 범위×기능 2축 권한, 설정/콘텐츠/정산 테넌트화. Phase 0 기록 |
+| 2026-07-01 | 멀티테넌시 Phase 1~4 — 스키마/마이그레이션, `inc/Org.php` 스코핑 엔진, `system/orgs` 조직 관리(조직+계정 통합 발급), **데이터 스코핑 적용**: 라이더·정산(업로드/이력/반영/수수료)·출금(목록/요약/처리/다운로드)·대시보드·공지/배너(작성 org_id + 라이더 broadcast). 라이더·출금·업로드 쓰기 경로에 소속 가드 |
+| 2026-07-01 | 멀티테넌시 — **정산 엑셀 열기 암호 per-agency화**: `SettlementExcelConfig` get/save/passwordsToTry/storedPasswordMeta/allStored에 org_id. 복호화 시도 순서 = 업로드 직접입력 → 대리점 저장 → 전역 → 환경변수 → baemin. 업로드 화면에 **암호 직접 입력 필드** 추가, 설정 화면(`system/settlement-excel`)은 대리점=자기/본사=전역. 미리보기·테스트도 스코프 반영 |
+| 2026-07-01 | 정산 업로드 **2단계화**(§5.4): 미리보기(파싱+매칭, 저장 안 함) 모달 → 미매칭 라이더 그 자리에서 빠른 등록(license 연동) → 확정 업로드. 신규 `settlement_register_rider.php`, `settlement_upload.php` mode=preview + `settlement_match_rider_id()` |
+| 2026-07-01 | 멀티테넌시 Phase 5 — 라이더 앱 연동: `rider_current_agency_id()` 추가, 라이더 공지·배너 노출을 소속 대리점+상위 broadcast+전역으로 제한. 정산/지갑/출금은 rider 기준 자동 격리. **3계층 멀티테넌시 end-to-end 동작** |
+| 2026-07-01 | 멀티테넌시 Phase 4b — **설정값 per-agency화**: `WithdrawalConfig`·`AgencyFeeConfig`·`globalDeductionConfig` get/save에 org_id(대리점행→전역 NULL→기본 폴백). 출금(`RiderWallet::previewWithdrawal`이 라이더 소속 대리점 정책 사용)·정산 반영(`SettlementLedger::applyUpload`이 업로드 대리점 수수료 사용). 설정 화면: 대리점=자기/본사=전역. `withdrawal/settings` 라우트 대리점 레벨 허용 |
+| 2026-07-01 | **`SettlementExcelConfig` per-agency화** — 엑셀 열기 암호도 대리점별 저장(`allStored`/`storedPasswordMeta`/`passwordsToTry`/`allPasswordsToTry`/`save`에 org_id). 복호화 시도 순서: 업로드 입력 → 대리점 저장 → 전역 저장 → 환경변수 → baemin. `system/settlement-excel`·엑셀 테스트·업로드 모두 스코프 반영. 설정 미저장 대리점은 전역 기본으로 폴백. **멀티테넌시 설정값 전면 per-agency 완료** |
 | 2026-05-24 | 목업 화면 제거: 프로모션·통계·파싱 오류·차감(수동/자동/할부) UI — `deduction/agency-fee`만 유지 |
 | 2026-05-24 | 저장소 정리: Metronic 데모 HTML·`src/`·미사용 assets 제거, `rider_shell_end.php` 복구 |
 | 2026-05-24 | 출금 일원화: 자동 일일정산 메뉴 제거, 라이더 전액 출금·건당 수수료·보증금·withdrawal_config |

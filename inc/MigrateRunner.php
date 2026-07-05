@@ -18,10 +18,13 @@ final class MigrateRunner
         self::runSqlFile('settlement_excel_config.sql');
         self::runSqlFile('withdrawal_wallet.sql');
         self::runSqlFile('agency_fee_config.sql');
+        self::runSqlFile('organizations.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
         self::migrateAuditLogs();
+        self::migrateOrgColumns();
+        self::migrateTenantConfig();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -139,6 +142,99 @@ final class MigrateRunner
                 echo "OK    rider_wallets backfill ({$missing})\n";
             } else {
                 echo "SKIP  rider_wallets backfill\n";
+            }
+        }
+    }
+
+    /**
+     * 멀티테넌시 — 기존 테이블에 조직 소속 컬럼 추가 (멱등)
+     * organizations.sql 이후 실행. FK는 생략(앱 레벨 정합성 + 인덱스).
+     */
+    private static function migrateOrgColumns(): void
+    {
+        echo "== org columns ==\n";
+
+        $specs = [
+            ['admins',             'org_id',    "ADD COLUMN org_id INT UNSIGNED NULL COMMENT '소속 조직(organizations.id)' AFTER role, ADD KEY idx_admins_org (org_id)"],
+            ['riders',             'agency_id', "ADD COLUMN agency_id INT UNSIGNED NULL COMMENT '소속 대리점(organizations.id, level=agency)' AFTER team_code, ADD KEY idx_riders_agency (agency_id)"],
+            ['settlement_uploads', 'agency_id', "ADD COLUMN agency_id INT UNSIGNED NULL COMMENT '업로드 소유 대리점' AFTER platform, ADD KEY idx_su_agency (agency_id)"],
+            ['content_notices',    'org_id',    "ADD COLUMN org_id INT UNSIGNED NULL COMMENT '작성 조직(broadcast 기준)' AFTER category, ADD KEY idx_notice_org (org_id)"],
+            ['content_banners',    'org_id',    "ADD COLUMN org_id INT UNSIGNED NULL COMMENT '작성 조직(broadcast 기준)' AFTER slot, ADD KEY idx_banner_org (org_id)"],
+        ];
+
+        foreach ($specs as [$table, $col, $alter]) {
+            if (!db_table_exists($table)) {
+                echo "SKIP  {$table} (테이블 없음)\n";
+                continue;
+            }
+            $cols = array_column(db_rows("SHOW COLUMNS FROM {$table}"), 'Field');
+            if (in_array($col, $cols, true)) {
+                echo "SKIP  {$table}.{$col}\n";
+                continue;
+            }
+            try {
+                db_execute("ALTER TABLE {$table} {$alter}");
+                echo "OK    {$table}.{$col}\n";
+            } catch (Throwable $e) {
+                echo "ERROR {$table}.{$col} → " . $e->getMessage() . "\n";
+                exit(1);
+            }
+        }
+    }
+
+    /**
+     * 멀티테넌시 — 싱글톤 설정 테이블을 조직별로 전환 (멱등)
+     * org_id NULL = 전역 기본값, 대리점별 행은 distinct org_id.
+     */
+    private static function migrateTenantConfig(): void
+    {
+        echo "== tenant config (org_id) ==\n";
+
+        // id=1 싱글톤 → AUTO_INCREMENT + org_id (NULL=전역 기본)
+        foreach (['withdrawal_config', 'deduction_global_config'] as $table) {
+            if (!db_table_exists($table)) {
+                echo "SKIP  {$table} (테이블 없음)\n";
+                continue;
+            }
+            $cols = array_column(db_rows("SHOW COLUMNS FROM {$table}"), 'Field');
+            if (in_array('org_id', $cols, true)) {
+                echo "SKIP  {$table}.org_id\n";
+                continue;
+            }
+            try {
+                db_execute(
+                    "ALTER TABLE {$table}
+                        MODIFY COLUMN id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        ADD COLUMN org_id INT UNSIGNED NULL COMMENT '대리점 조직(NULL=전역 기본)' AFTER id,
+                        ADD UNIQUE KEY `uq_{$table}_org` (`org_id`)"
+                );
+                echo "OK    {$table}.org_id\n";
+            } catch (Throwable $e) {
+                echo "ERROR {$table}.org_id → " . $e->getMessage() . "\n";
+                exit(1);
+            }
+        }
+
+        // settlement_excel_config: platform PK → 대리점 surrogate id + (org_id, platform) unique
+        if (db_table_exists('settlement_excel_config')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_excel_config'), 'Field');
+            if (in_array('org_id', $cols, true)) {
+                echo "SKIP  settlement_excel_config.org_id\n";
+            } else {
+                try {
+                    db_execute(
+                        "ALTER TABLE settlement_excel_config
+                            DROP PRIMARY KEY,
+                            ADD COLUMN id INT UNSIGNED NOT NULL AUTO_INCREMENT FIRST,
+                            ADD PRIMARY KEY (id),
+                            ADD COLUMN org_id INT UNSIGNED NULL COMMENT '대리점 조직(NULL=전역 기본)' AFTER platform,
+                            ADD UNIQUE KEY `uq_sec_org_pf` (`org_id`, `platform`)"
+                    );
+                    echo "OK    settlement_excel_config.org_id\n";
+                } catch (Throwable $e) {
+                    echo "ERROR settlement_excel_config.org_id → " . $e->getMessage() . "\n";
+                    exit(1);
+                }
             }
         }
     }

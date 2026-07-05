@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/AgencyFeeConfig.php';
 
-$config       = AgencyFeeConfig::get();
+// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
+$cfgOrgId     = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+$config       = AgencyFeeConfig::get($cfgOrgId);
 $apiUrl       = ADMIN_BASE . '/api/agency_fee_config.php';
 $needsMigrate = !AgencyFeeConfig::tableReady();
 $canWrite     = admin_can_write('deduction');

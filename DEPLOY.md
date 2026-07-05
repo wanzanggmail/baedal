@@ -111,6 +111,21 @@ sudo -u apache /usr/bin/python3 -m pip install --user msoffcrypto-tool
 4. 라이더·정산 엑셀 **재업로드** (백업 없으면 수동 재입력)
 5. `seed.php` 실행 후 **파일 삭제**
 
+**미매칭 정산 행 → 더미 라이더 (로컬·1회성)**
+
+```bash
+# 대상 확인만
+php scripts/seed_riders_from_settlement.php --upload-id=3 --dry-run
+
+# DB에 더미 라이더 생성 + settlement_daily_riders 연결
+php scripts/seed_riders_from_settlement.php --upload-id=3
+
+# SQL 파일로 뽑기 (다른 DB에 수동 실행)
+php scripts/seed_riders_from_settlement.php --upload-id=3 --sql-only > seed_riders.sql
+```
+
+`upload-id`는 `settlement_uploads.id`. 기본 비밀번호 `Rider1234!` (`--password=` 로 변경).
+
 ---
 
 ## 배포 시 동작 요약

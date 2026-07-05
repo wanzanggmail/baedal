@@ -28,7 +28,8 @@ function settlement_upload_inspect(
     string $tmpPath,
     string $origName,
     ?string $selectedPlatform = null,
-    ?string $uploadPassword = null
+    ?string $uploadPassword = null,
+    ?int $agencyId = null
 ): array {
     $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
     if ($ext !== 'xlsx') {
@@ -45,7 +46,7 @@ function settlement_upload_inspect(
     }
 
     $pwNorm     = SettlementExcelConfig::normalizePassword((string) ($uploadPassword ?? ''));
-    $passwords  = SettlementExcelConfig::allPasswordsToTry($pwNorm !== '' ? $pwNorm : null);
+    $passwords  = SettlementExcelConfig::allPasswordsToTry($pwNorm !== '' ? $pwNorm : null, $agencyId);
     $parser     = new XlsxParser();
     $parsePath  = $tmpPath;
 

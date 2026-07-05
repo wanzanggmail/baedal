@@ -49,11 +49,14 @@ final class RiderWallet
     public static function previewWithdrawal(int $riderId): array
     {
         $wallet = self::get($riderId);
-        $cfg    = WithdrawalConfig::get();
+        // 멀티테넌시: 라이더 소속 대리점의 출금 정책 사용 (없으면 전역 기본)
+        $agencyId = (int) (db_row('SELECT agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId])['agency_id'] ?? 0);
+        $orgId    = $agencyId > 0 ? $agencyId : null;
+        $cfg     = WithdrawalConfig::get($orgId);
         $balance = (int) $wallet['balance'];
         $accrued = (int) $wallet['accrued_days'];
         $reserve = (int) $cfg['reserve_amount'];
-        $fee     = WithdrawalConfig::feeForAccruedDays($accrued);
+        $fee     = WithdrawalConfig::feeForAccruedDays($accrued, $orgId);
         $afterReserve = max(0, $balance - $reserve);
         $payout  = max(0, $afterReserve - $fee);
 

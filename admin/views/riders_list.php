@@ -18,6 +18,13 @@ if ($filterQ !== '') {
 if ($filterTeam !== '')   { $where[] = 'r.team_code = ?'; $params[] = $filterTeam; }
 if ($filterStatus !== '') { $where[] = 'r.status = ?';    $params[] = $filterStatus; }
 
+// 멀티테넌시: 소속 대리점 스코프
+[$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+if ($scopeSql !== '') {
+    $where[]  = $scopeSql;
+    $params   = array_merge($params, $scopeParams);
+}
+
 $whereStr = implode(' AND ', $where);
 
 $totalCount = (int) (db_row(
@@ -64,6 +71,11 @@ $banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank
 $detailBase = admin_url('riders/detail');
 $apiBase    = ADMIN_BASE . '/api/riders.php';
 $currentUrl = admin_url('riders/list');
+
+// 멀티테넌시: 라이더 소속 대리점 선택 (대리점 계정은 자기 대리점 자동)
+require_once INC_PATH . '/Organization.php';
+$isAgencyCreator = admin_org_level() === Org::LEVEL_AGENCY;
+$agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -225,6 +237,22 @@ $currentUrl = admin_url('riders/list');
 				<div class="modal-body py-lg-8 px-lg-10">
 					<div id="reg_alert" class="d-none mb-6"></div>
 					<form id="rider_register_form" novalidate>
+						<?php if (!$isAgencyCreator): ?>
+						<div class="row g-6 mb-6">
+							<div class="col-md-12">
+								<label class="form-label required">소속 대리점</label>
+								<select class="form-select form-select-solid" id="reg_agency_id" required>
+									<option value="">대리점 선택</option>
+									<?php foreach ($agencyOptions as $ag): ?>
+									<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+								<?php if ($agencyOptions === []): ?>
+								<div class="form-text text-danger">먼저 「조직 관리」에서 대리점을 등록하세요.</div>
+								<?php endif; ?>
+							</div>
+						</div>
+						<?php endif; ?>
 						<div class="row g-6 mb-6">
 							<div class="col-md-6">
 								<label class="form-label required">앱 로그인 ID</label>
@@ -364,6 +392,8 @@ $currentUrl = admin_url('riders/list');
 		if (pw !== pw2)      { showAlert('비밀번호가 일치하지 않습니다.'); return; }
 		if (!name)           { showAlert('이름을 입력하세요.'); return; }
 		if (!phone)          { showAlert('휴대전화를 입력하세요.'); return; }
+		var agencyEl = document.getElementById('reg_agency_id');
+		if (agencyEl && !agencyEl.value) { showAlert('소속 대리점을 선택하세요.'); return; }
 
 		var btn = document.getElementById('reg_submit_btn');
 		btn.querySelector('.indicator-label').classList.add('d-none');
@@ -375,6 +405,7 @@ $currentUrl = admin_url('riders/list');
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				login_id:    loginId,
+				agency_id:   agencyEl ? Number(agencyEl.value) : 0,
 				rider_code:  document.getElementById('reg_rider_code').value.trim(),
 				password:    pw,
 				name:        name,

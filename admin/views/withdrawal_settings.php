@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/WithdrawalConfig.php';
 
-$config  = WithdrawalConfig::get();
+// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
+$cfgOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+$config  = WithdrawalConfig::get($cfgOrgId);
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 $listUrl = admin_url('withdrawal/list');
 $needsMigrate = !db_table_exists('withdrawal_config');

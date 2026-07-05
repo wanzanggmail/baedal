@@ -167,6 +167,24 @@ function rider_current_user(): ?array
     ];
 }
 
+/**
+ * 멀티테넌시: 현재 라이더의 소속 대리점 id (없으면 0).
+ * 세션에 없으면 DB에서 1회 보충 (구 세션 호환).
+ */
+function rider_current_agency_id(): int
+{
+    if (!rider_is_logged_in()) {
+        return 0;
+    }
+    if (!isset($_SESSION['rider']['agency_id'])) {
+        $rid = (int) $_SESSION['rider']['id'];
+        $row = $rid > 0 ? db_row('SELECT agency_id FROM riders WHERE id = ? LIMIT 1', [$rid]) : null;
+        $_SESSION['rider']['agency_id'] = ($row && $row['agency_id'] !== null) ? (int) $row['agency_id'] : 0;
+    }
+
+    return (int) $_SESSION['rider']['agency_id'];
+}
+
 function rider_logout(): void
 {
     unset($_SESSION['rider']);

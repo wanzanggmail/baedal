@@ -88,6 +88,13 @@ final class Withdrawal
             $params   = array_merge($params, [$like, $like, $like, $like]);
         }
 
+        // 멀티테넌시: 라이더 소속 대리점 스코프
+        [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        if ($scopeSql !== '') {
+            $where[]  = $scopeSql;
+            $params   = array_merge($params, $scopeParams);
+        }
+
         $limit = max(1, min(500, (int) ($filters['limit'] ?? 300)));
         $whereStr = implode(' AND ', $where);
 
@@ -147,16 +154,49 @@ final class Withdrawal
     }
 
     /**
+     * 멀티테넌시: 주어진 출금 id 중 현재 계정 스코프(라이더 소속 대리점) 내의 것만 반환.
+     *
+     * @param list<int> $ids
+     * @return list<int>
+     */
+    public static function scopeFilterIds(array $ids): array
+    {
+        $ids = self::normalizeIds($ids);
+        if ($ids === []) {
+            return [];
+        }
+        [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        if ($scopeSql === '') {
+            return $ids; // 본사: 전체 허용
+        }
+        $ph   = implode(',', array_fill(0, count($ids), '?'));
+        $rows = db_rows(
+            "SELECT wr.id FROM withdrawal_requests wr
+               INNER JOIN riders r ON r.id = wr.rider_id
+              WHERE wr.id IN ({$ph}) AND {$scopeSql}",
+            array_merge($ids, $scopeParams)
+        );
+
+        return array_map(static fn (array $r): int => (int) $r['id'], $rows);
+    }
+
+    /**
      * @return array{pending_count: int, pending_amount: int, downloaded_count: int}
      */
     public static function summary(): array
     {
+        // 멀티테넌시: 라이더 소속 대리점 스코프
+        [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        $join     = $scopeSql !== '' ? 'INNER JOIN riders r ON r.id = wr.rider_id' : '';
+        $whereSql = $scopeSql !== '' ? 'WHERE ' . $scopeSql : '';
+
         $row = db_row(
-            'SELECT
-                SUM(CASE WHEN status = \'pending\' THEN 1 ELSE 0 END) AS pending_count,
-                SUM(CASE WHEN status = \'pending\' THEN amount ELSE 0 END) AS pending_amount,
-                SUM(CASE WHEN status = \'downloaded\' THEN 1 ELSE 0 END) AS downloaded_count
-             FROM withdrawal_requests'
+            "SELECT
+                SUM(CASE WHEN wr.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN wr.status = 'pending' THEN wr.amount ELSE 0 END) AS pending_amount,
+                SUM(CASE WHEN wr.status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count
+             FROM withdrawal_requests wr {$join} {$whereSql}",
+            $scopeParams
         );
 
         return [

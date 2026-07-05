@@ -41,7 +41,7 @@ if ($route === 'login') {
                     $loginError = '아이디와 비밀번호를 입력하세요.';
                 } else {
                     $admin = db_row(
-                        'SELECT id, login_id, password_hash, name, role, is_active
+                        'SELECT id, login_id, password_hash, name, role, org_id, is_active
                          FROM admins WHERE login_id = ? LIMIT 1',
                         [$loginId]
                     );
@@ -56,6 +56,7 @@ if ($route === 'login') {
                         $_SESSION['admin_login_id'] = $admin['login_id'];
                         $_SESSION['admin_name']     = $admin['name'];
                         $_SESSION['admin_role']     = $admin['role'];
+                        $_SESSION['admin_org_id']   = $admin['org_id'] !== null ? (int) $admin['org_id'] : 0;
                         unset($_SESSION['login_fail_count'], $_SESSION['login_fail_at'], $_SESSION['login_csrf_token']);
 
                         // last_login_at 갱신 (실패해도 무시)

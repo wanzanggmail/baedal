@@ -8,7 +8,7 @@ $listError = null;
 $notices   = [];
 
 try {
-    $notices = Notice::listPublishedForRider();
+    $notices = Notice::listPublishedForRider(50, rider_current_agency_id());
 } catch (Throwable $e) {
     $listError = $e->getMessage();
 }
