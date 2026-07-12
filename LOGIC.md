@@ -1,427 +1,277 @@
 # 도깨비 배달대행 — 비즈니스 로직 정리
 
 > **목적:** 페이지별로 기능을 붙여 나가면서 **규칙·상태·권한·DB 연동 여부**가 어긋나지 않도록 기준 문서를 둡니다.  
-> **유지:** 화면/API/도메인 클래스를 수정할 때 **해당 섹션을 함께 갱신**하세요.
+> **유지:** 화면/API/도메인 클래스를 수정할 때 **해당 섹션을 함께 갱신**하세요. (`.cursor/rules/logic-md-sync.mdc`)
+
+**현재 국면:** 2026-07-02 갑 미팅으로 정산·출금 로직이 대대적으로 재설계됨. 멀티테넌시 기반(§2)은 이미 구현·검증 완료 — **재설계는 정산/출금/콘텐츠 권한 도메인에 국한**되며 기반 인프라는 변경 없음. 협의 원본 근거는 프로젝트 메모리 `client-business-rules.md`.
+
+**상태 표기:** ✅ 확정·구현됨 · 🔧 기존 코드 수정 필요 · 🆕 신규 개발 · ❓ 사양 자체 미확정(갑 확인 필요) · ⚠️ 이번 검토에서 발견한 충돌·리스크
 
 ---
 
-## 1. 문서 사용법
+## 1. 전체 프로세스
 
-| 작업 전 | 작업 후 |
-|--------|--------|
-| 이 문서에서 해당 메뉴의 **상태(연동/목업)**, **권한**, **상태값 enum** 확인 | 변경한 규칙·API·테이블·감사 action 코드를 반영 |
-| **§4 교차 규칙**(역할, 코드 마스터, 감사)과 충돌 없는지 확인 | **§6 주의·미결**에 새 리스크가 있으면 추가 |
-| 목업 화면을 DB 연동할 때 §3 표의 상태를 `DB`로 바꿈 | migrate/seed 필요 여부 기록 |
+```
+① 조직 설정          본사가 총판·대리점 생성 + 로그인 계정 동시 발급
+        │
+② 라이더 등록         대리점이 직접 등록 (겸업 시 대리점마다 별도 계정)
+        │
+③ 정산 업로드         쿠팡이츠 정산 엑셀 → 미리보기(파싱+매칭) → 미매칭 즉시등록 → 확정
+        │
+④ 정산 반영           수수료 계산(선정산수수료·이체수수료·원천세·고용보험·산재보험
+        │             ·시간제보험·선지급차감) → 라이더 지갑(rider_wallets) 적립
+        │             ⚠️ 반영 후 정정 프로세스 미확정 (§8-A)
+        │
+⑤ PG 카드결제         대리점 등록카드로 (총액+결제수수료) 결제 — 자금 조달(FUND)
+        │             성공 → 대리점 잔액(agency_wallets) 충전, 결제수수료 3자 분배
+        │             실패 → 알림 + 실패이력(사유) + 재시도
+        │
+⑥ 출금 신청·승인       라이더 전액출금 신청 → 대리점 수기 승인
+        │
+⑦ 오픈뱅킹 이체        대리점 계좌 → 라이더 계좌 — 실지급(DISBURSE)
+                     성공 → 완료 / 실패 → 알림 + 실패이력(사유) + 재시도
 
-**에이전트·개발 공통:** 화면/API/DB/권한을 수정하는 **모든 작업**은 같은 변경 안에서 **본 문서(`LOGIC.md`)도 함께 갱신**한다. (프로젝트 규칙: `.cursor/rules/logic-md-sync.mdc`)
+(분기) 대리점 자체 인출  agency_wallets.balance − 라이더채무 − 세금예수금 만큼 인출 가능
+                     ⚠️ withdrawal_requests 스키마와 충돌 (§8-A)
 
-**상태 표기**
+(별도 흐름) 공지·배너    본사만 작성 → 전 조직 자동 broadcast → 라이더 앱 노출
+```
 
-- **DB** — 실 DB + PHP 도메인 클래스/API 사용
-- **부분** — 일부만 DB, UI/집계는 목업
-- **목업** — localStorage·하드코딩·샘플 데이터만
+시각 자료: 이번 세션에서 그린 순서도 참고(대화 내 아티팩트).
 
 ---
 
-## 2. 아키텍처 요약
+## 2. 조직 계층 (멀티테넌시) — ✅ 기반 완료
 
 ```
-[관리자] admin/index.php → inc/routes.php → admin/views/*.php
-                      ↘ admin/api/*.php → inc/*.php (도메인) → MariaDB
-
-[라이더] rider/index.php → inc/rider_routes.php → rider/views/*.php
-```
-
-| 계층 | 역할 |
-|------|------|
-| `admin/views/*`, `rider/views/*` | HTML·JS. 가능하면 **초기 목록은 서버 렌더**, 변경은 API |
-| `admin/api/*` | JSON API. 로그인·쓰기 권한 검사 후 도메인 클래스 호출 |
-| `inc/*.php` | 비즈니스 규칙·SQL·상태 전이 (화면별 로직의 **단일 출처** 지향) |
-| `system_codes` | 은행·상태 등 **표시명/선택지** 마스터 (코드 값은 앱 전역에서 동일해야 함) |
-| `audit_logs` | 관리자 행위 기록 (실패 시 기능은 계속, 로그만 생략) |
-
-**저장소 구조 (2026-05 정리):** Metronic **데모 HTML·`src/` 빌드 소스는 제거**됨. 런타임은 아래만 사용.
-
-| 경로 | 용도 |
-|------|------|
-| `admin/`, `rider/`, `inc/`, `sql/` | PHP 앱 |
-| `index.html` | 공개 랜딩 |
-| `assets/plugins/global/`, `assets/css/style.bundle.css`, `assets/js/scripts.bundle.js` | Metronic 번들 |
-| `assets/js/custom/landing.js`, `assets/plugins/custom/typedjs/` | 랜딩 전용 |
-| `assets/css/rider-mobile.css`, `rider-settlement-calendar.css`, `js/admin-datepickers.js` | admin·rider |
-| `assets/media/logos/`, `auth/`, `favicon/`, `banners/`, `svg/illustrations/landing.svg`, `svg/misc/octagon.svg` | UI·랜딩 이미지 |
-
-**DB 연결:** `inc/env.php` (루트 `.env`) → `inc/db.php` — Apache `SetEnv`가 있으면 `.env`보다 우선. `db_table_exists()`는 `information_schema` 사용 (`SHOW TABLES LIKE ?`는 사용 금지).
-
----
-
-## 2.5 멀티테넌시 — 조직 계층 (어드민 → 총판 → 대리점)
-
-> **2026-06-30 도입.** 기존 시스템은 "운영 주체 = 단일 대리점" 전제(소유 컬럼 없음)였으나, **3계층 멀티테넌시**로 확장한다. **구현 진행 중** — 각 절의 "상태"는 Phase 진척에 따라 갱신.
-
-### 2.5.1 조직 트리 (`organizations`)
-
-```
-어드민(admin, 루트 1개)
+본사(admin, 루트 1개)
  └─ 총판(distributor, N)
      └─ 대리점(agency, N)
          └─ 라이더(riders)
 ```
 
-| 컬럼 | 의미 |
+| 규칙 | 내용 |
 |------|------|
-| `id` | PK |
-| `parent_id` | 상위 조직 (루트 admin은 NULL) |
-| `level` | `admin` \| `distributor` \| `agency` |
-| `name` / `code` | 조직명 / 식별 코드(유일) |
-| `is_active` | 사용 여부 |
+| 조직 = `organizations`(id, parent_id, level, name, code, is_active) | 계정 ≠ 조직. 로그인 계정은 `admins.org_id`로 소속, 한 조직에 여러 계정 가능 |
+| 라이더 소속 | `riders.agency_id` → `organizations.id`(level=agency) |
+| 데이터 스코프 | 본사=전체 · 총판=하위 대리점 전체(조회만) · 대리점=자기 것만 |
+| 권한 = 범위×기능 2축 | 범위(org_id 트리 위치) × 기능(`admins.role`: super/operation/settlement/admin) |
+| 스코핑 구현 | `inc/Org.php`(`scopeAgencyIds`/`scopeOrgIds`/`agencyScopeClause`/`canAccessAgency`), 목록 쿼리에 `WHERE agency_id IN (:scope)` 주입 |
 
-- **계정 ≠ 조직.** 로그인 계정은 `admins.org_id` 로 조직에 소속. 한 조직에 여러 계정 가능(예: 총판 사장 + 정산 직원).
-- **라이더는 대리점 소속:** `riders.agency_id` → `organizations.id` (level=agency).
+🔧 **조직 생성 권한 축소 필요** — 현재 총판도 대리점을 생성할 수 있게 구현돼 있으나, **본사만 조직 생성 가능**해야 함(`Organization::create`, `admin_can_manage_orgs()` 수정). 총판의 조회 권한은 변경 없음.
 
-### 2.5.2 데이터 스코프 규칙
-
-| 로그인 조직 level | 볼 수 있는 데이터 |
-|-------------------|-------------------|
-| `admin` (루트) | **전체** (스코프 필터 없음) |
-| `distributor` | 자기 + **하위 모든 대리점** |
-| `agency` | **자기 대리점만** |
-
-- 구현: 로그인 시 현재 계정이 볼 수 있는 **agency id 집합**을 산출(`admin_scope_agency_ids()` — `inc/Org.php`), 모든 목록 쿼리에 `WHERE agency_id IN (:scope)` 주입.
-- 어드민(루트)은 필터 생략(전체).
-
-### 2.5.3 권한 = 2축 (범위 × 기능)
-
-- **범위(scope)** = 계정의 `org_id` 트리 위치 → *어떤 데이터 행*이 보이는가. (신규 축)
-- **기능(role)** = 기존 `admins.role`(super/operation/settlement/admin) → 그 범위 *안에서* 무엇을 읽고/쓰는가. (기존 §4.2 RBAC 재활용)
-- 예: "B대리점-settlement" 계정 = 범위 B대리점, 기능 정산 → B대리점 정산만 쓰기.
-- POST API는 (1) 기능 역할(`admin_can_write`) **+** (2) 대상 행이 자기 스코프 내인지 **둘 다** 검사.
-
-### 2.5.4 테넌트화 대상 테이블 (싱글톤 → 조직별)
-
-기존 단일행 설정은 **조직별**로 전환(`org_id` 키 추가):
-
-| 테이블 | 변경 |
-|--------|------|
-| `withdrawal_config` | PK `(org_id)` — 대리점별 보증금·건당 수수료 |
-| `deduction_global_config` | PK `(org_id)` — 대리점별 원천세·고용보험·대행 수수료 |
-| `settlement_excel_config` | PK `(org_id, platform)` — 대리점별 엑셀 암호 |
-| `agency_fee_config` | `org_id` 추가 |
-| `settlement_uploads` | `agency_id` 추가(업로드 소유 대리점) |
-| `content_notices` / `content_banners` | `org_id` 추가(작성 조직, broadcast 범위) |
-
-라이더 통해 간접 스코프되는 테이블(`settlement_rider_cycles`, `withdrawal_requests`, `rider_wallets`, `deduction_entries`)은 `riders.agency_id` JOIN으로 범위 판정.
-
-### 2.5.5 도메인 규칙
-
-- **정산 업로드:** 각 **대리점이 자기 정산서**를 업로드 → `agency_id = 업로더 대리점`. 중복 검사(§5.4)는 **대리점 범위 내**에서 판정.
-- **공지·배너:** **조직별 + 상위 broadcast.** 대리점은 자기 라이더에게만 노출. 어드민/총판은 하위 전체 broadcast 가능. 라이더는 자기 `agency_id` + 상위 broadcast 공지·배너만 조회.
-- **조직 관리 화면:** `system/orgs`(`Organization`/`admin/api/orgs.php`/`admin/views/system_orgs.php`). 본사는 총판·대리점 전체, 총판은 자기 하위 대리점만. **생성 시 로그인 계정 동시 발급**(트랜잭션). 접근 권한 `admin_can_manage_orgs()`=본사·총판 레벨 + 최고/운영 역할. 조직 계정 역할은 operation/settlement/admin (super는 플랫폼 루트 전용). 조직 중지 시 소속 계정 로그인도 함께 차단.
+🆕 **대표·서브계정 구조** — 대리점·총판 하나에 대표계정 1개 + 서브계정 여러 개, 대표가 자기 조직 범위 내 서브계정을 만들고 권한을 부여할 수 있어야 함. 현재 `system/admins`는 super 전용이라 신규 화면·API 필요. "대표계정"을 DB에 표시하는 방법(플래그 vs 최초계정) 설계 필요.
 
 ---
 
-## 3. 관리자 메뉴별 구현 상태
+## 3. 메뉴 구성
 
-| route | 화면 | 상태 | 도메인/API | 비고 |
-|-------|------|------|------------|------|
-| `dashboard` | 대시보드 | **DB** | `AdminDashboard` | `settlement_daily_riders`, `withdrawal_requests` 등 테이블 없으면 일부 0 |
-| `settlement/upload` | 엑셀 업로드 | **DB** | `settlement_upload.php`, `XlsxParser`, `XlsxDecrypt` | 암호 자동 해제 · **중복 업로드 거부** (§5.4) |
-| `settlement/upload-detail` | 업로드 상세 | **DB** | SQL 직접 | 정산 반영·수수료·지갑 |
-| `settlement/history` | 업로드 이력 | **DB** | `settlement_history.php` | 기간·플랫폼·파일명 검색, 페이지네이션 |
-| `settlement/fees` | 정산 수수료 내역 | **DB** | `SettlementLedger::listAdmin` | 정산 반영 후 생성 |
-| `settlement/fee-detail` | 정산 수수료 상세 | **DB** | `SettlementLedger::find` | 항목별 차감 |
-| `deduction/agency-fee` | 선공제(대행 수수료) | **DB** | `AgencyFeeConfig` | 적립일수·건당 정액 · 전역 비율(`deduction_global_config`) |
-| `withdrawal/list` | 출금 목록 | **DB** | `Withdrawal`, `withdrawals.php` | 라이더 신청 → `pending` |
-| `withdrawal/settings` | 출금 정책 | **DB** | `WithdrawalConfig`, `withdrawal_config.php` | super · 보증금·건당 수수료 |
-| `withdrawal/download` | 출금 다운로드 | **DB** | `withdrawal_download_file.php`, `ShinhanTransferFile` | |
-| `withdrawal/complete` | 처리 완료 | **DB** | `Withdrawal` | |
-| `content/notices` | 공지 | **DB** | `Notice`, `notices.php` | `php migrate.php` |
-| `content/banners` | 배너 | **DB** | `Banner`, `banners.php`, `banner_upload.php` | |
-| `riders/list`, `riders/detail` | 라이더 | **DB** | `riders.php`, `rider_action.php` | 은행 목록: `system_codes` |
-| `system/orgs` | 조직 관리(총판·대리점) | **DB** | `Organization`, `orgs.php` | 본사·총판 레벨(운영/최고) · 조직 생성 시 로그인 계정 동시 발급 |
-| `system/admins` | 관리자·권한 | **DB** | `AdminAccount`, `admins.php` | super 전용 |
-| `system/codes` | 코드/마스터 | **DB** | `SystemCode`, `codes.php` | super 전용 |
-| `system/settlement-excel` | 정산 엑셀 열기 암호 | **DB** | `SettlementExcelConfig`, `settlement_excel_config.php` | super(전역)·settlement / **대리점별 암호**(org_id), 업로드 시 직접 입력 가능 |
-| `system/audit` | 감사 로그 | **DB** | `AuditLog` | `php migrate.php` |
+| 메뉴 | 본사 | 총판 | 대리점 | 상태 |
+|------|:---:|:---:|:---:|------|
+| 대시보드 | 전체 | 하위합산 | 자기것 | ✅ + 🆕 리스크알림·큰금액하이라이트 |
+| 정산 업로드 / 반영 | — | 조회 | ✓ | ✅ (반영=PG결제 트리거) |
+| 업로드 이력 / 수수료 내역 | ✓ | ✓ | ✓ | ✅ |
+| 선공제(대행수수료) 설정 | — | — | ✓ | ✅ + 🔧 계산시점 토글 |
+| 선정산(선지급) 입력 | — | — | ✓ | 🆕 |
+| 출금 신청 목록·승인 | 조회 | 조회 | 승인 | ✅ 승인주체 재검증 |
+| 출금 정책 설정 | 이체수수료(전역) | — | 보증금(개별) | ✅ |
+| 대리점 계좌 등록(오픈뱅킹) | 계약주체 | — | 등록 | 🆕 |
+| 대리점 카드 등록(PG) | — | — | 등록 | 🆕 |
+| 결제수수료 분배 계약 | ✓ | — | — | 🆕 |
+| 대리점 자체 정산금 인출 | 승인❓ | — | 신청 | 🆕 ⚠️ 스키마 충돌 |
+| 공지 / 배너 관리 | ✓(작성) | 조회 | 조회 | ✅ + 🔧 권한 축소 |
+| 라이더 관리 | 조회 | 조회 | ✓(등록·관리) | ✅ |
+| 조직 관리 | ✓(생성) | — | — | ✅ + 🔧 총판 권한 제거 |
+| 대표/서브계정 관리 | ✓ | 자기조직 | 자기조직 | 🆕 |
+| 관리자·권한 / 코드마스터 / 감사로그 | ✓ | — | — | ✅ + 🆕 리스크 플래그 |
+| 정산 엑셀 열기 암호 | 전역 | — | 대리점별 | ✅ |
+
+**라이더 앱** (별도 세션, 본인 것만 조회 — 소속 대리점+상위 broadcast 자동 적용)
+
+| 화면 | 상태 |
+|------|------|
+| 홈 — 공지·배너 미리보기, 출금가능액 | ✅ DB, 단 ⚠️ **"이번 달 정산 합계" 카드는 하드코딩 목업**(`₩3,842,500` 고정) |
+| 정산 목록 보기 | ✅ DB |
+| 정산 수수료 내역 | ✅ DB(`SettlementLedger::listForRider`) |
+| ⚠️ **정산 달력 보기** | **완전 목업** — 파일 내 하드코딩 배열, DB 미연동 |
+| ⚠️ **정산 상세("샘플")** | **완전 목업** — 정적 HTML, DB 쿼리 없음. 메뉴명에도 "(샘플)" 표기됨 |
+| 출금 신청 / 신청 내역 | ✅ DB |
+| 공지 목록·상세 | ✅ DB |
+| 프로필 / 계좌정보 / 비밀번호 변경 | ✅ DB |
 
 ---
 
-## 4. 교차 규칙 (모든 페이지 공통)
+## 4. 교차 규칙
 
-### 4.1 관리자 인증
+### 4.1 인증·RBAC
 
-- 로그인: `admin/index.php?route=login` → `admins` 테이블, `password_verify`, `is_active = 1`
-- 세션: `admin_auth`, `admin_id`, `admin_login_id`, `admin_name`, `admin_role`, **`admin_org_id`** (멀티테넌시; 구 세션은 `admin_org_id()`가 DB에서 1회 보충)
-- 멀티테넌시 헬퍼(`inc/auth.php`): `admin_org_id()`, `admin_org()`, `admin_org_level()`, `admin_scope_agency_ids()` → 스코프 계산 본체는 **`inc/Org.php`**(`Org::scopeAgencyIds`/`scopeOrgIds`/`agencyScopeClause`/`canAccessAgency`)
-- 브루트포스: 10분 내 5회 실패 시 잠금
-- 성공 시 `last_login_at` 갱신 + `AuditLog::record('auth.login', ...)`
+- 로그인 `admins` 테이블, 세션에 `admin_org_id` 포함(구세션은 DB에서 1회 보충). 브루트포스 10분 5회 잠금.
+- 역할(role): `super`(전체) · `operation`(라이더·출금·콘텐츠) · `settlement`(정산·선공제) · `admin`(조회전용).
+- 🔧 **"공지는 본사만"이 role 체크만으로는 강제 안 됨** — `admin_can_write('content')`에 조직레벨(admin_org_level()===HQ) 체크 추가 필요.
+- 시드 계정: `admin`/super@본사, `operation01`/operation@총판, `settlement01`/settlement@대리점 (`Admin1234!`).
 
-**시드 계정 (개발):** `admin` / `Admin1234!` (role: `super`)
+### 4.2 시스템 코드 (`system_codes`)
 
-### 4.2 역할(RBAC)
+`bank`·`vehicle`·`rider_status`·`settlement_status`·`withdrawal_status`·`platform`·`deduction_kind`. code는 카테고리 내 유일, 생성 후 불변. 참조 중이면 삭제 대신 비활성화.
 
-| role (DB enum) | 라벨 | 메뉴 접근 | 데이터 쓰기 |
-|----------------|------|-----------|-------------|
-| `super` | 최고 관리자 | 전체 | 전체 |
-| `operation` | 운영 | 대시보드, 정산(조회), 출금, 라이더, 콘텐츠 | `content`, `riders`, `withdrawal` |
-| `settlement` | 정산 | 대시보드, 정산, 선공제(대행), 출금(조회) | `settlement`, `deduction` |
-| `admin` | 조회 전용 | 위 조회 가능 메뉴 + **감사 로그** | **없음** (모든 POST API 403) |
+⚠️ **상태값 이중 정의 위험** — `withdrawal_status`에 `failed` 추가 시 PHP `Withdrawal::STATUS_LABELS`와 `system_codes` **양쪽 다** 갱신 필요(이 문서 §9 체크리스트 참고).
 
-- **페이지:** `admin/index.php` → `admin_can_access_route($route)` (`inc/auth.php`)
-- **API:** POST 시 `admin_deny_write_json('영역')` — 영역: `content` \| `riders` \| `withdrawal` \| `settlement` \| `deduction` \| `system`
-- **규칙 정의:** `admin_route_access_rules()`, `admin_can_write()` — **변경 시 이 문서 §4.2도 수정**
+### 4.3 감사 로그 (`audit_logs`)
 
-### 4.3 시스템 코드 (`system_codes`)
-
-| category | 용도 | 참조 예 |
-|----------|------|---------|
-| `bank` | 라이더 계좌 은행 | `riders.bank_code`, JOIN 라벨 |
-| `vehicle` | 차량 유형 | `riders.vehicle_type` |
-| `rider_status` | 라이더 상태 | `riders.status` |
-| `settlement_status` | 업로드 배치 상태 | `settlement_uploads.status` |
-| `withdrawal_status` | 출금 상태 | `withdrawal_requests.status` |
-| `platform` | 배달 플랫폼 | 정산 업로드 `platform` enum |
-| `deduction_kind` | 차감 종류 | (차감 기능 연동 예정) |
-
-**규칙**
-
-- 코드 값(`code`)은 카테고리 내 유일. **생성 후 code 변경 불가.**
-- `is_active = 0` → 선택 목록에서 제외 (예: `riders_list` 은행 필터)
-- **삭제:** 참조 건수 > 0 이면 불가 → 사용 중지로 처리
-- seed: `seed.php` / `seed.sql`
-
-### 4.4 감사 로그 (`audit_logs`)
-
-- 스키마: `actor_type`, `actor_id`, `action`, `target_table`, `target_id`, `before_value`, `after_value`, `ip`, `user_agent`
-- `AuditLog::record('도메인.동작', $target, $detail)` — action은 DB에 `LOGIN`, `UPDATE`, `CREATE` 등으로 정규화
-- 테이블 없으면 **조용히 skip** (기능은 동작)
-- `target_table` 매핑: `content.notice.*` → `content_notices`, `admin.*` → `admins`, `codes.*` → `system_codes`, `rider.*` → `riders`, … (`AuditLog::resolveTarget`)
-
-**주요 action (내부 코드 → 화면 action)**
-
-| 내부 코드 | 의미 |
-|-----------|------|
-| `auth.login` / `auth.login.fail` / `auth.logout` | 로그인·실패·로그아웃 |
-| `content.notice.save` / `.delete` | 공지 |
-| `content.banner.save` / `.delete` | 배너 |
-| `admin.create` / `.update` / `.activate` / `.deactivate` | 관리자 |
-| `org.create` / `.update` / `.activate` / `.deactivate` | 조직(총판·대리점) → `organizations` |
-| `codes.create` / `.update` / `.delete` | 코드 마스터 |
-| `rider.status` / `.memo` / … | 라이더 |
-| `settlement.upload` | 정산 업로드 | |
-| `withdrawal.config.save` | 출금 정책 저장 | |
-| `withdrawal.*` | 출금 처리 | |
+`AuditLog::record('도메인.동작', ...)`, 테이블 없으면 조용히 skip. 🆕 리스크성 action(역할변경·대량상태변경·고액출금승인 등) 태깅 → 대시보드 알림 연동 예정.
 
 ---
 
 ## 5. 도메인별 로직
 
-### 5.1 공지 (`Notice` / `content_notices`)
+### 5.1 공지·배너 (`Notice`/`Banner`)
 
-| 항목 | 규칙 |
-|------|------|
-| 상태 | `draft` \| `published` \| `hidden` |
-| 카테고리 | `일반`, `안내`, `긴급` (코드 고정, system_codes 아님) |
-| public_id | `nt-YYYYMMDD-순번` 형식 |
-| 라이더 노출 | `published` + `published_at <= NOW()`; 상단 고정 `pinned` 우선 |
-| API | `admin/api/notices.php` — GET 목록, POST `save` \| `delete` |
-| 권한 | 조회: operation+, 쓰기: operation+ |
+🔧 **작성은 본사만.** 대리점·총판은 조회만(broadcast 수신). 라이더는 소속 대리점+상위 조직 broadcast만 조회. 슬롯(`home_top`/`home_middle`/`rider_app`), 라이더 홈 캐러셀은 `rider_app`만.
 
-### 5.2 배너 (`Banner` / `content_banners`)
+> ⚠️ `content_notices/banners.org_id`가 본사만 작성이면 항상 본사 id로 고정되어 사실상 무의미해짐 — 유지 여부 재검토 여지.
 
-| 항목 | 규칙 |
-|------|------|
-| 슬롯 | `home_top`, `home_middle`, `rider_app` |
-| **라이더 홈 캐러셀** | **`rider_app` 슬롯만** (`Banner::RIDER_HOME_CAROUSEL_SLOT`) |
-| 이미지 | 업로드 → `admin/api/banner_upload.php` → `/uploads/`; 라이더 앱은 `rider/p/asset.php` 프록시 |
-| 활성 | `is_active`, 기간 `starts_at` ~ `ends_at` |
-| API | `admin/api/banners.php` |
+### 5.2 라이더 (`riders`)
 
-### 5.3 라이더 (`riders` 테이블)
+상태 `active`/`suspended`/`leave_request`/`offboarded`. 등록·수정은 대리점, 조회는 상위 조직도 가능. 겸업 시 대리점마다 별도 로그인(스키마 변경 불필요, 1라이더-1대리점 FK 유지). 상태변경 통보 불필요.
 
-| 항목 | 규칙 |
-|------|------|
-| 상태 | `active`, `suspended`, `leave_request`, `offboarded` — **system_codes.rider_status와 일치해야 함** |
-| API | `riders.php` (목록·등록), `rider_action.php` (상세·상태·메모·출금보류·일일정산 플래그) |
-| 은행 표시 | `bank_code` → `system_codes` JOIN |
-| 권한 | operation+ 읽기/쓰기 |
+✅ **대리점 이관은 별도 절차가 아님** — 새 대리점에서 완전 신규 라이더로 등록. 이름·전화번호·플랫폼 라이선스ID(`rider_platforms.external_id`) 중복 허용, `riders`는 `rider_code`·`login_id`만 UNIQUE라 스키마상 이미 지원됨(개발 불필요).
 
-**라이더 앱:** `RiderAuth` — 별도 세션; 비밀번호 변경 `profile/password`.
-
-### 5.4 정산 업로드
+### 5.3 정산 업로드·반영
 
 ```
-엑셀 업로드 → settlement_uploads (status: uploaded → parsing → parsed → applied | error)
-           → settlement_daily_riders (일별·라이더·건수·금액)
+엑셀 업로드(mode=preview: 파싱+매칭만) → 미리보기 모달
+  → 미매칭 라이더 즉시등록(license 연동) → 확정 업로드(저장)
+  → settlement_uploads / settlement_daily_riders
+정산 반영 (SettlementLedger::applyUpload)
+  → settlement_rider_cycles + settlement_fee_items → RiderWallet::credit()
 ```
 
-| 항목 | 규칙 |
+| 항목 | 내용 |
 |------|------|
-| platform | `baemin` \| `coupang` \| `other` — **현재 파서·업로드 검증은 쿠팡이츠 일간 정산서만** (배민 미지원) |
-| 파서 | `inc/XlsxParser.php` (쿠팡이츠 일간 형식) |
-| 파일 열기 암호 | `SettlementExcelConfig` (DB `settlement_excel_config` · `.env`) · **설정 UI:** `system/settlement-excel` · 복호화: `scripts/decrypt_xlsx.py` |
-| **중복 업로드** | 동일 **귀속일+플랫폼** 이미 있으면 거부. 동일 **파일명** 또는 **SHA256(`file_hash`)** 도 거부. 덮어쓰기 없음 — 재업로드 시 기존 건 삭제 후 |
-| **플랫폼 자동 감지** | 파일 선택 시 `settlement_upload_preview.php` → `SettlementPlatformDetect`. **파싱 성공 = 쿠팡이츠** 로 판단 (현재 파서 기준). 파일명·헤더·내용 키워드 보조 |
-| **플랫폼 불일치 차단** | 선택 platform ≠ 감지 결과(신뢰도 medium 이상)면 업로드 거부. `confirm_platform_mismatch=1` 로 강제 업로드 가능. `other`는 검증 생략 |
-| **업로드 2단계** | 파일 제출 = `settlement_upload.php?mode=preview`(파싱+매칭만, **저장 안 함**) → 미리보기 모달로 행·매칭 확인. 미매칭 라이더는 모달에서 **빠른 등록**(`settlement_register_rider.php` — 최소 정보 + `rider_platforms.external_id=license_id` 연동, 업로드 대리점 귀속) → 「확정 업로드」가 파일 재전송으로 커밋(이때 신규 라이더 매칭). 매칭 헬퍼 `settlement_match_rider_id()`(license→이름, 대리점 범위). 중복은 미리보기에선 경고, 확정 시 차단 |
-| 이력 화면 | `settlement/history` — 필터·목록·상세 링크 |
-| migrate | `php migrate.php` (`sql/base_schema.sql` → 확장 SQL) |
-| 권한 | 조회: settlement, operation, super / 업로드 POST: settlement, super |
+| 지원 플랫폼 | 쿠팡이츠 일간만(배민 파서 착수 임박, 자료 수령 예정) |
+| 중복 검사 | 귀속일+플랫폼 / 파일명 / SHA256, 대리점 범위 내 판정 |
+| 플랫폼 자동감지·불일치 차단 | 신뢰도 medium 이상 불일치 시 업로드 거부(강제 확인 가능) |
+| 🆕 시간제보험 | 쿠팡 정산서 파일 자체에 포함된 값 — **계산 아님, 파일에서 직접 파싱**. 파서·`settlement_daily_riders` 컬럼 추가 필요 |
+| 🔧 고용·산재보험 분리 | 현재 `employment_ins_pct` 단일 필드 → 0.8%/0.88% 별도 컬럼 필요 |
+| 🆕 선지급(advance) 입력 | 대여금 성격 차감, `deduction_entries`(kind=advance) 스키마는 있으나 입력화면 없음. **"선정산수수료"와 다른 항목** |
+| 🆕 선정산수수료 계산시점 | 대리점이 선택: "선정산"(반영시 즉시, 기존 `AgencyFeeConfig` 방식) vs "후정산"(이체시점). 후정산 선택 시 이체시점에 **이체수수료(본사·정액)+선정산수수료(대리점)가 동시 부과**(확정) |
+| ❓ 정산 반영 후 정정 | **유일한 미확정 비즈니스 항목.** 되돌리기/익월상계/수동보정 중 미정 (§8-A 참고 — PG 자동결제와 얽혀 더 중요해짐) |
 
-#### 정산 반영·수수료 내역
+⚠️ **용어 혼동 위험** — `riders.is_daily_settlement`(라이더별 일일/주간 정산 대상 플래그)와 `fee_calc_timing`(대행수수료 계산 시점, 위 항목)이 둘 다 "선정산"이라 불려 헷갈림. 서로 연동되는 설정인지 독립적인지 확인 필요.
 
-```
-업로드 상세 「정산 반영 · 수수료·지갑」
-  → SettlementLedger::applyUpload()
-  → settlement_rider_cycles (라이더·일·플랫폼별 1건)
-  → settlement_fee_items (대행·원천·고용보험·추가 차감)
-  → RiderWallet::credit(net, accrued+1)
-  → settlement_uploads.status = applied
-```
+### 5.4 출금 — PG 카드결제 → 오픈뱅킹 이체 🔧 전면 재설계
 
-| 화면 | route | 설명 |
-|------|-------|------|
-| 관리자 목록 | `settlement/fees` | 기간·라이더 검색 |
-| 관리자 상세 | `settlement/fee-detail?cycle=` | 항목별 차감 |
-| 라이더 목록 | `settlement/fees` | 본인 완료 내역 |
-| 라이더 상세 | `settlement/fee-detail?cycle=` | 본인만 조회 |
+> 신한 이체파일 다운로드 방식 폐기. 2단계: **PG 카드결제(조달)** → **오픈뱅킹 이체(지급)**.
 
-| API | `admin/api/settlement_apply.php` (POST upload_id) |
-| migrate | `php migrate.php` |
-| 감사 | `settlement.apply` → `settlement_rider_cycles` |
+**1단계 — PG 카드결제 (신규)**
 
-수수료 산출: **대행** `AgencyFeeConfig`(적립일수·건당 정액) + `deduction_global_config` 비율(원천·고용보험) + 동일 `applied_date` 의 `deduction_entries`.
+- 트리거: **정산 반영 완료 시점**(수수료 확정 직후, 업로드 확정과는 다른 시점).
+- 대리점 등록카드로 `net 총액 + 결제수수료` 결제. 결제수수료는 대리점·총판·본사가 **계약별로 분배**(고정비율 아님).
+- PG사는 **본사가 결정, 플랫폼 전체 단일사**.
+- 성공 → `agency_wallets.balance`(신규, 대리점 잔액) 충전 — 실제 은행계좌 입금 여부와 무관한 시스템 내부 잔액.
+- 실패 → **알림 + 실패이력(사유) + 수동 재시도** (확정).
+- ⚠️ **결제 대상 금액이 "선정산 대상만"인지 "주정산 포함 전체"인지 미확정** — 주정산(추후지급) 라이더 몫까지 매일 충전하면 자금 비효율 우려.
 
-### 5.5 정산·출금 일원화
+**2단계 — 오픈뱅킹 이체 (신규)**
 
-> 정산 데이터 → 지갑 반영은 **`SettlementLedger::applyUpload()` → `RiderWallet::credit()`** 로 처리.
+- 대리점 명의 계좌를 오픈뱅킹에 등록(핀테크이용번호). 본사가 오픈뱅킹 이용기관 계약 주체.
+- 라이더 전액출금 신청 → **대리점 수기 승인**(현 스코프+역할로 지원될 가능성 높음, 재검증 필요) → API 호출.
+- 실지급 계산(변경 없음): `balance − reserve_amount − fee_per_tx`
+- 이체수수료(`fee_per_tx_short/long`): **라이더 부담 → 본사 수익**, 🔧 **본사 전역값만 사용**(보증금 `reserve_amount`만 대리점별 유지).
+- 실패 → **알림 + 실패이력(사유) + 수동 재시도** (확정).
+- 🆕 탈퇴/정지 라이더 잔여 잔액은 **0원 이체 처리**로 종결.
 
-#### 지갑 (`rider_wallets`)
+⚠️ **선정산(즉시지급) 라이더도 "출금 신청" 버튼이 필요한지 불명확** — PG로 자금은 정산반영 시점에 이미 확보되는데, 라이더가 능동적으로 신청해야만 지급되는 기존 모델을 그대로 쓰는 게 맞는지 확인 필요.
 
-| 컬럼 | 의미 |
-|------|------|
-| `balance` | 누적 잔액 (정산 반영 전 임시·수동 credit 가능) |
-| `accrued_days` | 쌓인 정산 **일수** (출금 수수료 구간 판단) |
-
-스키마: `php migrate.php`
-
-#### 출금 정책 (`withdrawal_config` — 단일 row)
-
-| 설정 | 기본값 | 설명 |
-|------|--------|------|
-| `reserve_amount` | 50,000 | **보증금** — 출금 후 지갑에 남김 |
-| `fee_day_threshold` | 7 | 적립 일수 기준 |
-| `fee_per_tx_short` | 80 | 기준 **미만** 건당 수수료(원) |
-| `fee_per_tx_long` | 40 | 기준 **이상** 건당 수수료(원) |
-
-관리: **출금 > 출금 정책** (`withdrawal/settings`, super)
-
-#### 라이더 전액 출금 (`Withdrawal::applyForRider`)
+### 5.5 대리점 자체 정산금 인출 🆕 신규 도메인
 
 ```
-실지급(amount) = balance − reserve_amount − fee_per_tx
-fee_per_tx = accrued_days < fee_day_threshold ? fee_per_tx_short : fee_per_tx_long
+인출가능액 = agency_wallets.balance − 라이더채무(rider_wallets 합계) − 세금예수금(미납부 원천세·고용보험·산재보험)
 ```
 
-**규칙**
+라이더 이체와 동일한 대리점 계좌 사용. 🆕 세금 예수금 "납부 여부" 추적이 현재 시스템에 없어 별도 설계 필요.
 
-- **부분 출금 불가** — 항상 현재 `balance` 기준 전액 신청
-- `pending` / `downloaded` 건이 있으면 재신청 불가
-- `withdrawal_hold`, 비활성, 계좌 미등록 시 불가
-- `withdrawal_requests` 매핑: `gross_amount`=잔액, `withhold_min_retain`=보증금, `withhold_other`=건당 수수료, `accrued_days`=적립 일수
-- **완료(`completed`)** 시: `RiderWallet::finalizeAfterComplete` → `balance = reserve_amount`, `accrued_days = 0`
-- **반려** 시: 지갑 변경 없음
+> ⚠️ **스키마 충돌 (가장 시급)** — `withdrawal_requests.rider_id`가 `NOT NULL`(FK)인데 대리점 인출(`kind=agency_payout`)은 라이더가 없음. **`rider_id`를 nullable로 바꾸고 `agency_id` 추가**하거나 **별도 테이블**(`agency_payout_requests`)이 필요.
 
-라이더 UI: `withdrawal/apply` POST → `rider/index.php`  
-관리자: 기존 목록·다운로드·완료 흐름 유지
+### 5.6 관리자 계정 / 대시보드
 
-### 5.6 출금 (`Withdrawal` / `withdrawal_requests`)
-
-| status | 의미 | system_codes |
-|--------|------|--------------|
-| `pending` | 대기 | ✓ |
-| `downloaded` | 이체 파일 다운로드됨 | ✓ |
-| `completed` | 처리 완료 | ✓ |
-| `rejected` | 반려 | ✓ |
-
-| kind | 의미 |
-|------|------|
-| `rider_manual` | **라이더 앱 전액 출금** (표준) |
-| `auto_daily` | ~~자동 일일정산~~ (레거시·신규 생성 안 함) |
-
-- public_id: `wd-{id}` / `wd-auto-{id}`
-- API: `withdrawals.php`, `withdrawal_download_file.php` (신한 이체 파일)
-- **쓰기:** operation (super 포함) — settlement 역할은 목록·다운로드 **조회만** (route는 허용, POST는 403)
-
-### 5.7 관리자 계정 (`AdminAccount` / `admins`)
-
-| role | DB enum |
-|------|---------|
-| super, admin, operation, settlement | `admins.role` |
-
-- **super만** 계정 CRUD (`admin/api/admins.php`)
-- 본인 비활성화 불가; 활성 super 최소 1명 유지
-- 비밀번호 bcrypt cost 12, 8자 이상
-
-### 5.8 대시보드 (`AdminDashboard`)
-
-- 이번 주 활성 라이더, 주간 payout/건수, 출금 대기, 게시 공지 수, 월 차감, 플랫폼별 payout, 최근 업로드
-- 테이블 없으면 try/catch로 0 — **목업 아님, DB 의존**
+- super만 전체 계정 CRUD, 🆕 조직 대표계정은 자기 org 범위 내 서브계정 CRUD 가능해야 함(§2).
+- 대시보드: 활성라이더·주간payout·출금대기 등 기존 지표 + 🆕 리스크 알림 위젯 + 🆕 큰 금액 출금 하이라이트.
 
 ---
 
-## 6. 라이더 앱 (요약)
+## 6. 마이그레이션·시드
 
-| route | 기능 | 상태 |
-|-------|------|------|
-| `home` | 공지 요약, 정산 카드, **`rider_app` 배너** | DB |
-| `notices/*` | 공지 목록·상세 | DB |
-| `settlement/*` | 정산 달력·목록·수수료 내역 | DB (`SettlementLedger` 반영분) |
-| `withdrawal/*` | 출금 신청·내역 | DB |
-| `profile/*` | 정보·계좌·비밀번호 | DB |
-
-PWA: `rider/service-worker.js`, `manifest.php`.
-
-**멀티테넌시(§2.5):** 라이더는 `riders.agency_id` 로 대리점 소속. 공지·배너는 자기 대리점 + 상위(총판·본사) broadcast + 전역(org_id NULL)만 노출 — `rider_current_agency_id()`(inc/rider_auth.php)를 `Notice::listPublishedForRider/findForRider/loginPopupQueue`·`Banner::listActiveForRiderHome`에 전달. 정산·지갑·출금은 `rider_id` 기준이라 자동 격리(출금 정책은 라이더 소속 대리점 설정 사용).
+`php migrate.php`(`inc/MigrateRunner.php`, 멱등) / `php seed.php`(조직트리+시드계정). 재설계분 신규 마이그레이션 필요: 대리점 은행계좌·카드·`agency_wallets`·`pg_payments`·`withdrawal_requests` 실패상태·이체수수료원가 컬럼. 운영 배포 후 `migrate.php`/`seed.php` 웹 접근 차단 권장.
 
 ---
 
-## 7. 마이그레이션·시드
+## 7. 구현 작업 목록 (재설계분 스코프)
 
-| 스크립트 | 대상 |
-|----------|------|
-| `php migrate.php` | `inc/MigrateRunner.php` — **`sql/base_schema.sql`** (admins, riders, settlement_uploads, …) → `content_tables`, `settlement_*`, `withdrawal_wallet`, `agency_fee_config`, **`organizations`**, `audit_tables` + ALTER (멱등). 멀티테넌시: `migrateOrgColumns()`(admins.org_id, riders.agency_id, settlement_uploads.agency_id, content_*.org_id) · `migrateTenantConfig()`(설정 테이블 org_id화) |
-| `php seed.php` / `seed.sql` | 조직 트리(HQ→DIST-01→AG-01), admins(org_id 소속·백필), 기존 riders.agency_id 백필, system_codes, deduction_global_config 초기값 |
+기존 인프라(라우팅·인증·멀티테넌시 스코핑·엑셀파싱)는 변경 없음. 아래가 이번 재설계로 실제 코드에 반영해야 할 전체 목록.
 
-**멀티테넌시 시드 계정 (개발):** `admin`/super @본사(HQ) · `operation01`/operation @총판(DIST-01) · `settlement01`/settlement @대리점(AG-01) — 계층별 스코프 테스트용. 비밀번호 전부 `Admin1234!`.
+**🔴 시급 — 스키마 충돌**
+1. `withdrawal_requests.rider_id` nullable화 + `agency_id` 컬럼, 또는 별도 테이블 (§5.5)
 
-운영 배포 후 `migrate.php`·`seed.php` **웹 접근 차단** 권장 (GitHub Actions rsync에서 제외).
+**🔧 기존 코드 수정**
+2. 조직 생성 권한: 총판 → 본사 전용 (§2)
+3. 공지·배너 쓰기 권한: 조직별 → 본사 전용, org레벨 가드 추가 (§5.1, §4.1)
+4. `deduction_global_config`: 고용보험·산재보험 분리, `fee_calc_timing` 컬럼 추가 (§5.3)
+5. `withdrawal_config`: 이체수수료(fee_per_tx) 조회를 전역 고정으로 (§5.4)
+6. `XlsxParser`: 시간제보험 컬럼 파싱 추가 (§5.3)
+7. `SettlementLedger::applyUpload`: `fee_calc_timing`='transfer'면 대행수수료 이연 (§5.3)
+
+**🆕 신규 개발**
+8. PG 카드결제 연동 — 빌링키 등록, 결제 실행, 실패 알림·재시도 (§5.4)
+9. `agency_wallets`(대리점 잔액) — PG 충전, 라이더채무·세금예수금 제외 인출가능액 계산 (§5.4, §5.5)
+10. 오픈뱅킹 계좌 등록·이체 API 연동, 실패 알림·재시도 (§5.4)
+11. 대리점 자체 인출 신청·승인 화면 (§5.5)
+12. 결제수수료 분배 계약 설정 화면(본사가 대리점·총판별 등록) (§5.4)
+13. 선지급(advance) 입력 화면 (§5.3)
+14. 대표·서브계정 권한관리 화면 (§2)
+15. 세금 예수금 납부상태 추적 (§5.5)
+16. 리스크 알림·큰 금액 하이라이트 (§4.3, §5.6)
+17. 탈퇴 라이더 0원 이체 처리 액션 (§5.4)
+
+**🆕 라이더 앱 — 재설계와 무관하게 원래 남아있던 미구현분 (§3)**
+18. 정산 달력 보기 — 완전 목업, DB 연동 필요
+19. 정산 상세("샘플") — 완전 목업, DB 연동 필요
+20. 홈 "이번 달 정산 합계" 카드 — 하드코딩 제거, 실제 집계로 교체
 
 ---
 
-## 8. 주의·미결 (로직 리스크)
+## 8. 미결·리스크
 
-1. **상태값 이중 정의** — `Withdrawal::STATUS_LABELS`, `Notice` 상태, `system_codes`가 따로 있음. **코드 값 변경 시 세 곳을 함께 확인.**
-2. **operation의 정산 메뉴** — route 접근은 허용, 업로드 POST는 settlement만.
-3. **settlement 역할의 출금** — 목록·다운로드 화면은 열리나 상태 변경 POST는 operation만.
-4. **지갑 잔액** — 정산 반영은 업로드 상세 「정산 반영 · 수수료·지갑」 또는 `SettlementLedger::applyUpload()`. 테스트용 수동 반영: `RiderWallet::credit()` 또는 DB 직접.
-5. **적립 일수(`accrued_days`)** — 정산 반영 시 `RiderWallet::credit($net, true)` 로 +1.
-6. **감사 로그** — `before_value` 미사용(대부분 after JSON만).
-7. **코드 마스터 vs PHP enum** — DB enum과 `system_codes` 불일치 시 JOIN/라벨 깨짐.
-8. **sidebar** — 권한 없는 메뉴 링크는 403 (숨김 optional).
-9. **미구현(메뉴 없음)** — 프로모션 배치, 종합 통계·엑셀 내보내기, 파싱 오류 전용 화면, 수동 차감 등록·자동 차감·할부 UI는 **목업 제거됨**. 필요 시 §9 체크리스트로 새로 추가.
+### A. 갑 확인이 필요한 비즈니스 사항
+
+1. ❓ **정산 반영 후 정정 프로세스** — 되돌리기/익월상계/수동보정 중 방향. PG 자동결제가 생기면서 **이미 카드 결제된 실제 돈을 어떻게 되돌릴지**(PG 환불 vs 익월 차감)까지 함께 정해야 함 — 원래보다 중요도 상승. 참고화면의 라이더 사이클 단위 "취소" 버튼이 힌트.
+2. ❓ PG 결제 대상 금액이 선정산 대상만인지 주정산 포함 전체인지 (§5.4)
+3. ❓ 선정산(즉시지급) 라이더도 수동 "출금 신청"이 필요한지, 자동지급이어야 하는지 (§5.4)
+4. ❓ `is_daily_settlement`와 `fee_calc_timing`(둘 다 "선정산") 연동 여부 (§5.3)
+5. **정산 주기(주간)** — 미정. `is_daily_settlement` 플래그로 이미 커버되는지 재확인.
+
+### B. 구현 시 유의 (문서 내부 정합성)
+
+6. `content_notices/banners.org_id` 실질적 무의미 — 제거 검토
+7. RBAC role 체크만으론 "공지=본사전용" 강제 안 됨, org레벨 가드 별도 필요
+8. `withdrawal_status.failed` 추가 시 PHP enum·system_codes 동시 갱신 (상태값 이중정의 패턴)
+9. sidebar 권한 없는 메뉴는 403(숨김 optional)
+
+### ✅ 2026-07-02~03 확정으로 해소된 항목
+
+지사 없음(본사·총판·대리점 3단) · 라이더 대리점 이관 절차 불필요 · 이체/PG결제 실패 처리(알림+이력+재시도) · 대리점 인출 잔액 정의 · 후정산 시 이체수수료+선정산수수료 동시부과 · PG사(본사 단일결정) · PG 정산금 입금경로(agency_wallets)
 
 ---
 
 ## 9. 새 기능 추가 체크리스트
 
-- [ ] `inc/routes.php` (+ 라이더면 `rider_routes.php`) 등록
-- [ ] `inc/auth.php` — `admin_route_access_rules` / `admin_can_write` 반영
-- [ ] 도메인 클래스(`inc/*.php`)에 SQL·검증·상태 전이
-- [ ] `admin/api/*.php` — 로그인 + 쓰기 권한 + `AuditLog::record`
-- [ ] `system_codes` 필요 여부
+- [ ] `inc/routes.php`(+`rider_routes.php`) 등록
+- [ ] `inc/auth.php` — 라우트 접근·쓰기 권한 반영
+- [ ] 도메인 클래스(`inc/*.php`) — SQL·검증·상태 전이
+- [ ] `admin/api/*.php` — 로그인+쓰기권한+`AuditLog::record`
+- [ ] `system_codes` 필요 여부, 상태값 추가 시 PHP enum도 동시 갱신
 - [ ] migrate/SQL + seed
-- [ ] **이 문서 §3 표·§5 해당 절·§8** 갱신
+- [ ] 이 문서 §3·§5·§7·§8 갱신
 
 ---
 
@@ -429,14 +279,9 @@ PWA: `rider/service-worker.js`, `manifest.php`.
 
 | 날짜 | 내용 |
 |------|------|
-| 2026-06-30 | **멀티테넌시 설계 도입(§2.5)** — 어드민>총판>대리점 3계층 `organizations` 트리, 범위×기능 2축 권한, 설정/콘텐츠/정산 테넌트화. Phase 0 기록 |
-| 2026-07-01 | 멀티테넌시 Phase 1~4 — 스키마/마이그레이션, `inc/Org.php` 스코핑 엔진, `system/orgs` 조직 관리(조직+계정 통합 발급), **데이터 스코핑 적용**: 라이더·정산(업로드/이력/반영/수수료)·출금(목록/요약/처리/다운로드)·대시보드·공지/배너(작성 org_id + 라이더 broadcast). 라이더·출금·업로드 쓰기 경로에 소속 가드 |
-| 2026-07-01 | 멀티테넌시 — **정산 엑셀 열기 암호 per-agency화**: `SettlementExcelConfig` get/save/passwordsToTry/storedPasswordMeta/allStored에 org_id. 복호화 시도 순서 = 업로드 직접입력 → 대리점 저장 → 전역 → 환경변수 → baemin. 업로드 화면에 **암호 직접 입력 필드** 추가, 설정 화면(`system/settlement-excel`)은 대리점=자기/본사=전역. 미리보기·테스트도 스코프 반영 |
-| 2026-07-01 | 정산 업로드 **2단계화**(§5.4): 미리보기(파싱+매칭, 저장 안 함) 모달 → 미매칭 라이더 그 자리에서 빠른 등록(license 연동) → 확정 업로드. 신규 `settlement_register_rider.php`, `settlement_upload.php` mode=preview + `settlement_match_rider_id()` |
-| 2026-07-01 | 멀티테넌시 Phase 5 — 라이더 앱 연동: `rider_current_agency_id()` 추가, 라이더 공지·배너 노출을 소속 대리점+상위 broadcast+전역으로 제한. 정산/지갑/출금은 rider 기준 자동 격리. **3계층 멀티테넌시 end-to-end 동작** |
-| 2026-07-01 | 멀티테넌시 Phase 4b — **설정값 per-agency화**: `WithdrawalConfig`·`AgencyFeeConfig`·`globalDeductionConfig` get/save에 org_id(대리점행→전역 NULL→기본 폴백). 출금(`RiderWallet::previewWithdrawal`이 라이더 소속 대리점 정책 사용)·정산 반영(`SettlementLedger::applyUpload`이 업로드 대리점 수수료 사용). 설정 화면: 대리점=자기/본사=전역. `withdrawal/settings` 라우트 대리점 레벨 허용 |
-| 2026-07-01 | **`SettlementExcelConfig` per-agency화** — 엑셀 열기 암호도 대리점별 저장(`allStored`/`storedPasswordMeta`/`passwordsToTry`/`allPasswordsToTry`/`save`에 org_id). 복호화 시도 순서: 업로드 입력 → 대리점 저장 → 전역 저장 → 환경변수 → baemin. `system/settlement-excel`·엑셀 테스트·업로드 모두 스코프 반영. 설정 미저장 대리점은 전역 기본으로 폴백. **멀티테넌시 설정값 전면 per-agency 완료** |
-| 2026-05-24 | 목업 화면 제거: 프로모션·통계·파싱 오류·차감(수동/자동/할부) UI — `deduction/agency-fee`만 유지 |
-| 2026-05-24 | 저장소 정리: Metronic 데모 HTML·`src/`·미사용 assets 제거, `rider_shell_end.php` 복구 |
-| 2026-05-24 | 출금 일원화: 자동 일일정산 메뉴 제거, 라이더 전액 출금·건당 수수료·보증금·withdrawal_config |
-| 2026-05-24 | 초안: RBAC, 감사, 코드 마스터, 콘텐츠·라이더·정산·출금·시스템 연동 상태 정리 |
+| 2026-05-24 | 초안: RBAC·감사·코드마스터·콘텐츠/라이더/정산/출금/시스템 정리, 출금 일원화, 목업 제거 |
+| 2026-06-30 | 멀티테넌시 설계 도입 — 3계층 조직트리, 2축 권한 |
+| 2026-07-01 | 멀티테넌시 Phase 1~5 완료·검증 — 스코핑엔진, 조직관리, 전 도메인 스코핑, per-agency 설정값, 정산업로드 2단계화, 라이더앱 연동 |
+| 2026-07-02 | **갑 미팅 — 대대적 재설계 확정.** 조직생성 본사전용, 대표+서브계정, 콘텐츠 본사전용, 라이더 이관 불필요 확인, 선정산 입력 신규, **출금 오픈뱅킹 전환**, 대리점 자체인출 신규 |
+| 2026-07-03 | 세부 정정(고용·산재보험 분리, 시간제보험 파일파싱, 지사 없음 확정) + **PG 카드결제 신규**(자금조달) + 이체·PG실패/대리점인출잔액/수수료동시부과 등 세부 확정 |
+| 2026-07-03 | 전체 프로세스 다이어그램 검토 — **`withdrawal_requests` 스키마 충돌 발견**(rider_id NOT NULL vs agency_payout), PG-정정 상호작용·선정산 용어중복 등 리스크 정리. **문서 재구성**(§1 전체프로세스, §3 메뉴표, §7 구현작업목록 신설) |
