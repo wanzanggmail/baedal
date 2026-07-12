@@ -1,0 +1,666 @@
+<title>출금 신청 — 정산 달력 (프로토타입)</title>
+<style>
+  :root {
+    --ink: #16212c;
+    --ink-soft: #5b6b7c;
+    --ink-faint: #8b98a6;
+    --paper: #eef1f4;
+    --surface: #ffffff;
+    --surface-2: #f5f7f9;
+    --line: #e1e7ec;
+    --line-strong: #ccd5dc;
+    --brand: #2e5eaa;
+    --brand-ink: #1c3f78;
+    --zone-short-bg: #fdf1e0;
+    --zone-short-line: #e3a53f;
+    --zone-short-ink: #8a5a13;
+    --zone-short-strong: #d97706;
+    --zone-long-bg: #e2f4ec;
+    --zone-long-line: #4bb98a;
+    --zone-long-ink: #0d6b4c;
+    --zone-long-strong: #0f9d74;
+    --shadow: 0 18px 40px -20px rgba(22, 33, 44, 0.35);
+    --radius-lg: 22px;
+    --radius-md: 14px;
+    --radius-sm: 9px;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8edf2;
+      --ink-soft: #a3b1bf;
+      --ink-faint: #6c7986;
+      --paper: #0f151b;
+      --surface: #1a232d;
+      --surface-2: #212c37;
+      --line: #2b3743;
+      --line-strong: #3a4854;
+      --brand: #6f9adf;
+      --brand-ink: #bcd4f5;
+      --zone-short-bg: #2e2413;
+      --zone-short-line: #8a5a13;
+      --zone-short-ink: #f0b95f;
+      --zone-short-strong: #e3a53f;
+      --zone-long-bg: #12271f;
+      --zone-long-line: #1f6a4c;
+      --zone-long-ink: #6fd3ac;
+      --zone-long-strong: #3fbe8f;
+      --shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8edf2; --ink-soft: #a3b1bf; --ink-faint: #6c7986;
+    --paper: #0f151b; --surface: #1a232d; --surface-2: #212c37;
+    --line: #2b3743; --line-strong: #3a4854;
+    --brand: #6f9adf; --brand-ink: #bcd4f5;
+    --zone-short-bg: #2e2413; --zone-short-line: #8a5a13; --zone-short-ink: #f0b95f; --zone-short-strong: #e3a53f;
+    --zone-long-bg: #12271f; --zone-long-line: #1f6a4c; --zone-long-ink: #6fd3ac; --zone-long-strong: #3fbe8f;
+    --shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.6);
+  }
+  :root[data-theme="light"] {
+    --ink: #16212c; --ink-soft: #5b6b7c; --ink-faint: #8b98a6;
+    --paper: #eef1f4; --surface: #ffffff; --surface-2: #f5f7f9;
+    --line: #e1e7ec; --line-strong: #ccd5dc;
+    --brand: #2e5eaa; --brand-ink: #1c3f78;
+    --zone-short-bg: #fdf1e0; --zone-short-line: #e3a53f; --zone-short-ink: #8a5a13; --zone-short-strong: #d97706;
+    --zone-long-bg: #e2f4ec; --zone-long-line: #4bb98a; --zone-long-ink: #0d6b4c; --zone-long-strong: #0f9d74;
+    --shadow: 0 18px 40px -20px rgba(22, 33, 44, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+
+  .stage {
+    min-height: 100vh;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 36px 16px 56px;
+    font-family: var(--font-ui);
+    color: var(--ink);
+  }
+
+  .proto-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px 5px 10px;
+  }
+  .proto-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); flex: none; }
+
+  .phone {
+    width: 100%;
+    max-width: 400px;
+    background: var(--surface);
+    border-radius: 34px;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .notch {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+    background: var(--surface);
+  }
+  .notch::before {
+    content: "";
+    width: 90px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  .app-header {
+    padding: 14px 22px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .app-header .eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--brand);
+    text-transform: uppercase;
+  }
+  .app-header h1 {
+    margin: 0;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .app-header .sub {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+
+  .policy-strip {
+    margin: 12px 20px 4px;
+    padding: 11px 13px;
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .policy-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+  .chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .chip .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .chip.short { background: var(--zone-short-bg); color: var(--zone-short-ink); border: 1px solid var(--zone-short-line); }
+  .chip.short .swatch { background: var(--zone-short-strong); }
+  .chip.long { background: var(--zone-long-bg); color: var(--zone-long-ink); border: 1px solid var(--zone-long-line); }
+  .chip.long .swatch { background: var(--zone-long-strong); }
+
+  .policy-why {
+    margin: 2px 0 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--ink-faint);
+  }
+
+  .cal-wrap { padding: 14px 20px 6px; }
+  .cal-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .cal-head h2 { margin: 0; font-size: 15.5px; font-weight: 800; }
+  .cal-head .hint { font-size: 11.5px; color: var(--ink-faint); }
+
+  .weekdays, .days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+  }
+  .weekdays {
+    margin-bottom: 6px;
+  }
+  .weekdays span {
+    text-align: center;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-faint);
+    padding-bottom: 2px;
+  }
+  .weekdays span:first-child { color: #c96a6a; }
+
+  .days { row-gap: 6px; column-gap: 4px; }
+
+  .day {
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    position: relative;
+    background: transparent;
+    color: var(--ink-faint);
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .day .num { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .day .amt { font-size: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .day.muted { color: var(--ink-faint); opacity: 0.55; }
+  .day.settled .num { text-decoration: line-through; text-decoration-color: var(--line-strong); }
+
+  .day.zone-short {
+    background: var(--zone-short-bg);
+    border-color: var(--zone-short-line);
+    color: var(--zone-short-ink);
+    cursor: pointer;
+  }
+  .day.zone-long {
+    background: var(--zone-long-bg);
+    border-color: var(--zone-long-line);
+    color: var(--zone-long-ink);
+    cursor: pointer;
+  }
+  .day.zone-short:hover, .day.zone-long:hover { filter: brightness(1.04); }
+  .day.zone-short:focus-visible, .day.zone-long:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  .day.selected {
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
+  .day.selected .num { color: var(--ink); }
+  .day.selected::after {
+    content: "✓";
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    font-size: 7px;
+    font-weight: 900;
+    color: var(--ink);
+    opacity: 0.55;
+  }
+
+  .day.today .num::before {
+    content: "";
+  }
+  .day.today {
+    outline: 1.5px dashed var(--brand);
+    outline-offset: -3px;
+  }
+
+  .legend-note {
+    margin: 10px 20px 4px;
+    font-size: 11px;
+    color: var(--ink-faint);
+    line-height: 1.5;
+  }
+
+  .summary {
+    margin: 14px 16px 18px;
+    padding: 16px 16px 14px;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(180deg, var(--surface-2), var(--surface));
+    border: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .summary .range-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .summary .range-line strong { color: var(--ink); font-weight: 800; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat .label { font-size: 10.5px; color: var(--ink-faint); font-weight: 600; }
+  .stat .value { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat .value.fee-short { color: var(--zone-short-strong); }
+  .stat .value.fee-long { color: var(--zone-long-strong); }
+
+  .divider { height: 1px; background: var(--line); margin: 2px 0; }
+
+  .fee-block { display: flex; flex-direction: column; gap: 7px; }
+  .fee-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fee-row .fee-detail {
+    flex: 1;
+    font-size: 12px;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .fee-row .fee-amt {
+    font-size: 13px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  .fee-amt.fee-long { color: var(--zone-long-strong); }
+  .fee-amt.fee-short { color: var(--zone-short-strong); }
+  .fee-total-row {
+    padding-top: 6px;
+    border-top: 1px dashed var(--line-strong);
+  }
+  .fee-total-label {
+    flex: 1;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .fee-total-row .fee-amt { font-size: 15px; color: var(--ink); }
+
+  .payout-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .payout-line .label { font-size: 13px; font-weight: 700; color: var(--ink-soft); }
+  .payout-line .value {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--brand-ink);
+  }
+
+  .breakdown {
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cta {
+    margin: 4px 16px 20px;
+    padding: 14px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--brand);
+    color: #fff;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.12s ease, filter 0.12s ease;
+  }
+  .cta:hover { filter: brightness(1.06); }
+  .cta:active { transform: scale(0.985); }
+  .cta:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 3px; }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+    z-index: 20;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cta, .toast { transition: none; }
+  }
+</style>
+
+<div class="stage">
+  <h2 class="sr-only">라이더 앱 출금 신청 화면 — 정산 달력에서 날짜를 선택해 출금액과 건당 수수료 구간을 확인하는 프로토타입</h2>
+
+  <span class="proto-tag"><span class="dot"></span>프로토타입 — 실제 데이터 미연동</span>
+
+  <div class="phone">
+    <div class="notch"></div>
+
+    <div class="app-header">
+      <span class="eyebrow">출금 신청</span>
+      <h1>정산 달력으로 확인하기</h1>
+      <span class="sub">마지막 출금 완료 · 2026-07-02</span>
+    </div>
+
+    <div class="policy-strip">
+      <div class="policy-row">
+        <span class="chip short"><span class="swatch"></span>최근 7일 이내</span>
+        <span>주문 건당 <strong style="color:var(--zone-short-strong)">80원</strong></span>
+      </div>
+      <div class="policy-row">
+        <span class="chip long"><span class="swatch"></span>7일 지난 주문</span>
+        <span>주문 건당 <strong style="color:var(--zone-long-strong)">40원</strong></span>
+      </div>
+      <p class="policy-why">플랫폼이 대리점에 일주일 단위로 정산하기 때문에, 아직 안 들어온 돈을 미리 받아가면 수수료가 더 붙어요.</p>
+    </div>
+
+    <div class="cal-wrap">
+      <div class="cal-head">
+        <h2>2026년 7월</h2>
+        <span class="hint">쌓인 날짜를 눌러보세요</span>
+      </div>
+      <div class="weekdays">
+        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+      </div>
+      <div class="days" id="calGrid" role="group" aria-label="7월 정산 달력"></div>
+    </div>
+
+    <p class="legend-note">
+      주황(최근 7일 이내)·청록(7일 지남) 날짜만 이번 출금에 포함할 수 있어요 — 누른 날짜까지 자동으로 선택됩니다. 회색은 이미 지급됐거나 아직 오지 않은 날입니다.
+    </p>
+
+    <div class="summary">
+      <div class="range-line">
+        <span>선택 기간</span>
+        <strong id="rangeLabel">7/3 ~ 7/11 (9일)</strong>
+      </div>
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="label">주문 건수</span>
+          <span class="value" id="statCount">213건</span>
+        </div>
+        <div class="stat">
+          <span class="label">정산 합계</span>
+          <span class="value" id="statGross">₩1,137,600</span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="fee-block">
+        <div class="fee-row">
+          <span class="chip long"><span class="swatch"></span>7일 지남</span>
+          <span class="fee-detail" id="feeLongDetail">118건 × 40원</span>
+          <span class="fee-amt fee-long" id="feeLongAmt">₩4,720</span>
+        </div>
+        <div class="fee-row">
+          <span class="chip short"><span class="swatch"></span>7일 이내</span>
+          <span class="fee-detail" id="feeShortDetail">95건 × 80원</span>
+          <span class="fee-amt fee-short" id="feeShortAmt">₩7,600</span>
+        </div>
+        <div class="fee-row fee-total-row">
+          <span class="fee-total-label">총 수수료</span>
+          <span class="fee-amt" id="feeTotalAmt">₩12,320</span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="payout-line">
+        <span class="label">예상 출금액</span>
+        <span class="value" id="statPayout">₩1,075,280</span>
+      </div>
+      <div class="breakdown" id="statBreakdown">합계 ₩1,137,600 − 보증금 ₩50,000 − 수수료 ₩12,320</div>
+    </div>
+
+    <button class="cta" id="ctaBtn" type="button">이 기간으로 출금 신청</button>
+  </div>
+
+  <div class="toast" id="toast">프로토타입입니다 — 실제 신청은 아직 연결되지 않았어요</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // 마지막 출금 완료 다음날부터 쌓인 정산 데이터 (목업)
+  var days = [
+    { date: "07-03", wd: 3, orders: 22, amount: 118400 },
+    { date: "07-04", wd: 4, orders: 27, amount: 142900 },
+    { date: "07-05", wd: 5, orders: 31, amount: 165200 },
+    { date: "07-06", wd: 6, orders: 18, amount: 96300 },
+    { date: "07-07", wd: 0, orders: 20, amount: 107800 },
+    { date: "07-08", wd: 1, orders: 24, amount: 129500 },
+    { date: "07-09", wd: 2, orders: 19, amount: 101200 },
+    { date: "07-10", wd: 3, orders: 23, amount: 121700 },
+    { date: "07-11", wd: 4, orders: 29, amount: 154600 },
+    { date: "07-12", wd: 5, orders: 33, amount: 178900 },
+    { date: "07-13", wd: 6, orders: 17, amount: 89400 },
+    { date: "07-14", wd: 0, orders: 21, amount: 112300 }
+  ];
+
+  var THRESHOLD = 7;      // 7일 기준
+  var FEE_SHORT = 80;     // 오늘로부터 7일 미만(최근) 주문 — 건당 수수료
+  var FEE_LONG = 40;      // 오늘로부터 7일 이상(오래됨) 주문 — 건당 수수료
+  var RESERVE = 50000;    // 보증금
+  var TODAY_INDEX = 11;   // 07-14 = 오늘(index 11) — 정산 이후 라이더 지갑에 쌓인 마지막 날
+
+  var grid = document.getElementById("calGrid");
+  var selectedUpTo = 8; // 기본 선택: 9일치 (index 0~8) — 두 수수료 구간이 섞이는 예시
+
+  function money(n) {
+    return "₩" + n.toLocaleString("ko-KR");
+  }
+
+  function buildGrid() {
+    // 7/1(수) 시작 기준 앞쪽 빈칸(6/28~6/30, 지급완료로 표시) + 이번 데이터 이후 미래 날짜
+    var lead = [
+      { date: "06-28", type: "settled" },
+      { date: "06-29", type: "settled" },
+      { date: "06-30", type: "settled" },
+      { date: "07-01", type: "settled" },
+      { date: "07-02", type: "settled" }
+    ];
+    // 7/15~7/31 + 8/1 — 5행짜리 달력을 정확히 채움(7/1은 수요일, 5+31+1=35=7×5)
+    var trail = [];
+    for (var d = 15; d <= 31; d++) {
+      trail.push({ date: "07-" + (d < 10 ? "0" + d : d), type: "future" });
+    }
+    trail.push({ date: "08-01", type: "future" });
+
+    var frag = document.createDocumentFragment();
+
+    lead.forEach(function (d) {
+      frag.appendChild(makeCell(d.date, "settled", null));
+    });
+
+    days.forEach(function (d, i) {
+      // 오늘로부터 며칠 전인지(age) 기준 — 최근(7일 미만)일수록 단기(80원), 오래될수록 장기(40원)
+      var age = TODAY_INDEX - i;
+      var zone = age < THRESHOLD ? "short" : "long";
+      frag.appendChild(makeCell(d.date, "zone-" + zone, d, i));
+    });
+
+    trail.forEach(function (d) {
+      frag.appendChild(makeCell(d.date, "future", null));
+    });
+
+    grid.innerHTML = "";
+    grid.appendChild(frag);
+  }
+
+  function makeCell(dateStr, kind, data, index) {
+    var day = parseInt(dateStr.split("-")[1], 10);
+    var el = document.createElement(kind === "zone-short" || kind === "zone-long" ? "button" : "div");
+    el.className = "day " + kind;
+    el.dataset.index = index !== undefined ? index : "";
+
+    if (kind === "settled") {
+      el.classList.add("muted", "settled");
+      el.innerHTML = '<span class="num">' + day + '</span>';
+    } else if (kind === "future") {
+      el.classList.add("muted");
+      el.innerHTML = '<span class="num">' + day + '</span>';
+    } else {
+      el.type = "button";
+      el.innerHTML = '<span class="num">' + day + '</span><span class="amt">' + Math.round(data.amount / 1000) + 'k</span>';
+      el.setAttribute("aria-label", "7월 " + day + "일, 주문 " + data.orders + "건, 정산 " + money(data.amount));
+      if (index === TODAY_INDEX) el.classList.add("today");
+      el.addEventListener("click", function () {
+        selectedUpTo = index;
+        render();
+      });
+    }
+    return el;
+  }
+
+  function render() {
+    var cells = grid.querySelectorAll(".day[data-index]");
+    cells.forEach(function (c) {
+      var idx = c.dataset.index;
+      if (idx === "") return;
+      idx = parseInt(idx, 10);
+      c.classList.toggle("selected", idx <= selectedUpTo);
+    });
+
+    var count = 0, gross = 0, shortOrders = 0, longOrders = 0;
+    for (var i = 0; i <= selectedUpTo; i++) {
+      var age = TODAY_INDEX - i;
+      count += days[i].orders;
+      gross += days[i].amount;
+      if (age < THRESHOLD) {
+        shortOrders += days[i].orders;
+      } else {
+        longOrders += days[i].orders;
+      }
+    }
+    var dayCount = selectedUpTo + 1;
+    var shortFee = shortOrders * FEE_SHORT;
+    var longFee = longOrders * FEE_LONG;
+    var totalFee = shortFee + longFee;
+    var payout = Math.max(0, gross - RESERVE - totalFee);
+
+    document.getElementById("rangeLabel").textContent =
+      "7/3 ~ 7/" + (parseInt(days[selectedUpTo].date.split("-")[1], 10)) + " (" + dayCount + "일)";
+    document.getElementById("statCount").textContent = count.toLocaleString("ko-KR") + "건";
+    document.getElementById("statGross").textContent = money(gross);
+
+    document.getElementById("feeLongDetail").textContent = longOrders.toLocaleString("ko-KR") + "건 × 40원";
+    document.getElementById("feeLongAmt").textContent = money(longFee);
+    document.getElementById("feeShortDetail").textContent = shortOrders.toLocaleString("ko-KR") + "건 × 80원";
+    document.getElementById("feeShortAmt").textContent = money(shortFee);
+    document.getElementById("feeTotalAmt").textContent = money(totalFee);
+
+    document.getElementById("statPayout").textContent = money(payout);
+    document.getElementById("statBreakdown").textContent =
+      "합계 " + money(gross) + " − 보증금 " + money(RESERVE) + " − 수수료 " + money(totalFee);
+  }
+
+  document.getElementById("ctaBtn").addEventListener("click", function () {
+    var toast = document.getElementById("toast");
+    toast.classList.add("show");
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(function () {
+      toast.classList.remove("show");
+    }, 2200);
+  });
+
+  buildGrid();
+  render();
+})();
+</script>
