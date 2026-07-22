@@ -25,7 +25,7 @@ alwaysApply: true
 | system_codes·enum·상태값 | §4.3 |
 | 감사 action 코드 | §4.4 |
 | 도메인 규칙(정산·출금·라이더 등) | §5 해당 절 |
-| migrate/seed·테이블 | §7 |
+| migrate/seed·테이블 | §7 (+ **DB_SCHEMA.md**도 함께 갱신 — `.cursor/rules/db-schema-sync.mdc`) |
 | 미결·리스크·TODO | §8 |
 | 새 기능 추가 절차 | §9 |
 

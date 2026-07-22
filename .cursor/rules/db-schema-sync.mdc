@@ -1,0 +1,50 @@
+---
+description: DB 스키마를 바꾸는 모든 작업 시 DB_SCHEMA.md를 함께 갱신
+alwaysApply: true
+---
+
+# DB_SCHEMA.md 동기화 (필수)
+
+이 프로젝트에서 **테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가**를 하면, 같은 작업 안에서 **`DB_SCHEMA.md`를 반드시 함께 수정**한다.
+
+## 언제 갱신하는가
+
+- `sql/*.sql` 신규/수정 (CREATE TABLE, ALTER)
+- `inc/MigrateRunner.php`에 마이그레이션 메서드 추가(컬럼 추가, enum 확장, 백필 등)
+- 기존 테이블의 컬럼 의미·기본값·오버라이드 패턴이 바뀌는 경우
+
+질문만 답하거나 코드 주석 수준의 trivial 변경은 생략 가능. **실제 DB 구조가 바뀌면 생략 불가.**
+
+## 어디를 수정하는가
+
+| 변경 유형 | DB_SCHEMA.md 위치 |
+|-----------|----------------|
+| 신규 테이블 | 해당 도메인 절(§2~§9)에 표+설명 추가, 없으면 새 절 |
+| 기존 테이블 컬럼 추가/변경 | 해당 테이블 표 갱신 |
+| enum 값 추가 | 해당 컬럼 설명에 값 목록 갱신 |
+| 관계(FK)·오버라이드 패턴 변경 | §1 개요 다이어그램 + 해당 테이블 설명 |
+| 도메인 클래스 신설/변경 | §11 매핑 표 |
+| 스키마 특이사항(죽은 컬럼, 의미 다른 org_id 등) | §10 |
+
+## 갱신 방법 (authoritative 소스)
+
+DB_SCHEMA.md는 **`sql/*.sql` 원본이 아니라 실제 DB(`SHOW CREATE TABLE`) 기준**으로 쓴다. `php migrate.php` 실행 후 아래로 실제 스냅샷을 뽑아 문서와 대조할 것:
+
+```bash
+php -r '
+require "inc/env.php"; require "inc/config.php"; require "inc/db.php";
+foreach (db_rows("SHOW TABLES") as $r) {
+    $t = array_values($r)[0];
+    $row = db_row("SHOW CREATE TABLE `$t`");
+    echo array_values($row)[1] . "\n\n";
+}
+'
+```
+
+## 완료 기준
+
+작업 마무리 전에 확인:
+
+1. 새/변경된 테이블·컬럼이 DB_SCHEMA.md에 반영됐는가
+2. §12 변경 이력에 날짜+요약 한 줄이 추가됐는가
+3. **DB 변경은 LOGIC.md §7(구현작업목록)에도 걸리는 경우가 많다** — LOGIC.md도 함께 확인(`.cursor/rules/logic-md-sync.mdc`)

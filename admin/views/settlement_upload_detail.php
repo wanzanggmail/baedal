@@ -238,12 +238,13 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<th class="min-w-80px text-end">배달</th>
 							<th class="min-w-80px text-end">지역단가</th>
 							<th class="min-w-70px">매칭</th>
+							<th class="min-w-70px"></th>
 						</tr>
 					</thead>
 					<tbody>
 					<?php if ($riders === []) : ?>
 						<tr>
-							<td colspan="11" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
+							<td colspan="12" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
 						</tr>
 					<?php else :
 					    $i = 0;
@@ -285,6 +286,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 									<span class="badge badge-light-warning">미매칭</span>
 								<?php endif; ?>
 							</td>
+							<td>
+								<button type="button" class="btn btn-sm btn-light-primary dr-detail-btn" data-id="<?= (int) $row['id'] ?>">상세</button>
+							</td>
 						</tr>
 						<?php endforeach; ?>
 					<?php endif; ?>
@@ -294,6 +298,123 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		</div>
 	</div>
 	<!--end::라이더 목록-->
+
+	<!--begin::원본 데이터 상세 모달-->
+	<div class="modal fade" id="kt_dr_detail_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered modal-lg">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h3 class="modal-title">정산 원본 데이터 상세</h3>
+					<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+				</div>
+				<div class="modal-body fs-7" id="dr_detail_body">
+					<div class="text-center text-muted py-10">불러오는 중…</div>
+				</div>
+				<div class="modal-footer">
+					<a href="#" id="dr_detail_rider_link" class="btn btn-primary d-none" target="_self">라이더 상세 보기</a>
+					<button type="button" class="btn btn-light" data-bs-dismiss="modal">닫기</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::원본 데이터 상세 모달-->
+
+	<script>
+	(function () {
+		var API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/settlement_daily_rider_detail.php', JSON_UNESCAPED_UNICODE) ?>;
+		var RIDER_DETAIL_URL = <?= json_encode($riderDetailUrl, JSON_UNESCAPED_UNICODE) ?>;
+		var modalEl = document.getElementById('kt_dr_detail_modal');
+		var body = document.getElementById('dr_detail_body');
+		var riderLink = document.getElementById('dr_detail_rider_link');
+
+		function won(n) { return (n || 0).toLocaleString('ko-KR') + '원'; }
+		function esc(s) {
+			return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+			});
+		}
+		function row(label, value) {
+			return '<div class="d-flex justify-content-between py-1 border-bottom border-gray-200">' +
+				'<span class="text-muted">' + esc(label) + '</span><span class="fw-semibold">' + value + '</span></div>';
+		}
+
+		function render(d) {
+			var html = '';
+			html += '<div class="mb-4">';
+			html += row('귀속일 · 플랫폼', esc(d.settlement_date) + ' · ' + esc(d.platform_label));
+			html += row('원본 파일', esc(d.original_filename));
+			html += row('엑셀 이름 / 라이선스ID', esc(d.rider_name_raw) + ' / ' + esc(d.license_id));
+			html += '</div>';
+
+			html += '<div class="separator separator-dashed mb-4"></div>';
+			html += '<div class="mb-4">';
+			html += row('오더 건수', esc(d.order_count) + '건');
+			html += row('정산예정(gross)', won(d.gross_amount));
+			html += row('실지급(payout)', won(d.payout_amount));
+			html += '</div>';
+
+			html += '<div class="separator separator-dashed mb-4"></div>';
+			html += '<div class="fw-bold text-gray-800 mb-2">수수료 상세</div>';
+			html += '<div class="row g-0 mb-4">';
+			html += '<div class="col-6">' + row('픽업', won(d.fee_pickup)) + '</div>';
+			html += '<div class="col-6">' + row('배달', won(d.fee_delivery)) + '</div>';
+			html += '<div class="col-6">' + row('지역단가', won(d.fee_area)) + '</div>';
+			html += '<div class="col-6">' + row('거리구간(건수/할증)', d.fee_dist_cnt + '건 / ' + won(d.fee_dist_surge)) + '</div>';
+			html += '<div class="col-6">' + row('픽업콜(건수/할증)', d.fee_pickup_cnt + '건 / ' + won(d.fee_pickup_surge)) + '</div>';
+			html += '<div class="col-6">' + row('도착콜(건수/할증)', d.fee_dest_cnt + '건 / ' + won(d.fee_dest_surge)) + '</div>';
+			html += '<div class="col-6">' + row('기상할증(건수/금액)', d.fee_weather_cnt + '건 / ' + won(d.fee_weather)) + '</div>';
+			html += '<div class="col-6">' + row('시간제보험', won(d.hourly_insurance)) + '</div>';
+			html += '</div>';
+
+			if (d.fee_promo1 || d.fee_promo2 || d.fee_promo3 || d.fee_promo4) {
+				html += '<div class="fw-bold text-gray-800 mb-2">프로모션</div>';
+				html += '<div class="row g-0 mb-4">';
+				html += '<div class="col-6">' + row('프로모션1', won(d.fee_promo1)) + '</div>';
+				html += '<div class="col-6">' + row('프로모션2', won(d.fee_promo2)) + '</div>';
+				html += '<div class="col-6">' + row('프로모션3', won(d.fee_promo3)) + '</div>';
+				html += '<div class="col-6">' + row('프로모션4', won(d.fee_promo4)) + '</div>';
+				html += '</div>';
+			}
+
+			html += '<div class="separator separator-dashed mb-4"></div>';
+			html += '<div class="fw-bold text-gray-800 mb-2">매칭 라이더</div>';
+			if (d.matched && d.rider) {
+				html += row('이름 / 코드', esc(d.rider.name) + ' / ' + esc(d.rider.rider_code));
+				html += row('연락처', esc(d.rider.phone));
+				html += row('상태', esc(d.rider.status_label));
+			} else {
+				html += '<div class="text-muted">미매칭 — 연결된 라이더가 없습니다.</div>';
+			}
+
+			body.innerHTML = html;
+
+			if (d.matched && d.rider) {
+				riderLink.href = RIDER_DETAIL_URL + '?id=' + d.rider.id;
+				riderLink.classList.remove('d-none');
+			} else {
+				riderLink.classList.add('d-none');
+			}
+		}
+
+		document.querySelectorAll('.dr-detail-btn').forEach(function (btn) {
+			btn.addEventListener('click', function () {
+				var id = btn.getAttribute('data-id');
+				body.innerHTML = '<div class="text-center text-muted py-10">불러오는 중…</div>';
+				riderLink.classList.add('d-none');
+				bootstrap.Modal.getOrCreateInstance(modalEl).show();
+				fetch(API + '?id=' + id, { credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (!res.ok) throw new Error(res.message || '조회 실패');
+						render(res.row);
+					})
+					.catch(function (e) {
+						body.innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>';
+					});
+			});
+		});
+	})();
+	</script>
 
 	<?php if (($upload['status'] ?? '') === 'parsed' && SettlementLedger::tableExists()) : ?>
 	<script>
