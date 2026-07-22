@@ -3,7 +3,7 @@
 > **목적:** 실제 DB에 어떤 테이블·컬럼·관계가 있는지 한눈에 파악하기 위한 기준 문서.
 > **원본:** `SHOW CREATE TABLE`(정보스키마) 기준 — 코드(`sql/*.sql`, `MigrateRunner.php`)가 아니라 **실제 서버 DB 상태**를 그대로 기술한다.
 > **갱신 규칙(필수):** 테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가 등 **스키마가 바뀌는 모든 작업에서 이 문서를 함께 갱신**한다. (`.cursor/rules/db-schema-sync.mdc`)
-> **최종 확인:** 2026-07-22, DB `my_web_db`, 테이블 25개 (Phase A~F 관리자 재설계 반영 완료 시점)
+> **최종 확인:** 2026-07-23, DB `my_web_db`, 테이블 27개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 반영 완료 시점)
 
 ---
 
@@ -106,10 +106,16 @@ PK=`rider_id`. `accrued_days`는 정산수수료 구간 판단용(§5 참고, `W
 
 ```
 settlement_uploads (1건 업로드)
-  → settlement_daily_riders (라이더별 일간 원본, N행)
-    → settlement_rider_cycles (정산 반영 1건, upload당 라이더 1일 1행)
-      → settlement_fee_items (반영 시 차감 항목 N개)
+  ├→ settlement_daily_riders   (종합탭, 라이더·일자 요약, N행)
+  │    → settlement_rider_cycles (정산 반영 1건, upload당 라이더 1일 1행)
+  │        → settlement_fee_items (반영 시 차감 항목 N개)
+  ├→ settlement_order_details  (오더별 상세내역, 주문 단위 원본, N행)
+  ├→ settlement_hourly_insurance (시간제보험, 라이더·일자별, N행)
+  └→ settlement_weekly_deductions (차감내역, 라이더 매칭, N행)
+       → registered_entry_id → deduction_entries (등록 시)
 ```
+
+> 2026-07-23 실 쿠팡 정산서(`오엑스플러스_서울_강서남부_20260628.xlsx`)로 시트 구조를 직접 검증. 실제 엑셀은 7개 탭: **종합·오더별 상세 내역서·지원금·추가지원금·차감내역·협력사 자체 미션·시간제보험**. 이 중 종합/오더별상세/차감내역/시간제보험만 파싱·저장 중(지원금·추가지원금·협력사자체미션은 미사용, 필요 시 추후 추가).
 
 ### `settlement_uploads`
 | 컬럼 | 설명 |
@@ -119,10 +125,17 @@ settlement_uploads (1건 업로드)
 | `agency_id` | 업로드 소유 대리점(FK 없음, 인덱스만) |
 | `status` | enum(`uploaded`,`parsing`,`parsed`,`applied`,`error`) |
 
-### `settlement_daily_riders` — 엑셀 파싱 원본 1행 = 라이더 1일 실적
+### `settlement_daily_riders` — 엑셀 "종합" 탭 원본 1행 = 라이더 1일 요약
 `fee_pickup/delivery/area/dist_*/pickup_*/dest_*/weather*/promo1~4` 등 쿠팡 정산서 세부 항목 컬럼.
-`hourly_insurance`(🆕 2026-07-22): 시간제보험 — **계산이 아니라 쿠팡 정산서 파일에 포함된 값을 그대로 파싱**해 넣는 컬럼. 파서 매핑은 실 자료 도착 시 확정(§7 #6, `admin/api/settlement_upload.php`에 TODO 표시).
+`hourly_insurance`: 시간제보험 — **계산이 아니라 "시간제보험" 탭 값을 파싱해 채움**(✅ 2026-07-23 실 파일 검증 완료, `XlsxParser::parseHourlyInsuranceSheet()`).
 UNIQUE(`upload_id`,`license_id`) — 중복 업로드 방지.
+
+### `settlement_order_details` — 🆕(2026-07-23) 엑셀 "오더별 상세 내역서" 탭 원본, 주문 1건=1행
+`rider_id`(FK→`riders`, `ON DELETE SET NULL`, 파일 내 성함 매칭·DB 폴백) · `order_no`(축약형 주문번호) · `pickup_area`/`delivery_area` · `assigned_at`/`accepted_at`/`delivered_at`(datetime, 엑셀 시리얼 변환 — **실제 배달 시각**, §7 #18 age-bucket 계산의 미래 데이터 소스) · `duration_minutes` · `distance_m` · `delivery_type`(멀티배달 등) · 수수료 세부(`fee_pickup`/`fee_delivery`/`fee_area`/`fee_dist_surge`/`fee_pickup_surge`/`fee_dest_surge`/`fee_weather`/`fee_promo1~4`) · `net_amount`(오더 단위 정산금액).
+검증: 한 업로드 내 전체 `net_amount` 합계가 `settlement_daily_riders` 총 정산금액과 일치해야 함(실 파일로 확인 완료: 328건 = 1,390,241원).
+
+### `settlement_hourly_insurance` — 🆕(2026-07-23) 엑셀 "시간제보험" 탭 원본, 라이더·일자별 1행
+`occurred_date`(발생일자, 파일 값) · `amount`(양수로 정규화 — 종합탭 AH컬럼은 음수 표기이나 이 테이블·`settlement_daily_riders.hourly_insurance`는 양수 공제액 컨벤션).
 
 ### `settlement_rider_cycles` — 정산 반영 확정 1건
 `gross_amount`(플랫폼 총액) → `total_fee_amount`(차감 합) → `net_amount`(지갑 반영액, `rider_wallets.balance`에 적립).
@@ -132,7 +145,9 @@ UNIQUE(`rider_id`,`settlement_date`,`platform`) — 같은 날 중복 반영 방
 `fee_code` 값: `agency_fee`(선정산수수료, `is_daily_settlement=1`만 반영시점 부과) · `withholding`(원천세, 대상자만) · `employment_ins`(고용 0.8%) · `accident_ins`(산재 0.88%) · `hourly_ins`(시간제보험) · `advance`(선지급) 등.
 ⚠️ `agency_fee`(대행수수료, 대리점 몫)와 §6의 `org_fee_config`(영업대행수수료, PG 결제 시 3자 분배)는 **이름이 비슷하지만 완전히 다른 개념**.
 
-### `settlement_weekly_deductions` — 배민 등 주간 정산 원천 데이터(참고용, 실사용 미확정)
+### `settlement_weekly_deductions` — 엑셀 "차감내역" 탭 원본
+🐛→✅ **2026-07-23 버그 수정**: 실 파일로 헤더 대조 결과 기존 파서가 D열부터 한 칸씩 밀려 읽어 **실제 차감액(금액열)이 아니라 배달비를 저장하던 버그**를 발견·수정. 라이더 매칭(`rider_id`, 이전엔 항상 NULL)도 이번에 추가.
+`registered_entry_id`(🆕): 이 차감행을 `deduction_entries`로 "등록"하면 채워짐(`admin/api/deduction_register.php`) — 중복 등록 방지 + 등록 취소 시 NULL로 복원. 등록된 `deduction_entries` 행은 정산 반영 시 `applied_date` 기준으로 자동 차감된다(§5.3 참고).
 
 ### `settlement_excel_config` — 정산 엑셀 열기 암호(대리점별 오버라이드)
 UNIQUE(`org_id`,`platform`), `org_id IS NULL`=전역 기본. 복호화 순서: 업로드 직접입력→대리점→전역→env→baemin 하드코딩.
@@ -248,8 +263,11 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | `admins` | `AdminAccount`(전체), `OrgAccount`(조직 서브계정) |
 | `riders`, `rider_platforms` | (라이더 CRUD — `admin/api/riders.php`, `rider_action.php`) |
 | `rider_wallets` | `RiderWallet` |
-| `settlement_*` | `SettlementLedger`, `AgencyFeeConfig` |
-| `deduction_entries` | 선지급: `admin/api/advance_entry.php` |
+| `settlement_*` | `SettlementLedger`, `AgencyFeeConfig`, `XlsxParser`(파싱), `admin/api/settlement_upload.php`(저장) |
+| `settlement_order_details` | `XlsxParser::parseOrderDetailSheet` → `settlement_upload.php` |
+| `settlement_hourly_insurance` | `XlsxParser::parseHourlyInsuranceSheet` → `settlement_upload.php` |
+| `settlement_weekly_deductions` | `XlsxParser::parseDeductionSheet` → `settlement_upload.php`(저장), `admin/api/deduction_register.php`(등록) |
+| `deduction_entries` | 선지급: `admin/api/advance_entry.php`, 업로드 차감 등록: `admin/api/deduction_register.php` |
 | `deduction_global_config` | `SettlementLedger::globalDeductionConfig` |
 | `withdrawal_config` | `WithdrawalConfig` |
 | `withdrawal_requests` | `Withdrawal`(rider_manual), `DailyPayout`(auto_daily), `AgencyPayout`(agency_payout) |
@@ -269,3 +287,4 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | 날짜 | 내용 |
 |---|---|
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |
+| 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |

@@ -80,6 +80,27 @@ $deductionCount = (int) (db_row(
     [$uploadId]
 )['cnt'] ?? 0);
 
+$deductionRows = db_rows(
+    'SELECT swd.id, swd.order_date, swd.rider_id, swd.rider_name_raw, swd.deduction_type,
+            swd.store_name, swd.amount, swd.registered_entry_id,
+            r.name AS rider_name, r.rider_code
+       FROM settlement_weekly_deductions swd
+       LEFT JOIN riders r ON r.id = swd.rider_id
+      WHERE swd.upload_id = ?
+      ORDER BY swd.order_date ASC, swd.id ASC',
+    [$uploadId]
+);
+
+$orderDetailCount = (int) (db_row(
+    'SELECT COUNT(*) AS cnt FROM settlement_order_details WHERE upload_id = ?',
+    [$uploadId]
+)['cnt'] ?? 0);
+
+$hourlyInsCount = (int) (db_row(
+    'SELECT COUNT(*) AS cnt FROM settlement_hourly_insurance WHERE upload_id = ?',
+    [$uploadId]
+)['cnt'] ?? 0);
+
 $meta = json_decode((string) ($upload['stored_path'] ?? ''), true);
 $teamRegion = is_array($meta)
     ? trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? ''))
@@ -185,7 +206,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<div class="text-gray-500 fw-semibold fs-7 mb-1">파일 · 상태</div>
 					<div class="text-gray-800 fs-7 text-break mb-2"><?= htmlspecialchars((string) $upload['original_filename'], ENT_QUOTES, 'UTF-8') ?></div>
 					<span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
-					<div class="text-muted fs-8 mt-2">차감 <?= number_format($deductionCount) ?>건</div>
+					<div class="text-muted fs-8 mt-2">차감 <?= number_format($deductionCount) ?>건 · 오더상세 <?= number_format($orderDetailCount) ?>건 · 시간제보험 <?= number_format($hourlyInsCount) ?>건</div>
 					<div class="text-muted fs-8"><?= htmlspecialchars((string) ($upload['operator_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(substr((string) $upload['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></div>
 				</div>
 			</div>
@@ -298,6 +319,69 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		</div>
 	</div>
 	<!--end::라이더 목록-->
+
+	<?php if ($deductionRows !== []) : ?>
+	<!--begin::차감내역-->
+	<div class="card card-flush mt-8">
+		<div class="card-header align-items-center border-0 pt-6">
+			<div class="card-title">
+				<h3 class="fw-bold m-0">차감내역 (엑셀 원본)</h3>
+			</div>
+			<div class="card-toolbar">
+				<span class="text-muted fs-7"><?= number_format(count($deductionRows)) ?>건</span>
+			</div>
+		</div>
+		<div class="card-body pt-0">
+			<div class="alert bg-light-warning fs-8 p-3 mb-4">업로드된 차감내역을 확인하고 "등록"하면 해당 라이더의 주문일자 정산 반영 시 자동으로 차감됩니다.</div>
+			<div class="table-responsive">
+				<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-4">
+					<thead>
+						<tr class="fw-bold text-muted bg-light">
+							<th class="min-w-100px">주문일자</th>
+							<th class="min-w-100px">라이더</th>
+							<th class="min-w-100px">구분</th>
+							<th class="min-w-140px">스토어명</th>
+							<th class="min-w-100px text-end">금액</th>
+							<th class="min-w-90px">상태</th>
+						</tr>
+					</thead>
+					<tbody id="ded_tbody">
+					<?php foreach ($deductionRows as $d) :
+						$dMatched = $d['rider_id'] !== null;
+						$registered = (int) ($d['registered_entry_id'] ?? 0) > 0;
+					?>
+						<tr data-id="<?= (int) $d['id'] ?>" data-matched="<?= $dMatched ? '1' : '0' ?>" data-registered="<?= $registered ? '1' : '0' ?>">
+							<td class="text-muted"><?= htmlspecialchars((string) $d['order_date'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td>
+								<?php if ($dMatched) : ?>
+									<span class="fw-semibold text-gray-900"><?= htmlspecialchars((string) $d['rider_name'], ENT_QUOTES, 'UTF-8') ?></span>
+									<div class="text-muted fs-8"><?= htmlspecialchars((string) $d['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+								<?php else : ?>
+									<span class="text-muted"><?= htmlspecialchars((string) $d['rider_name_raw'], ENT_QUOTES, 'UTF-8') ?></span>
+									<div><span class="badge badge-light-warning fs-8">미매칭</span></div>
+								<?php endif; ?>
+							</td>
+							<td><?= htmlspecialchars((string) $d['deduction_type'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-muted fs-7"><?= htmlspecialchars((string) $d['store_name'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-end fw-bold"><?= $fmtWon(abs((int) $d['amount'])) ?></td>
+							<td>
+								<?php if ($registered) : ?>
+									<button type="button" class="btn btn-sm btn-light-danger ded-unregister">등록취소</button>
+								<?php elseif ($dMatched) : ?>
+									<button type="button" class="btn btn-sm btn-light-primary ded-register">등록</button>
+								<?php else : ?>
+									<span class="text-muted fs-8">라이더 매칭 필요</span>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+	<!--end::차감내역-->
+	<?php endif; ?>
 
 	<!--begin::원본 데이터 상세 모달-->
 	<div class="modal fade" id="kt_dr_detail_modal" tabindex="-1" aria-hidden="true">
@@ -412,6 +496,44 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 						body.innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>';
 					});
 			});
+		});
+	})();
+	</script>
+
+	<script>
+	(function () {
+		var tbody = document.getElementById('ded_tbody');
+		if (!tbody) return;
+		var API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/deduction_register.php', JSON_UNESCAPED_UNICODE) ?>;
+
+		function post(payload) {
+			return fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify(payload),
+			}).then(function (r) { return r.json(); });
+		}
+
+		tbody.addEventListener('click', function (ev) {
+			var reg = ev.target.closest('.ded-register');
+			var unreg = ev.target.closest('.ded-unregister');
+			if (!reg && !unreg) return;
+
+			var tr = ev.target.closest('tr');
+			var id = parseInt(tr.getAttribute('data-id'), 10);
+			var btn = reg || unreg;
+			btn.disabled = true;
+
+			post({ action: reg ? 'register' : 'unregister', id: id })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '처리 실패');
+					location.reload();
+				})
+				.catch(function (e) {
+					alert(e.message || '처리 실패');
+					btn.disabled = false;
+				});
 		});
 	})();
 	</script>

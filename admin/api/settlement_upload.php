@@ -121,8 +121,10 @@ $parser    = new XlsxParser();
 try {
     $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords, $platform);
     $parser->open($parsePath);
-    $parsed     = $parser->parseDailySheet($settlementDate);
-    $deductions = $parser->parseDeductionSheet();
+    $parsed       = $parser->parseDailySheet($settlementDate);
+    $deductions   = $parser->parseDeductionSheet();
+    $orderDetails = $parser->parseOrderDetailSheet();
+    $hourlyIns    = $parser->parseHourlyInsuranceSheet();
 } catch (Throwable $e) {
     if (isset($parser)) {
         $parser->close();
@@ -207,10 +209,12 @@ if ($dryRun) {
         'team'              => $teamName,
         'region'            => $regionName,
         'summary'           => [
-            'total'      => count($rows),
-            'matched'    => $matchedCnt,
-            'unmatched'  => $unmatchedCnt,
-            'deductions' => $dedCount,
+            'total'            => count($rows),
+            'matched'          => $matchedCnt,
+            'unmatched'        => $unmatchedCnt,
+            'deductions'       => $dedCount,
+            'order_details'    => count($orderDetails),
+            'hourly_insurance' => count($hourlyIns),
         ],
         'rows'              => $previewRows,
         'duplicate_warning' => $dupWarning,
@@ -232,6 +236,8 @@ try {
         $fileHash,
         $rows,
         $deductions,
+        $orderDetails,
+        $hourlyIns,
         $adminId,
         $agencyId
     ): array {
@@ -249,30 +255,37 @@ try {
             ['daily', $platform, $agencyId, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
         );
 
-        $inserted  = 0;
-        $matched   = 0;
-        $unmatched = [];
+        // 시간제보험(§7 #6): 라이더 이름(원본 문자열) → 금액. 종합탭 daily_riders.hourly_insurance 채우기 + 별도 내역 테이블 저장에 공용.
+        $hourlyByNameRaw = [];
+        foreach ($hourlyIns as $hi) {
+            $hourlyByNameRaw[$hi['name_raw']] = ($hourlyByNameRaw[$hi['name_raw']] ?? 0) + (int) $hi['amount'];
+        }
+
+        $inserted        = 0;
+        $matched         = 0;
+        $unmatched       = [];
+        $nameRawToRiderId = [];
 
         foreach ($rows as $row) {
             $riderId = settlement_match_rider_id($platform, (string) $row['license_id'], (string) $row['name'], $agencyId);
 
             if ($riderId !== null) {
                 $matched++;
+                $nameRawToRiderId[$row['name_raw']] = $riderId;
             } else {
                 $unmatched[] = $row['name_raw'];
             }
 
-            // TODO(§7 #6 시간제보험): 쿠팡 정산서 실 파일의 시간제보험 컬럼 매핑이 확정되면
-            //   $row['hourly_insurance'] 를 파싱해 아래 INSERT의 hourly_insurance 컬럼에 넣을 것.
-            //   (컬럼·정산반영 공제 로직은 이미 준비됨 — SettlementLedger::createCycleFromDailyRow)
+            $hourlyForRider = (int) ($hourlyByNameRaw[$row['name_raw']] ?? 0);
+
             db_insert(
                 'INSERT INTO settlement_daily_riders
                     (upload_id, settlement_date, platform, rider_id, license_id, rider_name_raw,
                      order_count, gross_amount, fee_pickup, fee_delivery, fee_area,
                      fee_dist_cnt, fee_dist_surge, fee_pickup_cnt, fee_pickup_surge,
                      fee_dest_cnt, fee_dest_surge, fee_weather_cnt, fee_weather,
-                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, payout_amount)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, payout_amount, hourly_insurance)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $uploadId,
                     $settlementDate,
@@ -298,16 +311,83 @@ try {
                     $row['fee_promo3'],
                     $row['fee_promo4'],
                     $row['payout_amount'],
+                    $hourlyForRider,
                 ]
             );
             $inserted++;
         }
 
+        // 오더별 상세내역(주문 단위 원본) — 이름은 같은 파일 내 종합탭 매칭 결과를 우선 사용, 없으면 DB 조회로 폴백.
+        $orderDetailCount = 0;
+        foreach ($orderDetails as $od) {
+            $riderId = $nameRawToRiderId[$od['name_raw']]
+                ?? settlement_match_rider_id($platform, '', $od['name'], $agencyId);
+
+            db_insert(
+                'INSERT INTO settlement_order_details
+                    (upload_id, settlement_date, rider_id, rider_name_raw, order_no, store_name,
+                     pickup_area, delivery_area, assigned_at, accepted_at, delivered_at, duration_minutes,
+                     peak_time, distance_m, delivery_type, fee_pickup, fee_delivery, fee_area,
+                     fee_dist_surge, fee_pickup_surge, fee_dest_surge, fee_weather,
+                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, net_amount)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                [
+                    $uploadId,
+                    $settlementDate,
+                    $riderId,
+                    $od['name_raw'],
+                    $od['order_no'],
+                    $od['store_name'],
+                    $od['pickup_area'],
+                    $od['delivery_area'],
+                    $od['assigned_at'],
+                    $od['accepted_at'],
+                    $od['delivered_at'],
+                    $od['duration_minutes'],
+                    $od['peak_time'],
+                    $od['distance_m'],
+                    $od['delivery_type'],
+                    $od['fee_pickup'],
+                    $od['fee_delivery'],
+                    $od['fee_area'],
+                    $od['fee_dist_surge'],
+                    $od['fee_pickup_surge'],
+                    $od['fee_dest_surge'],
+                    $od['fee_weather'],
+                    $od['fee_promo1'],
+                    $od['fee_promo2'],
+                    $od['fee_promo3'],
+                    $od['fee_promo4'],
+                    $od['net_amount'],
+                ]
+            );
+            $orderDetailCount++;
+        }
+
+        // 시간제보험 내역(라이더·일자별) — 신고/조회용 별도 저장.
+        $hourlyInsCount = 0;
+        foreach ($hourlyIns as $hi) {
+            $riderId = $nameRawToRiderId[$hi['name_raw']]
+                ?? settlement_match_rider_id($platform, '', $hi['name'], $agencyId);
+
+            db_insert(
+                'INSERT INTO settlement_hourly_insurance
+                    (upload_id, settlement_date, occurred_date, rider_id, rider_name_raw, amount)
+                 VALUES (?,?,?,?,?,?)',
+                [$uploadId, $settlementDate, $hi['occurred_date'], $riderId, $hi['name_raw'], $hi['amount']]
+            );
+            $hourlyInsCount++;
+        }
+
+        // 차감내역 — 헤더 기반 매핑으로 정정(구 버전은 배달비를 실제 금액으로 잘못 저장하던 버그가 있었음).
         $deductionCount = 0;
         foreach ($deductions as $ded) {
             if ($ded['order_no'] === '' && $ded['amount'] === 0) {
                 continue;
             }
+
+            $riderId = $nameRawToRiderId[$ded['name_raw']]
+                ?? settlement_match_rider_id($platform, '', $ded['name'], $agencyId);
 
             db_insert(
                 'INSERT INTO settlement_weekly_deductions
@@ -319,11 +399,11 @@ try {
                     $settlementDate,
                     settlement_parse_date($ded['order_date']),
                     $ded['order_no'],
-                    null,
-                    '',
+                    $riderId,
+                    $ded['name_raw'],
                     $ded['type'],
                     $ded['store_name'],
-                    null,
+                    $ded['assigned_at'],
                     $ded['menu_price'],
                     $ded['delivery_fee'],
                     $ded['amount'],
@@ -341,11 +421,13 @@ try {
         );
 
         return [
-            'upload_id'  => $uploadId,
-            'inserted'   => $inserted,
-            'matched'    => $matched,
-            'unmatched'  => $unmatched,
-            'deductions' => $deductionCount,
+            'upload_id'      => $uploadId,
+            'inserted'       => $inserted,
+            'matched'        => $matched,
+            'unmatched'      => $unmatched,
+            'deductions'     => $deductionCount,
+            'order_details'  => $orderDetailCount,
+            'hourly_insurance' => $hourlyInsCount,
         ];
     });
 } catch (Throwable $e) {
@@ -373,8 +455,10 @@ echo json_encode([
     'rows'       => $result['inserted'],
     'matched'    => $result['matched'],
     'deductions' => $result['deductions'],
+    'order_details' => $result['order_details'],
+    'hourly_insurance' => $result['hourly_insurance'],
     'unmatched'  => $result['unmatched'],
-    'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명)",
+    'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명, 오더 상세 {$result['order_details']}건, 시간제보험 {$result['hourly_insurance']}건)",
 ], JSON_UNESCAPED_UNICODE);
 
 /**

@@ -21,6 +21,7 @@ final class MigrateRunner
         self::runSqlFile('organizations.sql');
         self::runSqlFile('redesign_wallet.sql');
         self::runSqlFile('redesign_gateway.sql');
+        self::runSqlFile('redesign_settlement_detail.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
@@ -33,6 +34,7 @@ final class MigrateRunner
         self::migrateAgencyWalletBackfill();
         self::migrateOrgFeeBackfill();
         self::migrateHourlyInsuranceColumn();
+        self::migrateDeductionRegisterColumn();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -446,6 +448,33 @@ final class MigrateRunner
              ADD COLUMN hourly_insurance INT NOT NULL DEFAULT 0 COMMENT '시간제보험(파일 파싱값, 계산 아님)'"
         );
         echo "OK    settlement_daily_riders.hourly_insurance\n";
+    }
+
+    /**
+     * §7 — 업로드된 차감내역(settlement_weekly_deductions)을 deduction_entries로 "등록"한
+     * 이력 추적. 중복 등록 방지용 FK-less 참조 컬럼.
+     */
+    private static function migrateDeductionRegisterColumn(): void
+    {
+        echo "== settlement_weekly_deductions.registered_entry_id ==\n";
+
+        if (!db_table_exists('settlement_weekly_deductions')) {
+            echo "SKIP  settlement_weekly_deductions (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_weekly_deductions'), 'Field');
+        if (in_array('registered_entry_id', $cols, true)) {
+            echo "SKIP  settlement_weekly_deductions.registered_entry_id\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE settlement_weekly_deductions
+             ADD COLUMN registered_entry_id INT UNSIGNED NULL COMMENT 'deduction_entries.id (등록됨)' AFTER amount,
+             ADD KEY idx_swd_registered (registered_entry_id)"
+        );
+        echo "OK    settlement_weekly_deductions.registered_entry_id\n";
     }
 
     private static function migrateAuditLogs(): void
