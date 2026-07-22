@@ -155,10 +155,19 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 						<input class="form-check-input" type="checkbox" id="daily_toggle" <?= !empty($rider['is_daily_settlement']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="daily_toggle">일일정산 대상</label>
 					</div>
+					<div class="form-check form-switch d-flex align-items-center justify-content-center gap-2 mb-3">
+						<input class="form-check-input" type="checkbox" id="withholding_toggle" <?= !empty($rider['withholding_tax_enabled']) ? 'checked' : '' ?> />
+						<label class="form-check-label fw-semibold" for="withholding_toggle">원천세 공제 대상 <span class="text-muted fs-8">(3.3% 고정)</span></label>
+					</div>
 					<div class="form-check form-switch d-flex align-items-center justify-content-center gap-2">
 						<input class="form-check-input" type="checkbox" id="hold_toggle" <?= !empty($rider['withdrawal_hold']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="hold_toggle">출금 보류</label>
 					</div>
+					<?php if ((string) ($rider['status'] ?? '') !== 'active') : ?>
+					<div class="separator separator-dashed my-4"></div>
+					<button type="button" class="btn btn-sm btn-light-danger w-100" id="btn_zero_close">잔여 잔액 0원 종결</button>
+					<div class="form-text text-center">탈퇴/정지 라이더의 잔여 지갑 잔액을 0원 이체로 종결합니다.</div>
+					<?php endif; ?>
 				</div>
 			</div>
 		</div>
@@ -383,10 +392,23 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 		}
 	});
 
+	document.getElementById('withholding_toggle').addEventListener('change', function () {
+		var on = this.checked;
+		apiPatch({ action: 'withholding_tax', enabled: on }, on ? '원천세 공제 대상으로 설정했습니다.' : '원천세 비대상으로 변경했습니다.');
+	});
+
 	document.getElementById('hold_toggle').addEventListener('change', function () {
 		var hold = this.checked;
 		apiPatch({ action: 'withdrawal_hold', hold: hold }, hold ? '출금 보류로 설정했습니다.' : '출금 보류를 해제했습니다.');
 	});
+
+	var zeroBtn = document.getElementById('btn_zero_close');
+	if (zeroBtn) {
+		zeroBtn.addEventListener('click', function () {
+			if (!confirm('잔여 지갑 잔액을 0원 이체로 종결할까요? 되돌릴 수 없습니다.')) return;
+			apiPatch({ action: 'zero_close' }, '0원 이체로 종결했습니다.');
+		});
+	}
 
 	// 메모 저장
 	document.getElementById('btn_memo_save').addEventListener('click', function () {

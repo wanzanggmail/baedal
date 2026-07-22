@@ -183,28 +183,24 @@ final class Organization
     {
         $creatorLevel = admin_org_level();
         $creatorOrgId = admin_org_id();
-        if (!in_array($creatorLevel, [Org::LEVEL_ADMIN, Org::LEVEL_DISTRIBUTOR], true)) {
-            throw new InvalidArgumentException('조직을 생성할 권한이 없습니다.');
+        // 2026-07 재설계: 조직 생성은 본사(admin 레벨)만. 총판의 생성 권한은 회수됨.
+        if ($creatorLevel !== Org::LEVEL_ADMIN) {
+            throw new InvalidArgumentException('조직 생성은 본사만 가능합니다.');
         }
 
         $level = trim((string) ($data['level'] ?? ''));
 
-        // 레벨·상위 결정
-        if ($creatorLevel === Org::LEVEL_DISTRIBUTOR) {
-            $level    = Org::LEVEL_AGENCY;     // 총판은 대리점만 생성
-            $parentId = $creatorOrgId;
-        } else { // 본사
-            if ($level === Org::LEVEL_DISTRIBUTOR) {
-                $parentId = $creatorOrgId;     // 루트 하위
-            } elseif ($level === Org::LEVEL_AGENCY) {
-                $parentId = (int) ($data['parent_id'] ?? 0);
-                $parent   = Org::find($parentId);
-                if ($parent === null || (string) $parent['level'] !== Org::LEVEL_DISTRIBUTOR) {
-                    throw new InvalidArgumentException('대리점의 상위 총판을 선택하세요.');
-                }
-            } else {
-                throw new InvalidArgumentException('생성할 조직 유형(총판/대리점)을 선택하세요.');
+        // 레벨·상위 결정 (본사가 총판 또는 대리점 생성)
+        if ($level === Org::LEVEL_DISTRIBUTOR) {
+            $parentId = $creatorOrgId;         // 본사 루트 하위
+        } elseif ($level === Org::LEVEL_AGENCY) {
+            $parentId = (int) ($data['parent_id'] ?? 0);
+            $parent   = Org::find($parentId);
+            if ($parent === null || (string) $parent['level'] !== Org::LEVEL_DISTRIBUTOR) {
+                throw new InvalidArgumentException('대리점의 상위 총판을 선택하세요.');
             }
+        } else {
+            throw new InvalidArgumentException('생성할 조직 유형(총판/대리점)을 선택하세요.');
         }
 
         $code = strtoupper(trim((string) ($data['code'] ?? '')));

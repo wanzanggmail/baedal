@@ -91,6 +91,7 @@ if ($method === 'GET') {
             'insurance_expires' => $rider['insurance_expires'] ? substr((string)$rider['insurance_expires'], 0, 10) : '',
             'withdrawal_hold'       => (bool) $rider['withdrawal_hold'],
             'is_daily_settlement'   => (int) ($rider['is_daily_settlement'] ?? 0) === 1,
+            'withholding_tax_enabled' => (int) ($rider['withholding_tax_enabled'] ?? 0) === 1,
             'admin_memo'       => $rider['admin_memo'] ?? '',
             'created_at'       => substr((string)$rider['created_at'], 0, 10),
             'last_login_at'    => $rider['last_login_at'] ? substr((string)$rider['last_login_at'], 0, 16) : '—',
@@ -146,6 +147,34 @@ if ($method === 'POST' || $method === 'PATCH') {
         echo json_encode([
             'ok'      => true,
             'message' => $daily ? '일일정산 대상으로 설정했습니다.' : '주간 정산 대상으로 변경했습니다.',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($action === 'zero_close') {
+        // #17 탈퇴/정지 라이더 잔여 잔액 0원 이체 종결
+        require_once INC_PATH . '/DailyPayout.php';
+        try {
+            $adminId = (int) ($_SESSION['admin_id'] ?? 0);
+            $r = DailyPayout::zeroClose($id, $adminId > 0 ? $adminId : null);
+            AuditLog::record('rider.zero_close', (string) ($rider['rider_code'] ?? $id), sprintf('0원 종결(잔여 %s원 정리)', number_format((int) $r['written_off'])));
+            echo json_encode(['ok' => true, 'message' => sprintf('0원 이체로 종결했습니다. (잔여 %s원 정리)', number_format((int) $r['written_off']))], JSON_UNESCAPED_UNICODE);
+        } catch (InvalidArgumentException $e) {
+            $err($e->getMessage());
+        } catch (Throwable $e) {
+            $err('종결 실패: ' . $e->getMessage(), 500);
+        }
+        exit;
+    }
+
+    if ($action === 'withholding_tax') {
+        // #15 원천세 공제 대상 여부 — 대리점이 라이더별로 설정. 세율(3.3%)은 고정.
+        $on = !empty($body['enabled']) ? 1 : 0;
+        db_execute('UPDATE riders SET withholding_tax_enabled = ? WHERE id = ?', [$on, $id]);
+        AuditLog::record('rider.withholding_tax', (string) ($rider['rider_code'] ?? $id), $on ? '원천세 공제 대상' : '원천세 비대상');
+        echo json_encode([
+            'ok'      => true,
+            'message' => $on ? '원천세 공제 대상으로 설정했습니다.' : '원천세 비대상으로 변경했습니다.',
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }

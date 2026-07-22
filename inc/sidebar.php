@@ -62,6 +62,14 @@ $route = $route ?? '';
 														<span class="menu-title">정산 수수료 내역</span>
 													</a>
 												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('settlement/withholding') ?>" href="<?= htmlspecialchars(admin_url('settlement/withholding'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">원천세 명세</span>
+													</a>
+												</div>
 											</div>
 										</div>
 										<!--end:Menu item-->
@@ -75,6 +83,20 @@ $route = $route ?? '';
 													</i>
 												</span>
 												<span class="menu-title">선공제(대행 수수료)</span>
+											</a>
+										</div>
+										<!--end:Menu item-->
+										<!--begin:Menu item-->
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('deduction/advance') ?>" href="<?= htmlspecialchars(admin_url('deduction/advance'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-dollar fs-2">
+														<span class="path1"></span>
+														<span class="path2"></span>
+														<span class="path3"></span>
+													</i>
+												</span>
+												<span class="menu-title">선지급(대여금)</span>
 											</a>
 										</div>
 										<!--end:Menu item-->
@@ -117,6 +139,32 @@ $route = $route ?? '';
 														<span class="menu-title">처리 완료</span>
 													</a>
 												</div>
+												<?php if (admin_org_level() === Org::LEVEL_AGENCY) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/daily-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/daily-payout'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">일일정산 지급</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/agency-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/agency-payout'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">대리점 자체 인출</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/payment-setup') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/payment-setup'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">결제 설정(카드·계좌)</span>
+													</a>
+												</div>
+												<?php endif; ?>
 											</div>
 										</div>
 										<!--end:Menu item-->
@@ -179,6 +227,18 @@ $route = $route ?? '';
 											</div>
 										</div>
 										<!--end:Menu item-->
+										<?php if (admin_can_manage_team()) : ?>
+										<!--begin:Menu item-->
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('system/team') ?>" href="<?= htmlspecialchars(admin_url('system/team'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-shield-tick fs-2"><span class="path1"></span><span class="path2"></span></i>
+												</span>
+												<span class="menu-title">대표·서브계정</span>
+											</a>
+										</div>
+										<!--end:Menu item-->
+										<?php endif; ?>
 										<!--begin:Menu item-->
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('system/') ?>">
 											<span class="menu-link">
@@ -234,6 +294,24 @@ $route = $route ?? '';
 														<span class="menu-title">감사 로그</span>
 													</a>
 												</div>
+												<?php if (admin_has_role('super')) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/pg-fee') ?>" href="<?= htmlspecialchars(admin_url('system/pg-fee'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">영업대행수수료 분배</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/manual-adjust') ?>" href="<?= htmlspecialchars(admin_url('system/manual-adjust'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">정산/잔액 수동 조정</span>
+													</a>
+												</div>
+												<?php endif; ?>
 											</div>
 										</div>
 										<!--end:Menu item-->

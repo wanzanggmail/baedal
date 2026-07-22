@@ -99,9 +99,9 @@ final class AgencyFeeConfig
         } else {
             db_insert(
                 'INSERT INTO deduction_global_config
-                    (org_id, withholding_tax_pct, employment_ins_pct, agency_fee_pct,
+                    (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct, agency_fee_pct,
                      agency_fee_day_threshold, agency_fee_short, agency_fee_long)
-                 VALUES (?, 3.30, 9.12, 0, ?, ?, ?)',
+                 VALUES (?, 3.30, 0.80, 0.88, 0, ?, ?, ?)',
                 [$hasOrg ? $orgId : null, $cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']]
             );
         }

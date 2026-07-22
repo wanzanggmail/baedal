@@ -19,12 +19,20 @@ final class MigrateRunner
         self::runSqlFile('withdrawal_wallet.sql');
         self::runSqlFile('agency_fee_config.sql');
         self::runSqlFile('organizations.sql');
+        self::runSqlFile('redesign_wallet.sql');
+        self::runSqlFile('redesign_gateway.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
         self::migrateAuditLogs();
         self::migrateOrgColumns();
         self::migrateTenantConfig();
+        self::migrateWithdrawalRedesign();
+        self::migrateDeductionSplit();
+        self::migrateRiderWithholdingFlag();
+        self::migrateAgencyWalletBackfill();
+        self::migrateOrgFeeBackfill();
+        self::migrateHourlyInsuranceColumn();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -94,10 +102,11 @@ final class MigrateRunner
         $exists = db_row('SELECT id FROM deduction_global_config WHERE id = 1 LIMIT 1');
         if ($exists === null) {
             db_insert(
+                // 고용보험 기본 0.80 (산재 컬럼은 migrateDeductionSplit에서 추가)
                 'INSERT INTO deduction_global_config
                     (id, withholding_tax_pct, employment_ins_pct, agency_fee_pct,
                      agency_fee_day_threshold, agency_fee_short, agency_fee_long)
-                 VALUES (1, 3.30, 9.12, 0, 7, 80, 40)'
+                 VALUES (1, 3.30, 0.80, 0, 7, 80, 40)'
             );
             echo "OK    deduction_global_config row\n";
         }
@@ -237,6 +246,206 @@ final class MigrateRunner
                 }
             }
         }
+    }
+
+    /**
+     * §7 #1 — 대리점 자체 인출(agency_payout) 저장을 위한 withdrawal_requests 스키마 조정.
+     * rider_id를 nullable로(대리점 인출은 라이더 없음), agency_id·fail_reason 추가,
+     * kind에 agency_payout, status에 failed 추가. (dev 데이터 0건, 멱등)
+     */
+    private static function migrateWithdrawalRedesign(): void
+    {
+        echo "== withdrawal redesign (agency_payout/failed) ==\n";
+
+        if (!db_table_exists('withdrawal_requests')) {
+            echo "SKIP  withdrawal_requests (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols     = array_column(db_rows('SHOW COLUMNS FROM withdrawal_requests'), 'Field');
+        $riderCol = db_row("SHOW COLUMNS FROM withdrawal_requests LIKE 'rider_id'");
+
+        if ($riderCol !== null && strtoupper((string) ($riderCol['Null'] ?? '')) === 'NO') {
+            db_execute('ALTER TABLE withdrawal_requests MODIFY COLUMN rider_id INT UNSIGNED NULL COMMENT \'라이더(대리점 자체 인출이면 NULL)\'');
+            echo "OK    withdrawal_requests.rider_id → NULL\n";
+        } else {
+            echo "SKIP  withdrawal_requests.rider_id nullable\n";
+        }
+
+        if (!in_array('agency_id', $cols, true)) {
+            db_execute(
+                "ALTER TABLE withdrawal_requests
+                 ADD COLUMN agency_id INT UNSIGNED NULL COMMENT '대리점 자체 인출 소유 대리점(organizations.id)' AFTER rider_id,
+                 ADD KEY idx_wr_agency (agency_id)"
+            );
+            echo "OK    withdrawal_requests.agency_id\n";
+        } else {
+            echo "SKIP  withdrawal_requests.agency_id\n";
+        }
+
+        if (!in_array('fail_reason', $cols, true)) {
+            db_execute(
+                "ALTER TABLE withdrawal_requests
+                 ADD COLUMN fail_reason VARCHAR(300) NOT NULL DEFAULT '' COMMENT '오픈뱅킹 이체 실패 사유' AFTER rejected_reason"
+            );
+            echo "OK    withdrawal_requests.fail_reason\n";
+        } else {
+            echo "SKIP  withdrawal_requests.fail_reason\n";
+        }
+
+        // enum 확장 (MODIFY는 반복 실행에 안전)
+        db_execute("ALTER TABLE withdrawal_requests MODIFY COLUMN kind ENUM('rider_manual','auto_daily','agency_payout') NOT NULL DEFAULT 'rider_manual'");
+        db_execute("ALTER TABLE withdrawal_requests MODIFY COLUMN status ENUM('pending','downloaded','completed','rejected','failed') NOT NULL DEFAULT 'pending'");
+        echo "OK    withdrawal_requests.kind/status enum\n";
+    }
+
+    /**
+     * §7 #4 — 고용보험(0.8%)·산재보험(0.88%) 컬럼 분리. 기존 employment_ins_pct는
+     * 합산 placeholder(9.12)였음 — 고용 전용(0.80)으로 교정하고 산재 컬럼 신규.
+     */
+    private static function migrateDeductionSplit(): void
+    {
+        echo "== deduction 고용/산재 분리 ==\n";
+
+        if (!db_table_exists('deduction_global_config')) {
+            echo "SKIP  deduction_global_config (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
+        if (in_array('industrial_accident_ins_pct', $cols, true)) {
+            echo "SKIP  deduction_global_config.industrial_accident_ins_pct\n";
+
+            return;
+        }
+
+        db_execute(
+            "ALTER TABLE deduction_global_config
+             ADD COLUMN industrial_accident_ins_pct DECIMAL(5,2) NOT NULL DEFAULT 0.88 COMMENT '산재보험료율(%)' AFTER employment_ins_pct"
+        );
+        db_execute("ALTER TABLE deduction_global_config MODIFY COLUMN employment_ins_pct DECIMAL(5,2) NOT NULL DEFAULT 0.80 COMMENT '고용보험료율(%)'");
+        // 전역 기본행이 옛 합산값(>2%)이면 0.80/0.88로 교정 (per-agency 의도값은 건드리지 않음)
+        db_execute('UPDATE deduction_global_config SET employment_ins_pct = 0.80, industrial_accident_ins_pct = 0.88 WHERE org_id IS NULL AND employment_ins_pct > 2.00');
+        echo "OK    deduction_global_config.industrial_accident_ins_pct (+전역 교정)\n";
+    }
+
+    /**
+     * §7 #15 — 원천세 공제 대상 여부를 라이더별로 설정(대리점이 상세화면에서 토글).
+     */
+    private static function migrateRiderWithholdingFlag(): void
+    {
+        echo "== riders.withholding_tax_enabled ==\n";
+
+        if (!db_table_exists('riders')) {
+            echo "SKIP  riders (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+        if (in_array('withholding_tax_enabled', $cols, true)) {
+            echo "SKIP  riders.withholding_tax_enabled\n";
+
+            return;
+        }
+
+        db_execute(
+            "ALTER TABLE riders
+             ADD COLUMN withholding_tax_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '원천세 공제 대상(대리점 설정)' AFTER is_daily_settlement"
+        );
+        echo "OK    riders.withholding_tax_enabled\n";
+    }
+
+    /**
+     * §7 #9 — 대리점(agency) 조직마다 지갑 1행 보장.
+     */
+    private static function migrateAgencyWalletBackfill(): void
+    {
+        echo "== agency_wallets backfill ==\n";
+
+        if (!db_table_exists('agency_wallets') || !db_table_exists('organizations')) {
+            echo "SKIP  agency_wallets backfill (테이블 없음)\n";
+
+            return;
+        }
+
+        $missing = (int) (db_row(
+            "SELECT COUNT(*) AS c FROM organizations o
+             LEFT JOIN agency_wallets w ON w.agency_id = o.id
+             WHERE o.level = 'agency' AND w.agency_id IS NULL"
+        )['c'] ?? 0);
+
+        if ($missing > 0) {
+            db_execute(
+                "INSERT INTO agency_wallets (agency_id, balance, withholding_reserve)
+                 SELECT o.id, 0, 0 FROM organizations o
+                 LEFT JOIN agency_wallets w ON w.agency_id = o.id
+                 WHERE o.level = 'agency' AND w.agency_id IS NULL"
+            );
+            echo "OK    agency_wallets backfill ({$missing})\n";
+        } else {
+            echo "SKIP  agency_wallets backfill\n";
+        }
+    }
+
+    /**
+     * §7 #12 — 모든 조직(본사·총판·대리점)에 영업대행수수료 요율 행 보장(기본 1.00%).
+     */
+    private static function migrateOrgFeeBackfill(): void
+    {
+        echo "== org_fee_config backfill ==\n";
+
+        if (!db_table_exists('org_fee_config') || !db_table_exists('organizations')) {
+            echo "SKIP  org_fee_config backfill (테이블 없음)\n";
+
+            return;
+        }
+
+        $missing = (int) (db_row(
+            'SELECT COUNT(*) AS c FROM organizations o
+             LEFT JOIN org_fee_config f ON f.org_id = o.id
+             WHERE f.org_id IS NULL'
+        )['c'] ?? 0);
+
+        if ($missing > 0) {
+            db_execute(
+                'INSERT INTO org_fee_config (org_id, pg_service_fee_pct)
+                 SELECT o.id, 1.00 FROM organizations o
+                 LEFT JOIN org_fee_config f ON f.org_id = o.id
+                 WHERE f.org_id IS NULL'
+            );
+            echo "OK    org_fee_config backfill ({$missing})\n";
+        } else {
+            echo "SKIP  org_fee_config backfill\n";
+        }
+    }
+
+    /**
+     * §7 #6 — 시간제보험(쿠팡 정산서 파일에 포함된 값)을 담을 컬럼.
+     * 계산이 아니라 파일에서 파싱해 넣는 값(파서 매핑은 실 자료 도착 시 확정).
+     */
+    private static function migrateHourlyInsuranceColumn(): void
+    {
+        echo "== settlement_daily_riders.hourly_insurance ==\n";
+
+        if (!db_table_exists('settlement_daily_riders')) {
+            echo "SKIP  settlement_daily_riders (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_daily_riders'), 'Field');
+        if (in_array('hourly_insurance', $cols, true)) {
+            echo "SKIP  settlement_daily_riders.hourly_insurance\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE settlement_daily_riders
+             ADD COLUMN hourly_insurance INT NOT NULL DEFAULT 0 COMMENT '시간제보험(파일 파싱값, 계산 아님)'"
+        );
+        echo "OK    settlement_daily_riders.hourly_insurance\n";
     }
 
     private static function migrateAuditLogs(): void

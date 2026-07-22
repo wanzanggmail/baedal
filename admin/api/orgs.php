@@ -8,7 +8,7 @@ declare(strict_types=1);
  * POST { "action": "save", ... }            — 생성(조직+계정) / 수정
  *      { "action": "toggle_active", id, active }
  *
- * 권한: 본사(admin)·총판(distributor) 레벨 + 운영/최고 역할 (admin_can_manage_orgs)
+ * 권한: 본사(admin) 레벨 + 운영/최고 역할만 (admin_can_manage_orgs) — 총판 생성권한 회수(2026-07)
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';

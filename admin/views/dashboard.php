@@ -215,6 +215,64 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 	</div>
 	<!--end::Row KPI-->
 
+	<?php if ($dash['risk_alerts'] !== [] || $dash['large_withdrawals'] !== []) : ?>
+	<!--begin::Row 리스크-->
+	<div class="row g-5 g-xl-10 mb-5 mb-xl-10">
+		<?php if ($dash['risk_alerts'] !== []) : ?>
+		<div class="col-xl-6">
+			<div class="card card-flush h-xl-100">
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold text-gray-900">⚠️ 리스크 알림</h3>
+					<div class="card-toolbar"><span class="badge badge-light-danger"><?= count($dash['risk_alerts']) ?></span></div>
+				</div>
+				<div class="card-body pt-2">
+					<div class="d-flex flex-column gap-2">
+						<?php foreach ($dash['risk_alerts'] as $ra) : ?>
+						<div class="d-flex align-items-center gap-3 border-start border-4 border-<?= htmlspecialchars((string) $ra['level'], ENT_QUOTES, 'UTF-8') ?> ps-3 py-1">
+							<span class="badge badge-light-<?= htmlspecialchars((string) $ra['level'], ENT_QUOTES, 'UTF-8') ?> flex-shrink-0"><?= htmlspecialchars((string) $ra['action'], ENT_QUOTES, 'UTF-8') ?></span>
+							<div class="flex-grow-1 fs-7">
+								<span class="text-gray-800"><?= htmlspecialchars((string) $ra['detail'], ENT_QUOTES, 'UTF-8') ?></span>
+								<span class="text-muted fs-8">· <?= htmlspecialchars((string) $ra['actor'], ENT_QUOTES, 'UTF-8') ?></span>
+							</div>
+							<span class="text-muted fs-8 flex-shrink-0"><?= htmlspecialchars((string) $ra['at'], ENT_QUOTES, 'UTF-8') ?></span>
+						</div>
+						<?php endforeach; ?>
+					</div>
+				</div>
+			</div>
+		</div>
+		<?php endif; ?>
+		<?php if ($dash['large_withdrawals'] !== []) : ?>
+		<div class="col-xl-6">
+			<div class="card card-flush h-xl-100">
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold text-gray-900">💰 큰 금액 출금</h3>
+					<div class="card-toolbar"><span class="badge badge-light-warning"><?= number_format(AdminDashboard::LARGE_WITHDRAWAL_THRESHOLD) ?>원 이상</span></div>
+				</div>
+				<div class="card-body pt-2">
+					<div class="table-responsive">
+						<table class="table table-row-dashed align-middle fs-7 gy-2 mb-0">
+							<tbody>
+								<?php foreach ($dash['large_withdrawals'] as $lw) : ?>
+								<tr>
+									<td><span class="badge badge-light-secondary fs-8"><?= htmlspecialchars((string) $lw['kind'], ENT_QUOTES, 'UTF-8') ?></span></td>
+									<td class="fw-bold text-gray-800"><?= htmlspecialchars((string) $lw['name'], ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-end fw-bolder text-danger"><?= htmlspecialchars((string) $lw['amount_label'], ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-center"><span class="badge badge-light"><?= htmlspecialchars((string) $lw['status'], ENT_QUOTES, 'UTF-8') ?></span></td>
+									<td class="text-muted fs-8 text-end"><?= htmlspecialchars((string) $lw['at'], ENT_QUOTES, 'UTF-8') ?></td>
+								</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+		<?php endif; ?>
+	</div>
+	<!--end::Row 리스크-->
+	<?php endif; ?>
+
 	<!--begin::Row 2 cols-->
 	<div class="row g-5 g-xl-10 mb-5 mb-xl-10">
 		<div class="col-xl-6">

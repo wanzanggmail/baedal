@@ -262,6 +262,9 @@ try {
                 $unmatched[] = $row['name_raw'];
             }
 
+            // TODO(§7 #6 시간제보험): 쿠팡 정산서 실 파일의 시간제보험 컬럼 매핑이 확정되면
+            //   $row['hourly_insurance'] 를 파싱해 아래 INSERT의 hourly_insurance 컬럼에 넣을 것.
+            //   (컬럼·정산반영 공제 로직은 이미 준비됨 — SettlementLedger::createCycleFromDailyRow)
             db_insert(
                 'INSERT INTO settlement_daily_riders
                     (upload_id, settlement_date, platform, rider_id, license_id, rider_name_raw,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/RiderWallet.php';
 require_once __DIR__ . '/AgencyFeeConfig.php';
+require_once __DIR__ . '/AgencyWallet.php';
 
 /**
  * 정산 완료·수수료 내역 (settlement_rider_cycles / settlement_fee_items)
@@ -209,6 +210,13 @@ final class SettlementLedger
         $base    = $payout > 0 ? $payout : $gross;
 
         $fees = self::buildFeeItems($base, $riderId, (string) $dailyRow['settlement_date'], $cfg, $orgId);
+
+        // #6 시간제보험 — 쿠팡 정산서 파일에 포함된 값(계산 아님). 파싱된 값이 있으면 공제.
+        $hourlyIns = (int) ($dailyRow['hourly_insurance'] ?? 0);
+        if ($hourlyIns > 0) {
+            $fees[] = ['fee_code' => 'hourly_ins', 'label' => '시간제 보험', 'amount' => $hourlyIns];
+        }
+
         $totalFee = array_sum(array_column($fees, 'amount'));
         $net      = max(0, $base - $totalFee);
 
@@ -247,6 +255,19 @@ final class SettlementLedger
         if ($net > 0) {
             RiderWallet::credit($riderId, $net, true);
         }
+
+        // #15 원천세 예수금 누적 — 원천세 대상 라이더 공제분을 대리점 지갑 reserve에 적립.
+        if ($orgId !== null && $orgId > 0) {
+            $withheld = 0;
+            foreach ($fees as $f) {
+                if (($f['fee_code'] ?? '') === 'withholding') {
+                    $withheld += (int) $f['amount'];
+                }
+            }
+            if ($withheld > 0) {
+                AgencyWallet::addWithholdingReserve($orgId, $withheld);
+            }
+        }
     }
 
     /**
@@ -257,21 +278,38 @@ final class SettlementLedger
     {
         $items = [];
 
-        $wallet  = RiderWallet::get($riderId);
-        $accrued = (int) $wallet['accrued_days'];
-        $agency  = AgencyFeeConfig::feeForAccruedDays($accrued, $orgId);
-        if ($agency > 0) {
-            $items[] = ['fee_code' => 'agency_fee', 'label' => '정산 수수료(대행)', 'amount' => $agency];
+        // 라이더 정산 유형·원천세 대상 여부
+        $rider         = db_row('SELECT is_daily_settlement, withholding_tax_enabled FROM riders WHERE id = ? LIMIT 1', [$riderId]);
+        $isDaily       = (int) ($rider['is_daily_settlement'] ?? 0) === 1;
+        $withholdRider = (int) ($rider['withholding_tax_enabled'] ?? 0) === 1;
+
+        // #7 선정산수수료(대행수수료) — 선정산(일일지급, is_daily_settlement=1) 라이더만 반영 시점에 부과.
+        // 주정산(후정산) 라이더는 출금 신청 시점에 부과 → 라이더 출금 플로우 단계에서 처리(현재 이연).
+        if ($isDaily) {
+            $wallet  = RiderWallet::get($riderId);
+            $accrued = (int) $wallet['accrued_days'];
+            $agency  = AgencyFeeConfig::feeForAccruedDays($accrued, $orgId);
+            if ($agency > 0) {
+                $items[] = ['fee_code' => 'agency_fee', 'label' => '선정산수수료(대행)', 'amount' => $agency];
+            }
         }
 
-        $tax = self::pctAmount($base, (float) ($cfg['withholding_tax_pct'] ?? 0));
-        if ($tax > 0) {
-            $items[] = ['fee_code' => 'withholding', 'label' => '원천세', 'amount' => $tax];
+        // #15 원천세 — 대상 라이더만(대리점이 상세화면에서 설정). 세율 고정(3.3%). 예수금은 createCycleFromDailyRow에서 누적.
+        if ($withholdRider) {
+            $tax = self::pctAmount($base, (float) ($cfg['withholding_tax_pct'] ?? 0));
+            if ($tax > 0) {
+                $items[] = ['fee_code' => 'withholding', 'label' => '원천세', 'amount' => $tax];
+            }
         }
 
-        $ins = self::pctAmount($base, (float) ($cfg['employment_ins_pct'] ?? 0));
-        if ($ins > 0) {
-            $items[] = ['fee_code' => 'employment_ins', 'label' => '고용·산재보험', 'amount' => $ins];
+        // #4 고용보험·산재보험 분리 — 쿠팡이 대납 처리하므로 예수금 아님, 단순 공제(라이더 몫에서 차감).
+        $emp = self::pctAmount($base, (float) ($cfg['employment_ins_pct'] ?? 0));
+        if ($emp > 0) {
+            $items[] = ['fee_code' => 'employment_ins', 'label' => '고용보험', 'amount' => $emp];
+        }
+        $acc = self::pctAmount($base, (float) ($cfg['industrial_accident_ins_pct'] ?? 0));
+        if ($acc > 0) {
+            $items[] = ['fee_code' => 'accident_ins', 'label' => '산재보험', 'amount' => $acc];
         }
 
         if (db_table_exists('deduction_entries')) {
@@ -303,23 +341,25 @@ final class SettlementLedger
     {
         if (!db_table_exists('deduction_global_config')) {
             return [
-                'withholding_tax_pct' => 3.3,
-                'employment_ins_pct'  => 9.12,
+                'withholding_tax_pct'         => 3.3,
+                'employment_ins_pct'          => 0.80,
+                'industrial_accident_ins_pct' => 0.88,
             ];
         }
 
         // 대리점(org) 행 → 전역 기본(org_id NULL) 순 폴백
         $row = null;
         if ($orgId !== null && $orgId > 0) {
-            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId]);
+            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId]);
         }
         if ($row === null) {
-            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+            $row = db_row('SELECT withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
         }
 
         return [
-            'withholding_tax_pct' => (float) ($row['withholding_tax_pct'] ?? 3.3),
-            'employment_ins_pct'  => (float) ($row['employment_ins_pct'] ?? 9.12),
+            'withholding_tax_pct'         => (float) ($row['withholding_tax_pct'] ?? 3.3),
+            'employment_ins_pct'          => (float) ($row['employment_ins_pct'] ?? 0.80),
+            'industrial_accident_ins_pct' => (float) ($row['industrial_accident_ins_pct'] ?? 0.88),
         ];
     }
 
@@ -336,8 +376,9 @@ final class SettlementLedger
     {
         $labels = [
             'withholding'    => '원천세(수동)',
-            'employment_ins' => '고용·산재(수동)',
-            'agency_fee'     => '정산 수수료(수동)',
+            'employment_ins' => '고용보험(수동)',
+            'accident_ins'   => '산재보험(수동)',
+            'agency_fee'     => '선정산수수료(수동)',
             'hourly_ins'     => '시간제 보험',
             'ins_refund'     => '보험료 환급',
             'rental'         => '대여금',

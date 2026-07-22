@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "baedal-dev",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["-S", "127.0.0.1:8747", "-t", "D:/web/baedal"],
+      "port": 8747,
+      "url": "http://localhost:8747/"
+    }
+  ]
+}

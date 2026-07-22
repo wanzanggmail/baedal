@@ -7,6 +7,9 @@ declare(strict_types=1);
  */
 final class AdminDashboard
 {
+    /** 큰 금액 출금 하이라이트 임계값(원) */
+    public const LARGE_WITHDRAWAL_THRESHOLD = 1_000_000;
+
     /**
      * @return array<string, mixed>
      */
@@ -39,6 +42,8 @@ final class AdminDashboard
             'platform_total'   => 0,
             'timeline'         => [],
             'recent_uploads'   => [],
+            'risk_alerts'      => [],
+            'large_withdrawals'=> [],
         ];
 
         try {
@@ -117,7 +122,99 @@ final class AdminDashboard
             $data['errors'][] = '업로드 이력: ' . $e->getMessage();
         }
 
+        try {
+            $data['risk_alerts']       = self::riskAlerts();
+            $data['large_withdrawals'] = self::largeWithdrawals();
+        } catch (Throwable $e) {
+            // 리스크 위젯은 부가 정보라 실패해도 대시보드 전체를 막지 않음
+        }
+
         return $data;
+    }
+
+    /**
+     * 리스크 알림 — 본사(admin 레벨)에서만 노출. 최근 위험 관리자 행위(수동조정·역할변경 등).
+     *
+     * @return list<array{at:string, action:string, actor:string, detail:string, level:string}>
+     */
+    private static function riskAlerts(): array
+    {
+        if (admin_org_level() !== Org::LEVEL_ADMIN || !self::tableExists('audit_logs')) {
+            return [];
+        }
+
+        $rows = db_rows(
+            "SELECT al.action, al.target_table, al.target_id, al.before_value, al.after_value,
+                    al.created_at, a.login_id AS actor_login
+               FROM audit_logs al
+               LEFT JOIN admins a ON a.id = al.actor_id AND al.actor_type = 'admin'
+              WHERE al.action IN ('MANUAL_ADJUST', 'DELETE')
+                 OR al.target_table IN ('agency_wallets', 'rider_wallets')
+              ORDER BY al.created_at DESC
+              LIMIT 10"
+        );
+
+        $out = [];
+        foreach ($rows as $r) {
+            $action = (string) ($r['action'] ?? '');
+            $after  = json_decode((string) ($r['after_value'] ?? ''), true);
+            $detail = is_array($after) && isset($after['reason'])
+                ? (string) $after['reason']
+                : (string) ($r['target_table'] ?? '');
+            $out[] = [
+                'at'     => date('m-d H:i', strtotime((string) $r['created_at'])),
+                'action' => $action === 'MANUAL_ADJUST' ? '수동 조정' : ($action === 'DELETE' ? '삭제' : $action),
+                'actor'  => (string) ($r['actor_login'] ?? 'system'),
+                'detail' => $detail,
+                'level'  => $action === 'MANUAL_ADJUST' ? 'danger' : 'warning',
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * 큰 금액 출금 하이라이트 — 임계값 이상 출금 신청(스코프 내, 최근 14일).
+     *
+     * @return list<array{name:string, amount:int, amount_label:string, status:string, at:string, kind:string}>
+     */
+    private static function largeWithdrawals(): array
+    {
+        if (!self::tableExists('withdrawal_requests')) {
+            return [];
+        }
+
+        // rider_manual/auto_daily는 라이더 소속 대리점, agency_payout(rider 없음)은 wr.agency_id 기준
+        [$scope, $scopeParams] = Org::agencyScopeClause('COALESCE(r.agency_id, wr.agency_id)');
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $params = array_merge([self::LARGE_WITHDRAWAL_THRESHOLD], $scopeParams);
+
+        $rows = db_rows(
+            "SELECT wr.amount, wr.status, wr.kind, wr.requested_at,
+                    COALESCE(r.name, o.name) AS name
+               FROM withdrawal_requests wr
+               LEFT JOIN riders r ON r.id = wr.rider_id
+               LEFT JOIN organizations o ON o.id = wr.agency_id
+              WHERE wr.amount >= ?
+                AND wr.requested_at >= DATE_SUB(NOW(), INTERVAL 14 DAY){$cond}
+              ORDER BY wr.amount DESC, wr.requested_at DESC
+              LIMIT 8",
+            $params
+        );
+
+        $statusLabel = ['pending' => '대기', 'downloaded' => '처리중', 'completed' => '완료', 'rejected' => '반려', 'failed' => '실패'];
+        $kindLabel   = ['rider_manual' => '라이더', 'auto_daily' => '일일정산', 'agency_payout' => '대리점인출'];
+
+        return array_map(static function (array $r) use ($statusLabel, $kindLabel): array {
+            return [
+                'name'         => (string) ($r['name'] ?? ''),
+                'amount'       => (int) $r['amount'],
+                'amount_label' => number_format((int) $r['amount']) . '원',
+                'status'       => $statusLabel[(string) $r['status']] ?? (string) $r['status'],
+                'kind'         => $kindLabel[(string) $r['kind']] ?? (string) $r['kind'],
+                'at'           => date('m-d H:i', strtotime((string) $r['requested_at'])),
+            ];
+        }, $rows);
     }
 
     public static function formatWon(int $amount): string

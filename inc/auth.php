@@ -116,6 +116,8 @@ function admin_route_access_rules(): array
     return [
         'system/admins' => ['super'],
         'system/codes'  => ['super'],
+        'system/manual-adjust' => ['super'],
+        'system/pg-fee' => ['super'],
         'system/settlement-excel' => ['super', 'settlement'],
         'system/audit'  => ['super', 'admin'],
         'settlement/'   => ['super', 'settlement', 'operation'],
@@ -142,6 +144,11 @@ function admin_can_access_route(string $route): bool
     // 멀티테넌시: 조직 관리 — 레벨 기반(본사/총판)
     if (str_starts_with($route, 'system/orgs')) {
         return admin_can_manage_orgs();
+    }
+
+    // 대표·서브계정 관리 — 조직 대표계정만
+    if (str_starts_with($route, 'system/team')) {
+        return admin_can_manage_team();
     }
 
     // 멀티테넌시: 출금 정책 — 본사(전역) 또는 대리점(자기 설정)
@@ -176,8 +183,13 @@ function admin_can_write(string $area): bool
         return false;
     }
 
+    // 2026-07 재설계: 공지·배너 작성은 본사(admin 레벨)만. 총판·대리점은 조회(broadcast 수신)만.
+    if ($area === 'content') {
+        return $role === 'operation' && admin_org_level() === Org::LEVEL_ADMIN;
+    }
+
     return match ($area) {
-        'content', 'riders' => $role === 'operation',
+        'riders'             => $role === 'operation',
         'withdrawal'         => $role === 'operation',
         'settlement', 'deduction' => $role === 'settlement',
         'system'             => $role === 'super',
@@ -186,18 +198,38 @@ function admin_can_write(string $area): bool
 }
 
 /**
- * 멀티테넌시: 조직(총판/대리점) 관리 권한.
- * 본사(admin) 또는 총판(distributor) 레벨이면서 최고/운영 역할일 때 허용.
+ * 멀티테넌시: 조직(총판/대리점) 생성·관리 권한.
+ * 2026-07 재설계: 본사(admin 레벨)만 조직을 생성·관리. 총판의 조직 생성 권한은 회수됨
+ * (총판은 대시보드에서 하위 대리점을 조회만 함). 최고/운영 역할일 때 허용.
  */
 function admin_can_manage_orgs(): bool
 {
-    $level = admin_org_level();
-    if (!in_array($level, [Org::LEVEL_ADMIN, Org::LEVEL_DISTRIBUTOR], true)) {
+    if (admin_org_level() !== Org::LEVEL_ADMIN) {
         return false;
     }
     $user = admin_user();
 
     return $user !== null && in_array($user['role'], ['super', 'operation'], true);
+}
+
+/**
+ * 대표·서브계정 관리 권한 (LOGIC §2 · §7 #14).
+ * 총판·대리점의 "대표계정"(조직 최초 계정)만 자기 조직 서브계정을 관리할 수 있다.
+ */
+function admin_can_manage_team(): bool
+{
+    $level = admin_org_level();
+    if (!in_array($level, [Org::LEVEL_AGENCY, Org::LEVEL_DISTRIBUTOR], true)) {
+        return false;
+    }
+    $orgId = admin_org_id();
+    $user  = admin_user();
+    if ($orgId < 1 || $user === null) {
+        return false;
+    }
+    $primary = (int) (db_row('SELECT id FROM admins WHERE org_id = ? ORDER BY id ASC LIMIT 1', [$orgId])['id'] ?? 0);
+
+    return $primary === (int) $user['id'];
 }
 
 function admin_deny_write_json(string $area): void
