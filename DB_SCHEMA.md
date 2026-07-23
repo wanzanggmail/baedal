@@ -88,7 +88,8 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 ### `riders`
 | 컬럼 | 설명 |
 |---|---|
-| `agency_id` | FK 없음(인덱스만) → `organizations.id`(level=agency) |
+| `agency_id` | FK 없음(인덱스만) → `organizations.id`(level=agency). **라이더의 실제 소속 단위**(상세·목록·수정 화면에 "소속 대리점"으로 표시, 2026-07-24) |
+| `team_code` | ⚠️ **레거시**(단일 대리점 시절 지역/조 구분, 예 `gangseo_a`). 멀티테넌시 이후 `agency_id`로 대체돼 현재 전 라이더 `etc`·UI에서 제거됨(2026-07-24). 컬럼은 보존(정산 등 잔여 참조), 신규 등록 시 기본값 `etc` |
 | `status` | enum(`active`,`suspended`,`leave_request`,`offboarded`) |
 | `kyc_status` | enum(`none`,`pending`,`verified`,`rejected`) |
 | `withdrawal_hold` | 출금 보류 플래그 |

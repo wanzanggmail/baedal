@@ -247,9 +247,6 @@ if ($method === 'POST' || $method === 'PATCH') {
             $birthDate = $birthRaw;
         }
 
-        $teamCode = trim((string) ($body['team_code'] ?? ''));
-        if (mb_strlen($teamCode) > 32) $err('팀 코드가 너무 깁니다.');
-
         $vehicle = trim((string) ($body['vehicle_type'] ?? ''));
         if ($vehicle !== '' && !in_array($vehicle, $vehicleAllowed, true)) $err('차량 종류가 올바르지 않습니다.');
         if ($vehicle === '') $vehicle = (string) ($rider['vehicle_type'] ?? 'motor');
@@ -283,12 +280,12 @@ if ($method === 'POST' || $method === 'PATCH') {
         db_execute(
             'UPDATE riders
                 SET name = ?, phone = ?, email = ?, birth_date = ?,
-                    team_code = ?, vehicle_type = ?, address = ?,
+                    vehicle_type = ?, address = ?,
                     bank_code = ?, bank_account = ?, account_holder = ?,
                     kyc_status = ?, updated_at = NOW()
               WHERE id = ?',
             [$name, $phone, $email, $birthDate,
-             $teamCode, $vehicle, $address,
+             $vehicle, $address,
              $bankCode, $bankAccount, $holder,
              $kyc, $id]
         );

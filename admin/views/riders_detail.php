@@ -57,10 +57,12 @@ $kycLabel     = ['none' => '미진행', 'pending' => '서류 대기', 'verified'
 $kycBadge     = ['none' => 'secondary', 'pending' => 'warning', 'verified' => 'success', 'rejected' => 'danger'];
 $vehicleLabel = ['motor' => '오토바이', 'bike' => '자전거', 'car' => '자동차', 'walk' => '도보', 'kick' => '전동킥보드'];
 $pfLabel      = ['baemin' => '배달의민족', 'coupang' => '쿠팡이츠', 'other' => '기타'];
-$teamLabel    = [
-    'gangseo_a' => '강서남부 A조', 'gangseo_b' => '강서남부 B조',
-    'ydp' => '영등포', 'mapo' => '마포', 'etc' => '기타',
-];
+
+// 소속 대리점 (조직 트리)
+$agency        = Org::find((int) ($rider['agency_id'] ?? 0));
+$agencyDisplay = $agency
+    ? trim(((string) ($agency['name'] ?? '')) . (($agency['code'] ?? '') !== '' ? ' (' . $agency['code'] . ')' : ''))
+    : '미배정';
 
 $st      = $rider['status'] ?? 'active';
 $kyc     = $rider['kyc_status'] ?? 'pending';
@@ -77,12 +79,8 @@ $acctMsk = $acct !== '' && strlen($acct) > 4
 
 $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 
-// 편집 모달용: 은행 목록 + 현재 팀 코드가 목록에 없으면 옵션 추가
+// 편집 모달용: 은행 목록
 $banks = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order, label");
-$curTeam = (string) ($rider['team_code'] ?? '');
-if ($curTeam !== '' && !isset($teamLabel[$curTeam])) {
-    $teamLabel[$curTeam] = $curTeam;
-}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -225,8 +223,8 @@ if ($curTeam !== '' && !isset($teamLabel[$curTeam])) {
 						<div class="card-header pt-5"><h3 class="card-title fw-bold">소속·배달</h3></div>
 						<div class="card-body pt-0 fs-6">
 							<div class="mb-4">
-								<span class="text-gray-500 fw-semibold d-block fs-7">팀</span>
-								<span class="text-gray-900"><?= htmlspecialchars($teamLabel[$rider['team_code'] ?? ''] ?? ($rider['team_code'] ?? '—'), ENT_QUOTES, 'UTF-8') ?></span>
+								<span class="text-gray-500 fw-semibold d-block fs-7">소속 대리점</span>
+								<span class="text-gray-900 fw-semibold"><?= htmlspecialchars($agencyDisplay, ENT_QUOTES, 'UTF-8') ?></span>
 							</div>
 							<div class="mb-4">
 								<span class="text-gray-500 fw-semibold d-block fs-7">주 플랫폼</span>
@@ -399,13 +397,9 @@ if ($curTeam !== '' && !isset($teamLabel[$curTeam])) {
 						<div class="col-md-6">
 							<div class="text-gray-500 fw-bold fs-8 text-uppercase mb-3">소속 · 정산 계좌</div>
 							<div class="mb-4">
-								<label class="form-label fs-7 fw-semibold">팀</label>
-								<select class="form-select form-select-sm form-select-solid" id="ed_team">
-									<option value="">미지정</option>
-									<?php foreach ($teamLabel as $code => $lbl): ?>
-									<option value="<?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?>" <?= $curTeam === $code ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
-									<?php endforeach; ?>
-								</select>
+								<label class="form-label fs-7 fw-semibold">소속 대리점</label>
+								<input type="text" class="form-control form-control-sm form-control-solid" value="<?= htmlspecialchars($agencyDisplay, ENT_QUOTES, 'UTF-8') ?>" disabled />
+								<div class="form-text fs-8">대리점 이동은 신규 등록(새 로그인 ID 발급)으로 처리됩니다.</div>
 							</div>
 							<div class="mb-4">
 								<label class="form-label fs-7 fw-semibold">차량</label>
@@ -544,7 +538,6 @@ if ($curTeam !== '' && !isset($teamLabel[$curTeam])) {
 				email: val('ed_email'),
 				birth_date: val('ed_birth'),
 				kyc_status: val('ed_kyc'),
-				team_code: val('ed_team'),
 				vehicle_type: val('ed_vehicle'),
 				address: val('ed_address'),
 				bank_code: val('ed_bank'),

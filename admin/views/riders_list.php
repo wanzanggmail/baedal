@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 // ── 서버사이드 데이터 조회 ──────────────────────────────────
 $filterQ      = trim((string) ($_GET['q']       ?? ''));
-$filterTeam   = trim((string) ($_GET['team']    ?? ''));
+$filterAgency = (int) ($_GET['agency'] ?? 0);
 $filterStatus = trim((string) ($_GET['status']  ?? ''));
 
 $where  = ['1=1'];
@@ -15,7 +15,7 @@ if ($filterQ !== '') {
     $where[] = '(r.rider_code LIKE ? OR r.login_id LIKE ? OR r.name LIKE ? OR r.phone LIKE ?)';
     $params  = array_merge($params, [$like, $like, $like, $like]);
 }
-if ($filterTeam !== '')   { $where[] = 'r.team_code = ?'; $params[] = $filterTeam; }
+if ($filterAgency > 0)    { $where[] = 'r.agency_id = ?'; $params[] = $filterAgency; }
 if ($filterStatus !== '') { $where[] = 'r.status = ?';    $params[] = $filterStatus; }
 
 // 멀티테넌시: 소속 대리점 스코프
@@ -43,13 +43,15 @@ $offset = ($page - 1) * $perPage;
 
 $riders = db_rows(
     "SELECT r.id, r.rider_code, r.login_id, r.name,
-            r.phone, r.status, r.team_code, r.vehicle_type,
+            r.phone, r.status, r.vehicle_type,
             r.withdrawal_hold, r.created_at, r.last_login_at,
+            o.name AS agency_name, o.code AS agency_code,
             (SELECT rp.platform
              FROM rider_platforms rp
              WHERE rp.rider_id = r.id AND rp.is_connected = 1
              ORDER BY rp.id LIMIT 1) AS primary_platform
      FROM riders r
+     LEFT JOIN organizations o ON o.id = r.agency_id
      WHERE {$whereStr}
      ORDER BY r.name ASC
      LIMIT {$perPage} OFFSET {$offset}",
@@ -60,7 +62,7 @@ $riders = db_rows(
 $pageQuery = array_filter([
     'route'  => (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) ? 'riders/list' : null,
     'q'      => $filterQ !== ''      ? $filterQ      : null,
-    'team'   => $filterTeam !== ''   ? $filterTeam   : null,
+    'agency' => $filterAgency > 0    ? $filterAgency : null,
     'status' => $filterStatus !== '' ? $filterStatus : null,
 ], static fn ($v) => $v !== null && $v !== '');
 $pageBase = (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL)
@@ -86,10 +88,6 @@ $vehicleLabel = [
     'car'   => '자동차',   'walk' => '도보', 'kick' => '전동킥보드',
 ];
 $pfLabel = ['baemin' => '배민', 'coupang' => '쿠팡이츠', 'other' => '기타'];
-$teamLabel = [
-    'gangseo_a' => '강서남부 A조', 'gangseo_b' => '강서남부 B조',
-    'ydp' => '영등포', 'mapo' => '마포', 'etc' => '기타',
-];
 
 $banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order");
 $detailBase = admin_url('riders/detail');
@@ -140,18 +138,20 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 					       placeholder="이름, 라이더코드, 로그인ID, 전화"
 					       value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" autocomplete="off" />
 				</div>
+				<?php if (!empty($agencyOptions)): ?>
 				<div class="col-md-2">
-					<label class="form-label fw-semibold">팀</label>
-					<select class="form-select form-select-solid" name="team">
+					<label class="form-label fw-semibold">대리점</label>
+					<select class="form-select form-select-solid" name="agency">
 						<option value="">전체</option>
-						<?php foreach ($teamLabel as $code => $label): ?>
-						<option value="<?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?>"
-							<?= $filterTeam === $code ? 'selected' : '' ?>>
-							<?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?>
+						<?php foreach ($agencyOptions as $ao): ?>
+						<option value="<?= (int) $ao['id'] ?>"
+							<?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>>
+							<?= htmlspecialchars((string) $ao['name'], ENT_QUOTES, 'UTF-8') ?>
 						</option>
 						<?php endforeach; ?>
 					</select>
 				</div>
+				<?php endif; ?>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">상태</label>
 					<select class="form-select form-select-solid" name="status">
@@ -179,7 +179,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				<h3 class="fw-bold m-0">라이더 목록</h3>
 				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">
 					총 <strong><?= number_format($totalCount) ?></strong>명
-					<?php if ($filterQ !== '' || $filterTeam !== '' || $filterStatus !== ''): ?>
+					<?php if ($filterQ !== '' || $filterAgency > 0 || $filterStatus !== ''): ?>
 					<span class="badge badge-light-warning ms-2">필터 적용 중</span>
 					<?php endif; ?>
 				</span>
@@ -194,7 +194,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							<th class="min-w-100px">로그인ID</th>
 							<th class="min-w-90px">이름</th>
 							<th class="min-w-120px">연락처</th>
-							<th class="min-w-110px">팀</th>
+							<th class="min-w-140px">대리점</th>
 							<th class="min-w-80px">플랫폼</th>
 							<th class="min-w-80px">차량</th>
 							<th class="min-w-100px">상태</th>
@@ -206,7 +206,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<?php if (empty($riders)): ?>
 						<tr>
 							<td colspan="10" class="text-center text-gray-500 py-10">
-								<?= ($filterQ !== '' || $filterTeam !== '' || $filterStatus !== '')
+								<?= ($filterQ !== '' || $filterAgency > 0 || $filterStatus !== '')
 								    ? '검색 조건에 맞는 라이더가 없습니다.'
 								    : '등록된 라이더가 없습니다. 「라이더 등록」으로 추가하세요.' ?>
 							</td>
@@ -217,7 +217,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						    $badge    = $statusBadge[$st] ?? 'primary';
 						    $vLabel   = $vehicleLabel[$r['vehicle_type'] ?? ''] ?? ($r['vehicle_type'] ?? '—');
 						    $pf       = $pfLabel[$r['primary_platform'] ?? ''] ?? ($r['primary_platform'] ? $r['primary_platform'] : '—');
-						    $team     = $teamLabel[$r['team_code'] ?? ''] ?? ($r['team_code'] ?? '—');
+						    $agencyNm = (string) ($r['agency_name'] ?? '') !== '' ? (string) $r['agency_name'] : '미배정';
 						    $phone    = preg_replace('/\D/', '', $r['phone'] ?? '');
 						    $phoneMsk = preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $phone) ?: '—';
 						    $detailUrl = $detailBase . (int) $r['id'];
@@ -227,7 +227,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							<td class="font-monospace fs-7 text-gray-800"><?= htmlspecialchars($r['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-900 fw-semibold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700"><?= htmlspecialchars($phoneMsk, ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-gray-800"><?= htmlspecialchars($team, ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-800"><?= htmlspecialchars($agencyNm, ENT_QUOTES, 'UTF-8') ?><?php if (!empty($r['agency_code'])): ?> <span class="text-muted fs-8"><?= htmlspecialchars((string) $r['agency_code'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></td>
 							<td><span class="badge badge-light-primary"><?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="text-gray-700"><?= htmlspecialchars($vLabel, ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
@@ -361,17 +361,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							</div>
 						</div>
 						<div class="row g-6 mb-6">
-							<div class="col-md-4">
-								<label class="form-label required">팀</label>
-								<select class="form-select form-select-solid" id="reg_team" required>
-									<?php foreach ($teamLabel as $code => $label): ?>
-									<option value="<?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?>">
-										<?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?>
-									</option>
-									<?php endforeach; ?>
-								</select>
-							</div>
-							<div class="col-md-4">
+							<div class="col-md-6">
 								<label class="form-label required">차량</label>
 								<select class="form-select form-select-solid" id="reg_vehicle" required>
 									<option value="motor">오토바이</option>
@@ -480,7 +470,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				phone:       phone,
 				email:       document.getElementById('reg_email').value.trim(),
 				birth_date:  document.getElementById('reg_birth').value.trim(),
-				team_code:   document.getElementById('reg_team').value,
 				platform:    document.getElementById('reg_platform').value,
 				coupang_id:  document.getElementById('reg_coupang_id').value.trim(),
 				baemin_id:   document.getElementById('reg_baemin_id').value.trim(),
