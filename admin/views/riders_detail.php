@@ -76,6 +76,13 @@ $acctMsk = $acct !== '' && strlen($acct) > 4
              : '****';
 
 $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
+
+// 편집 모달용: 은행 목록 + 현재 팀 코드가 목록에 없으면 옵션 추가
+$banks = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order, label");
+$curTeam = (string) ($rider['team_code'] ?? '');
+if ($curTeam !== '' && !isset($teamLabel[$curTeam])) {
+    $teamLabel[$curTeam] = $curTeam;
+}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -97,6 +104,10 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 			</ul>
 		</div>
 		<div class="d-flex gap-2 flex-wrap">
+			<button type="button" class="btn btn-sm btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#kt_rider_edit_modal">
+				<i class="ki-duotone ki-pencil fs-3"><span class="path1"></span><span class="path2"></span></i>
+				정보 수정
+			</button>
 			<a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">
 				<i class="ki-duotone ki-left fs-3"><span class="path1"></span><span class="path2"></span></i>
 				목록으로
@@ -343,6 +354,100 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 	</div>
 	<!--end::Contract & Memo row-->
 
+	<!--begin::Edit Modal-->
+	<div class="modal fade" id="kt_rider_edit_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-750px">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 class="fw-bold">라이더 정보 수정</h2>
+					<div class="btn btn-icon btn-sm btn-active-icon-primary" data-bs-dismiss="modal">
+						<i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i>
+					</div>
+				</div>
+				<div class="modal-body py-lg-8 px-lg-10">
+					<div id="edit_alert" class="d-none mb-5"></div>
+					<div class="row g-5">
+						<!--연락·계정-->
+						<div class="col-md-6">
+							<div class="text-gray-500 fw-bold fs-8 text-uppercase mb-3">연락 · 계정</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold required">이름</label>
+								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_name" value="<?= htmlspecialchars((string) $rider['name'], ENT_QUOTES, 'UTF-8') ?>" maxlength="80" />
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">휴대전화</label>
+								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_phone" value="<?= htmlspecialchars((string) ($rider['phone'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="010-1234-5678" maxlength="20" />
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">이메일</label>
+								<input type="email" class="form-control form-control-sm form-control-solid" id="ed_email" value="<?= htmlspecialchars((string) ($rider['email'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="120" />
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">생년월일</label>
+								<input type="date" class="form-control form-control-sm form-control-solid" id="ed_birth" value="<?= htmlspecialchars($rider['birth_date'] ? substr((string) $rider['birth_date'], 0, 10) : '', ENT_QUOTES, 'UTF-8') ?>" />
+							</div>
+							<div class="mb-2">
+								<label class="form-label fs-7 fw-semibold">본인인증 상태</label>
+								<select class="form-select form-select-sm form-select-solid" id="ed_kyc">
+									<?php foreach ($kycLabel as $val => $lbl): ?>
+									<option value="<?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?>" <?= ($rider['kyc_status'] ?? '') === $val ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+						</div>
+						<!--소속·계좌-->
+						<div class="col-md-6">
+							<div class="text-gray-500 fw-bold fs-8 text-uppercase mb-3">소속 · 정산 계좌</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">팀</label>
+								<select class="form-select form-select-sm form-select-solid" id="ed_team">
+									<option value="">미지정</option>
+									<?php foreach ($teamLabel as $code => $lbl): ?>
+									<option value="<?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?>" <?= $curTeam === $code ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">차량</label>
+								<select class="form-select form-select-sm form-select-solid" id="ed_vehicle">
+									<?php foreach ($vehicleLabel as $val => $lbl): ?>
+									<option value="<?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?>" <?= ($rider['vehicle_type'] ?? '') === $val ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">활동 지역</label>
+								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_address" value="<?= htmlspecialchars((string) ($rider['address'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="255" />
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">은행</label>
+								<select class="form-select form-select-sm form-select-solid" id="ed_bank">
+									<option value="">선택 안 함</option>
+									<?php foreach ($banks as $b): ?>
+									<option value="<?= htmlspecialchars((string) $b['code'], ENT_QUOTES, 'UTF-8') ?>" <?= ($rider['bank_code'] ?? '') === $b['code'] ? 'selected' : '' ?>><?= htmlspecialchars((string) $b['label'], ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">계좌번호</label>
+								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="ed_account" value="<?= htmlspecialchars((string) ($rider['bank_account'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="숫자·하이픈" maxlength="40" />
+							</div>
+							<div class="mb-2">
+								<label class="form-label fs-7 fw-semibold">예금주</label>
+								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_holder" value="<?= htmlspecialchars((string) ($rider['account_holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="80" />
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
+					<button type="button" class="btn btn-primary" id="btn_profile_save">저장</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::Edit Modal-->
+
 <script>
 (function () {
 	var API = <?= json_encode($actionApi, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
@@ -425,6 +530,59 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 		var memo = document.getElementById('admin_memo_ta').value;
 		apiPatch({ action: 'memo', memo: memo }, '메모가 저장되었습니다.');
 	});
+
+	// 프로필 정보 수정 저장
+	var profileBtn = document.getElementById('btn_profile_save');
+	if (profileBtn) {
+		profileBtn.addEventListener('click', function () {
+			var editAlert = document.getElementById('edit_alert');
+			var val = function (id) { return (document.getElementById(id).value || '').trim(); };
+			var payload = {
+				action: 'update_profile',
+				name: val('ed_name'),
+				phone: val('ed_phone'),
+				email: val('ed_email'),
+				birth_date: val('ed_birth'),
+				kyc_status: val('ed_kyc'),
+				team_code: val('ed_team'),
+				vehicle_type: val('ed_vehicle'),
+				address: val('ed_address'),
+				bank_code: val('ed_bank'),
+				bank_account: val('ed_account'),
+				account_holder: val('ed_holder')
+			};
+			if (payload.name === '') {
+				editAlert.className = 'alert alert-danger mb-5';
+				editAlert.textContent = '이름을 입력하세요.';
+				return;
+			}
+			profileBtn.disabled = true;
+			profileBtn.textContent = '저장 중…';
+			fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload)
+			})
+			.then(function (r) { return r.json(); })
+			.then(function (data) {
+				if (data.ok) {
+					// 저장 성공 → 변경 내용 반영을 위해 새로고침
+					window.location.reload();
+				} else {
+					editAlert.className = 'alert alert-danger mb-5';
+					editAlert.textContent = data.message || '오류가 발생했습니다.';
+					profileBtn.disabled = false;
+					profileBtn.textContent = '저장';
+				}
+			})
+			.catch(function () {
+				editAlert.className = 'alert alert-danger mb-5';
+				editAlert.textContent = '네트워크 오류가 발생했습니다.';
+				profileBtn.disabled = false;
+				profileBtn.textContent = '저장';
+			});
+		});
+	}
 })();
 </script>
 

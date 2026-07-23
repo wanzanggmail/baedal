@@ -217,6 +217,86 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
+    if ($action === 'update_profile') {
+        // 라이더 프로필 정보 일괄 수정 (연락처·소속·계좌 등)
+        $vehicleAllowed = ['motor', 'bike', 'car', 'walk', 'kick'];
+        $kycAllowed     = ['none', 'pending', 'verified', 'rejected'];
+
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '')            $err('이름을 입력하세요.');
+        if (mb_strlen($name) > 80)   $err('이름이 너무 깁니다.');
+
+        // 휴대전화: 숫자·하이픈만 허용
+        $phone = trim((string) ($body['phone'] ?? ''));
+        if ($phone !== '' && !preg_match('/^[0-9\-]{9,20}$/', $phone)) {
+            $err('휴대전화 형식이 올바르지 않습니다.');
+        }
+
+        $email = trim((string) ($body['email'] ?? ''));
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $err('이메일 형식이 올바르지 않습니다.');
+        }
+        if (mb_strlen($email) > 120) $err('이메일이 너무 깁니다.');
+
+        // 생년월일: 비었으면 NULL, 있으면 YYYY-MM-DD 유효성
+        $birthRaw  = trim((string) ($body['birth_date'] ?? ''));
+        $birthDate = null;
+        if ($birthRaw !== '') {
+            $d = DateTime::createFromFormat('Y-m-d', $birthRaw);
+            if (!$d || $d->format('Y-m-d') !== $birthRaw) $err('생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)');
+            $birthDate = $birthRaw;
+        }
+
+        $teamCode = trim((string) ($body['team_code'] ?? ''));
+        if (mb_strlen($teamCode) > 32) $err('팀 코드가 너무 깁니다.');
+
+        $vehicle = trim((string) ($body['vehicle_type'] ?? ''));
+        if ($vehicle !== '' && !in_array($vehicle, $vehicleAllowed, true)) $err('차량 종류가 올바르지 않습니다.');
+        if ($vehicle === '') $vehicle = (string) ($rider['vehicle_type'] ?? 'motor');
+
+        $address = trim((string) ($body['address'] ?? ''));
+        if (mb_strlen($address) > 255) $err('활동 지역이 너무 깁니다.');
+
+        // 은행코드: 비었으면 NULL, 있으면 system_codes 존재 확인
+        $bankCode = trim((string) ($body['bank_code'] ?? ''));
+        if ($bankCode !== '') {
+            $ok = db_row("SELECT 1 AS x FROM system_codes WHERE category='bank' AND code = ? LIMIT 1", [$bankCode]);
+            if ($ok === null) $err('선택한 은행이 올바르지 않습니다.');
+        } else {
+            $bankCode = null;
+        }
+
+        $bankAccount = trim((string) ($body['bank_account'] ?? ''));
+        if ($bankAccount !== '' && !preg_match('/^[0-9\-]{1,40}$/', $bankAccount)) {
+            $err('계좌번호는 숫자·하이픈만 입력하세요.');
+        }
+        if ($bankAccount === '') $bankAccount = null;
+
+        $holder = trim((string) ($body['account_holder'] ?? ''));
+        if (mb_strlen($holder) > 80) $err('예금주가 너무 깁니다.');
+        if ($holder === '') $holder = null;
+
+        $kyc = trim((string) ($body['kyc_status'] ?? ''));
+        if ($kyc !== '' && !in_array($kyc, $kycAllowed, true)) $err('본인인증 상태값이 올바르지 않습니다.');
+        if ($kyc === '') $kyc = (string) ($rider['kyc_status'] ?? 'none');
+
+        db_execute(
+            'UPDATE riders
+                SET name = ?, phone = ?, email = ?, birth_date = ?,
+                    team_code = ?, vehicle_type = ?, address = ?,
+                    bank_code = ?, bank_account = ?, account_holder = ?,
+                    kyc_status = ?, updated_at = NOW()
+              WHERE id = ?',
+            [$name, $phone, $email, $birthDate,
+             $teamCode, $vehicle, $address,
+             $bankCode, $bankAccount, $holder,
+             $kyc, $id]
+        );
+        AuditLog::record('rider.update_profile', (string) ($rider['rider_code'] ?? $id), '프로필 정보 수정');
+        echo json_encode(['ok' => true, 'message' => '라이더 정보가 저장되었습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $err('알 수 없는 액션입니다.');
 }
 

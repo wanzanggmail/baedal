@@ -32,6 +32,15 @@ $totalCount = (int) (db_row(
     $params
 )['cnt'] ?? 0);
 
+// ── 페이징 ──────────────────────────────────────────────────
+$perPage    = 20;
+$totalPages = max(1, (int) ceil($totalCount / $perPage));
+$page       = max(1, (int) ($_GET['page'] ?? 1));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
 $riders = db_rows(
     "SELECT r.id, r.rider_code, r.login_id, r.name,
             r.phone, r.status, r.team_code, r.vehicle_type,
@@ -43,9 +52,24 @@ $riders = db_rows(
      FROM riders r
      WHERE {$whereStr}
      ORDER BY r.name ASC
-     LIMIT 500",
+     LIMIT {$perPage} OFFSET {$offset}",
     $params
 );
+
+// 페이지 링크 baseURL (현재 필터 유지, page 만 교체)
+$pageQuery = array_filter([
+    'route'  => (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) ? 'riders/list' : null,
+    'q'      => $filterQ !== ''      ? $filterQ      : null,
+    'team'   => $filterTeam !== ''   ? $filterTeam   : null,
+    'status' => $filterStatus !== '' ? $filterStatus : null,
+], static fn ($v) => $v !== null && $v !== '');
+$pageBase = (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL)
+    ? ADMIN_BASE . '/index.php'
+    : admin_url('riders/list');
+$pageUrl = static function (int $p) use ($pageBase, $pageQuery): string {
+    $qs = http_build_query($pageQuery + ['page' => $p]);
+    return $pageBase . '?' . $qs;
+};
 
 $statusLabel = [
     'active'        => '활동 중',
@@ -69,6 +93,7 @@ $teamLabel = [
 
 $banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order");
 $detailBase = admin_url('riders/detail');
+$detailBase .= str_contains($detailBase, '?') ? '&id=' : '?id=';
 $apiBase    = ADMIN_BASE . '/api/riders.php';
 $currentUrl = admin_url('riders/list');
 
@@ -103,6 +128,9 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
 	<form method="get" action="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>">
+	<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL): ?>
+	<input type="hidden" name="route" value="riders/list" />
+	<?php endif; ?>
 	<div class="card card-flush mb-8">
 		<div class="card-body py-5">
 			<div class="row g-4 align-items-end">
@@ -192,7 +220,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						    $team     = $teamLabel[$r['team_code'] ?? ''] ?? ($r['team_code'] ?? '—');
 						    $phone    = preg_replace('/\D/', '', $r['phone'] ?? '');
 						    $phoneMsk = preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $phone) ?: '—';
-						    $detailUrl = $detailBase . '?id=' . (int) $r['id'];
+						    $detailUrl = $detailBase . (int) $r['id'];
 						?>
 						<tr>
 							<td class="fw-bold text-gray-900 font-monospace fs-7"><?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -222,6 +250,42 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				</table>
 			</div>
 		</div>
+		<?php if ($totalCount > 0): ?>
+		<div class="card-footer d-flex flex-stack flex-wrap gap-3 py-4">
+			<div class="text-gray-600 fs-7">
+				<?= number_format($offset + 1) ?>–<?= number_format(min($offset + $perPage, $totalCount)) ?>
+				/ 총 <strong class="text-gray-800"><?= number_format($totalCount) ?></strong>명
+				<span class="text-muted ms-1">(<?= $page ?>/<?= $totalPages ?> 페이지)</span>
+			</div>
+			<?php if ($totalPages > 1):
+				$win   = 2;
+				$start = max(1, $page - $win);
+				$end   = min($totalPages, $page + $win);
+			?>
+			<ul class="pagination mb-0">
+				<li class="page-item previous <?= $page <= 1 ? 'disabled' : '' ?>">
+					<a class="page-link" href="<?= $page <= 1 ? '#' : htmlspecialchars($pageUrl($page - 1), ENT_QUOTES, 'UTF-8') ?>"><i class="previous"></i></a>
+				</li>
+				<?php if ($start > 1): ?>
+					<li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl(1), ENT_QUOTES, 'UTF-8') ?>">1</a></li>
+					<?php if ($start > 2): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
+				<?php endif; ?>
+				<?php for ($p = $start; $p <= $end; $p++): ?>
+					<li class="page-item <?= $p === $page ? 'active' : '' ?>">
+						<a class="page-link" href="<?= htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8') ?>"><?= $p ?></a>
+					</li>
+				<?php endfor; ?>
+				<?php if ($end < $totalPages): ?>
+					<?php if ($end < $totalPages - 1): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
+					<li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl($totalPages), ENT_QUOTES, 'UTF-8') ?>"><?= $totalPages ?></a></li>
+				<?php endif; ?>
+				<li class="page-item next <?= $page >= $totalPages ? 'disabled' : '' ?>">
+					<a class="page-link" href="<?= $page >= $totalPages ? '#' : htmlspecialchars($pageUrl($page + 1), ENT_QUOTES, 'UTF-8') ?>"><i class="next"></i></a>
+				</li>
+			</ul>
+			<?php endif; ?>
+		</div>
+		<?php endif; ?>
 	</div>
 
 	<!--begin::Register Modal-->
@@ -432,7 +496,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 			if (!data.ok) { showAlert(data.message || '오류가 발생했습니다.'); return; }
 			var modal = bootstrap.Modal.getInstance(document.getElementById('kt_rider_register_modal'));
 			if (modal) modal.hide();
-			window.location.href = DETAIL_URL + '?id=' + data.id;
+			window.location.href = DETAIL_URL + data.id;
 		})
 		.catch(function () { showAlert('네트워크 오류가 발생했습니다.'); })
 		.finally(function () {
