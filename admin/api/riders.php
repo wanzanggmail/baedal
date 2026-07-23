@@ -91,11 +91,33 @@ if ($method === 'POST') {
     $accHolder   = trim((string) ($body['account_holder'] ?? ''));
     $email       = trim((string) ($body['email']          ?? ''));
     $platform    = trim((string) ($body['platform']       ?? ''));
+    $coupangId   = trim((string) ($body['coupang_id']     ?? ''));
+    $baeminId    = trim((string) ($body['baemin_id']      ?? ''));
+
+    // 플랫폼별 외부 ID 맵 (정산 매칭 키). 값이 있는 것만 연동.
+    $platformIds = array_filter([
+        'coupang' => $coupangId,
+        'baemin'  => $baeminId,
+    ], static fn ($v): bool => $v !== '');
+    // 구 단일 platform 선택값도 반영(외부ID 없이 플랫폼만 표시하고 싶을 때)
+    if ($platform !== '' && in_array($platform, ['baemin', 'coupang', 'other'], true) && !isset($platformIds[$platform])) {
+        $platformIds[$platform] = '';
+    }
+
+    // 같은 대리점 내 동일 플랫폼 ID 중복 방지
+    foreach ($platformIds as $pf => $ext) {
+        if ($ext === '') {
+            continue;
+        }
+        if (db_row('SELECT rp.id FROM rider_platforms rp INNER JOIN riders r ON r.id = rp.rider_id WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ? LIMIT 1', [$pf, $ext, $agencyId]) !== null) {
+            $err(($pf === 'coupang' ? '쿠팡' : '배민') . " ID({$ext})가 이미 다른 라이더에 연결돼 있습니다.");
+        }
+    }
 
     $newId = db_transaction(static function () use (
         $riderCode, $loginId, $passwordHash, $name, $phone, $email,
         $birth, $teamCode, $vehicle, $address,
-        $bankCode, $bankAccount, $accHolder, $platform, $agencyId
+        $bankCode, $bankAccount, $accHolder, $platformIds, $agencyId
     ): int {
         $id = db_insert(
             'INSERT INTO riders
@@ -114,12 +136,12 @@ if ($method === 'POST') {
             ]
         );
 
-        // 플랫폼 연동 등록
-        if ($platform !== '' && in_array($platform, ['baemin', 'coupang', 'other'], true)) {
+        // 플랫폼 연동 등록 (쿠팡/배민 외부 ID)
+        foreach ($platformIds as $pf => $ext) {
             db_insert(
                 'INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id)
                  VALUES (?, ?, 1, ?)',
-                [$id, $platform, '']
+                [$id, $pf, $ext]
             );
         }
 

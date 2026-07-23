@@ -35,6 +35,7 @@ final class MigrateRunner
         self::migrateOrgFeeBackfill();
         self::migrateHourlyInsuranceColumn();
         self::migrateDeductionRegisterColumn();
+        self::migrateDailyRidersUniqueDate();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -475,6 +476,53 @@ final class MigrateRunner
              ADD KEY idx_swd_registered (registered_entry_id)"
         );
         echo "OK    settlement_weekly_deductions.registered_entry_id\n";
+    }
+
+    /**
+     * 배민 대응 — 한 업로드가 여러 날짜(운행일)를 포함할 수 있으므로
+     * settlement_daily_riders UNIQUE를 (upload_id, license_id) → (upload_id, license_id, settlement_date)로 확장.
+     * 쿠팡은 upload당 단일 날짜라 영향 없음(멱등).
+     */
+    private static function migrateDailyRidersUniqueDate(): void
+    {
+        echo "== settlement_daily_riders UNIQUE(+date) ==\n";
+
+        if (!db_table_exists('settlement_daily_riders')) {
+            echo "SKIP  settlement_daily_riders (테이블 없음)\n";
+
+            return;
+        }
+
+        // 새 유니크가 이미 있으면 skip
+        $idx = db_rows('SHOW INDEX FROM settlement_daily_riders');
+        $hasNew = false;
+        $hasOld = false;
+        foreach ($idx as $r) {
+            if (($r['Key_name'] ?? '') === 'uq_sdr_upload_license_date') {
+                $hasNew = true;
+            }
+            if (($r['Key_name'] ?? '') === 'uq_sdr_upload_license') {
+                $hasOld = true;
+            }
+        }
+        if ($hasNew) {
+            echo "SKIP  uq_sdr_upload_license_date (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            $sql = 'ALTER TABLE settlement_daily_riders ';
+            if ($hasOld) {
+                $sql .= 'DROP INDEX uq_sdr_upload_license, ';
+            }
+            $sql .= 'ADD UNIQUE KEY uq_sdr_upload_license_date (upload_id, license_id, settlement_date)';
+            db_execute($sql);
+            echo "OK    uq_sdr_upload_license_date\n";
+        } catch (Throwable $e) {
+            echo 'ERROR uq date → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
     }
 
     private static function migrateAuditLogs(): void

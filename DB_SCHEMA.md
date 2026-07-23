@@ -127,10 +127,11 @@ settlement_uploads (1건 업로드)
 | `agency_id` | 업로드 소유 대리점(FK 없음, 인덱스만) |
 | `status` | enum(`uploaded`,`parsing`,`parsed`,`applied`,`error`) |
 
-### `settlement_daily_riders` — 엑셀 "종합" 탭 원본 1행 = 라이더 1일 요약
+### `settlement_daily_riders` — 라이더 1일 요약(쿠팡 "종합" 탭 / 배민 집계)
 `fee_pickup/delivery/area/dist_*/pickup_*/dest_*/weather*/promo1~4` 등 쿠팡 정산서 세부 항목 컬럼.
 `hourly_insurance`: 시간제보험 — **계산이 아니라 "시간제보험" 탭 값을 파싱해 채움**(✅ 2026-07-23 실 파일 검증 완료, `XlsxParser::parseHourlyInsuranceSheet()`).
-UNIQUE(`upload_id`,`license_id`) — 중복 업로드 방지.
+**UNIQUE(`upload_id`,`license_id`,`settlement_date`)** — 2026-07-23 확장(기존 `(upload_id,license_id)`). 배민은 파일 하나가 여러 운행일을 포함해 라이더가 날짜별로 여러 행을 가질 수 있어 날짜를 유니크에 포함. 쿠팡은 upload당 단일 날짜라 영향 없음.
+- 쿠팡: `license_id`=라이선스ID, 종합탭 값 그대로. 배민: `license_id`=라이더ID(J), 주문을 라이더·운행일별로 집계(`settlement_baemin_normalize`)해 채움 — `gross_amount`=`payout_amount`=배달처리비 합, 쿠팡 전용 fee 세부컬럼은 0(체계 다름).
 
 ### `settlement_order_details` — 🆕(2026-07-23) 엑셀 "오더별 상세 내역서" 탭 원본, 주문 1건=1행
 `rider_id`(FK→`riders`, `ON DELETE SET NULL`, 파일 내 성함 매칭·DB 폴백) · `order_no`(축약형 주문번호) · `pickup_area`/`delivery_area` · `assigned_at`/`accepted_at`/`delivered_at`(datetime, 엑셀 시리얼 변환 — **실제 배달 시각**, §7 #18 age-bucket 계산의 미래 데이터 소스) · `duration_minutes` · `distance_m` · `delivery_type`(멀티배달 등) · 수수료 세부(`fee_pickup`/`fee_delivery`/`fee_area`/`fee_dist_surge`/`fee_pickup_surge`/`fee_dest_surge`/`fee_weather`/`fee_promo1~4`) · `net_amount`(오더 단위 정산금액).
@@ -290,3 +291,4 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 |---|---|
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |
 | 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |
+| 2026-07-23 (2) | 배달의민족 정산서 지원. `settlement_daily_riders` UNIQUE를 `(upload_id,license_id)`→`(upload_id,license_id,settlement_date)`로 확장(배민 다중 운행일 대응, 인덱스명 `uq_sdr_upload_license_date`). 스키마 신규 테이블 없음 — 배민 주문을 기존 `settlement_daily_riders`/`settlement_order_details`에 집계·저장. |

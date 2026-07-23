@@ -308,15 +308,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 								</select>
 							</div>
 							<div class="col-md-4">
-								<label class="form-label">주 플랫폼</label>
-								<select class="form-select form-select-solid" id="reg_platform">
-									<option value="">선택 안 함</option>
-									<option value="baemin">배달의민족</option>
-									<option value="coupang">쿠팡이츠</option>
-									<option value="other">기타</option>
-								</select>
-							</div>
-							<div class="col-md-4">
 								<label class="form-label required">차량</label>
 								<select class="form-select form-select-solid" id="reg_vehicle" required>
 									<option value="motor">오토바이</option>
@@ -325,6 +316,19 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 									<option value="car">자동차</option>
 									<option value="walk">도보</option>
 								</select>
+							</div>
+							<input type="hidden" id="reg_platform" value="" />
+						</div>
+						<div class="separator separator-dashed my-2"></div>
+						<div class="row g-4 mb-2">
+							<div class="col-12"><label class="form-label fw-semibold">플랫폼 매칭 정보 <span class="text-muted fs-8">(정산서 매칭 키 · 나중에 라이더 상세에서도 등록 가능)</span></label></div>
+							<div class="col-md-6">
+								<label class="form-label fs-7">쿠팡이츠 성함</label>
+								<input type="text" class="form-control form-control-solid" id="reg_coupang_id" maxlength="60" placeholder="예: 박성준1682" />
+							</div>
+							<div class="col-md-6">
+								<label class="form-label fs-7">배달의민족 UserID</label>
+								<input type="text" class="form-control form-control-solid font-monospace" id="reg_baemin_id" maxlength="60" placeholder="예: adammins" />
 							</div>
 						</div>
 						<div class="mb-6">
@@ -414,6 +418,8 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				birth_date:  document.getElementById('reg_birth').value.trim(),
 				team_code:   document.getElementById('reg_team').value,
 				platform:    document.getElementById('reg_platform').value,
+				coupang_id:  document.getElementById('reg_coupang_id').value.trim(),
+				baemin_id:   document.getElementById('reg_baemin_id').value.trim(),
 				vehicle_type: document.getElementById('reg_vehicle').value,
 				address:     document.getElementById('reg_address').value.trim(),
 				bank_code:   document.getElementById('reg_bank_code').value,

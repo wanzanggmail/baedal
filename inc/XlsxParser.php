@@ -488,6 +488,121 @@ class XlsxParser
         return $dt !== null ? substr($dt, 0, 10) : null;
     }
 
+    /**
+     * 배달의민족 정산서 파서 — 시트 1개("배달 내역 상세"), 주문(배달건) 단위 원본.
+     * 쿠팡과 달리 라이더 요약 탭이 없어 주문을 반환하고, 상위(업로드 API)에서 라이더·운행일별로 집계한다.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function parseBaeminOrders(): array
+    {
+        // 배민은 대개 첫 시트. "배달" 키워드로 시트 탐색(폴백 0번).
+        $sheetIdx = $this->findSheetIndex('배달');
+        if ($sheetIdx === null) {
+            $sheetIdx = 0;
+        }
+
+        $allRows   = $this->readSheet($sheetIdx, 1, 0);
+        $headerRow = $this->findHeaderRow($allRows, ['배달번호', '배달처리비']);
+        if ($headerRow === null) {
+            return [];
+        }
+
+        $map = $this->mapHeaderColumns($allRows[$headerRow] ?? [], [
+            'run_date'      => ['운행일'],
+            'order_no'      => ['배달번호'],
+            'status'        => ['배달상태'],
+            'service_type'  => ['서비스타입'],
+            'delivery_type' => ['배달방식'],
+            'rider_id'      => ['라이더ID'],
+            'user_id'       => ['User ID', 'UserID'],
+            'rider_name'    => ['라이더명'],
+            'store_name'    => ['가게이름'],
+            'product_price' => ['상품가격'],
+            'pickup_area'   => ['픽업 주소', '픽업주소'],
+            'delivery_area' => ['전달지 주소', '전달지주소'],
+            'order_time'    => ['주문시간'],
+            'assigned_at'   => ['배차완료'],
+            'store_at'      => ['가게도착'],
+            'picked_at'     => ['픽업완료'],
+            'delivered_at'  => ['전달완료'],
+            'distance'      => ['거리'],
+            'fee_base'      => ['기본단가'],
+            'fee_weather'   => ['기상할증'],
+            'fee_extra'     => ['추가할증'],
+            'fee_peak'      => ['피크할증'],
+            'fee_area'      => ['지역 할증', '지역할증'],
+            'fee_bulk'      => ['대량 할증', '대량할증'],
+            'payout'        => ['배달처리비'],
+        ]);
+
+        $get = static fn (array $c, ?string $col): mixed => ($col !== null && isset($c[$col])) ? $c[$col] : null;
+        $money = static fn (array $c, ?string $col): int => (int) round((float) (self::numOrZero($get($c, $col))));
+
+        $rows = [];
+        foreach ($allRows as $rowNum => $cols) {
+            if ($rowNum <= $headerRow) {
+                continue;
+            }
+            $orderNo = (string) ($get($cols, $map['order_no'] ?? null) ?? '');
+            if ($orderNo === '') {
+                continue;
+            }
+
+            $riderId  = (string) ($get($cols, $map['rider_id'] ?? null) ?? '');
+            $userId   = (string) ($get($cols, $map['user_id'] ?? null) ?? '');
+            $nameRaw  = (string) ($get($cols, $map['rider_name'] ?? null) ?? '');
+            if ($riderId === '' && $userId === '' && $nameRaw === '') {
+                continue;
+            }
+
+            $rows[] = [
+                'settlement_date' => self::yyyymmdd((string) ($get($cols, $map['run_date'] ?? null) ?? '')),
+                'order_no'        => $orderNo,
+                'status'          => (string) ($get($cols, $map['status'] ?? null) ?? ''),
+                'rider_id'        => $riderId,
+                'user_id'         => $userId,
+                'name_raw'        => $nameRaw,
+                'name'            => self::cleanName($nameRaw),
+                'store_name'      => (string) ($get($cols, $map['store_name'] ?? null) ?? ''),
+                'pickup_area'     => (string) ($get($cols, $map['pickup_area'] ?? null) ?? ''),
+                'delivery_area'   => (string) ($get($cols, $map['delivery_area'] ?? null) ?? ''),
+                'assigned_at'     => self::excelDateTime($get($cols, $map['assigned_at'] ?? null)),
+                'accepted_at'     => self::excelDateTime($get($cols, $map['picked_at'] ?? null)),
+                'delivered_at'    => self::excelDateTime($get($cols, $map['delivered_at'] ?? null)),
+                'distance_m'      => $money($cols, $map['distance'] ?? null),
+                'delivery_type'   => (string) ($get($cols, $map['delivery_type'] ?? null) ?? ''),
+                // 배민 수수료 구성(참고): 기본단가·각종 할증 → 배달처리비(payout)
+                'fee_base'        => $money($cols, $map['fee_base'] ?? null),
+                'fee_weather'     => $money($cols, $map['fee_weather'] ?? null),
+                'fee_extra'       => $money($cols, $map['fee_extra'] ?? null),
+                'fee_peak'        => $money($cols, $map['fee_peak'] ?? null),
+                'fee_area'        => $money($cols, $map['fee_area'] ?? null),
+                'fee_bulk'        => $money($cols, $map['fee_bulk'] ?? null),
+                'payout'          => $money($cols, $map['payout'] ?? null),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** "YYYYMMDD" → "Y-m-d". 실패 시 오늘. */
+    private static function yyyymmdd(string $s): string
+    {
+        $s = trim($s);
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $s, $m)) {
+            return "{$m[1]}-{$m[2]}-{$m[3]}";
+        }
+        $ts = strtotime($s);
+
+        return $ts ? date('Y-m-d', $ts) : date('Y-m-d');
+    }
+
+    private static function numOrZero(mixed $v): float
+    {
+        return is_numeric($v) ? (float) $v : 0.0;
+    }
+
     private function resolveWorksheet(int|string $sheetIndex): ?Worksheet
     {
         if ($this->spreadsheet === null) {

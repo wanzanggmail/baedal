@@ -29,17 +29,45 @@ if (!admin_can_write('settlement') && !admin_can_write('riders')) {
     exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['ok' => false, 'message' => 'POST 만 허용'], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
 $err = static function (string $msg, int $code = 422): never {
     http_response_code($code);
     echo json_encode(['ok' => false, 'message' => $msg], JSON_UNESCAPED_UNICODE);
     exit;
 };
+
+// ── GET: 연결할 기존 라이더 검색 (대리점 스코프 내) ──────────────
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+    $q = trim((string) ($_GET['q'] ?? ''));
+    $pf = trim((string) ($_GET['platform'] ?? ''));
+    [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+    $where  = ['1=1'];
+    $params = [];
+    if ($q !== '') {
+        $like    = '%' . $q . '%';
+        $where[] = '(r.name LIKE ? OR r.rider_code LIKE ? OR r.login_id LIKE ?)';
+        $params  = array_merge($params, [$like, $like, $like]);
+    }
+    if ($scopeSql !== '') {
+        $where[] = $scopeSql;
+        $params  = array_merge($params, $scopeParams);
+    }
+    $rows = db_rows(
+        "SELECT r.id, r.rider_code, r.name, r.status,
+                (SELECT rp.external_id FROM rider_platforms rp WHERE rp.rider_id = r.id AND rp.platform = ? LIMIT 1) AS platform_ext
+           FROM riders r
+          WHERE " . implode(' AND ', $where) . "
+          ORDER BY r.name ASC LIMIT 20",
+        array_merge([$pf !== '' ? $pf : 'coupang'], $params)
+    );
+    echo json_encode(['ok' => true, 'riders' => $rows], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['ok' => false, 'message' => 'POST 만 허용'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 $raw  = file_get_contents('php://input');
 $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
@@ -58,8 +86,44 @@ if (admin_org_level() === Org::LEVEL_AGENCY) {
     }
 }
 
+$action    = trim((string) ($body['action'] ?? 'create'));
 $platform  = trim((string) ($body['platform'] ?? ''));
 $licenseId = trim((string) ($body['license_id'] ?? ''));
+
+// ── 기존 라이더에 플랫폼 ID 연결 (쿠팡만/배민만 있던 라이더에 다른 플랫폼 매핑) ──
+if ($action === 'link') {
+    $targetId = (int) ($body['rider_id'] ?? 0);
+    if (!in_array($platform, ['baemin', 'coupang', 'other'], true) || $licenseId === '') {
+        $err('플랫폼과 정산서 ID가 필요합니다.');
+    }
+    $target = db_row('SELECT id, name, rider_code, agency_id FROM riders WHERE id = ? LIMIT 1', [$targetId]);
+    if ($target === null || !Org::canAccessAgency((int) $target['agency_id'])) {
+        $err('연결할 라이더를 찾을 수 없습니다.', 404);
+    }
+    // 이 ID가 같은 대리점 다른 라이더에 이미 연결됐는지
+    $dup = db_row(
+        'SELECT rp.rider_id FROM rider_platforms rp INNER JOIN riders r ON r.id = rp.rider_id
+          WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ? AND rp.rider_id <> ? LIMIT 1',
+        [$platform, $licenseId, (int) $target['agency_id'], $targetId]
+    );
+    if ($dup !== null) {
+        $err('이 ID는 이미 다른 라이더(#' . (int) $dup['rider_id'] . ')에 연결돼 있습니다.');
+    }
+    $existing = db_row('SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? ORDER BY id ASC LIMIT 1', [$targetId, $platform]);
+    if ($existing !== null) {
+        db_execute('UPDATE rider_platforms SET external_id = ?, is_connected = 1 WHERE id = ?', [$licenseId, (int) $existing['id']]);
+    } else {
+        db_insert('INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id) VALUES (?, ?, 1, ?)', [$targetId, $platform, $licenseId]);
+    }
+    AuditLog::record('rider.platform', (string) $target['rider_code'], "정산 미매칭 → 기존 라이더 연결 · {$platform}:{$licenseId}");
+    echo json_encode([
+        'ok'      => true,
+        'message' => (string) $target['name'] . ' 라이더에 연결되었습니다.',
+        'rider'   => ['id' => (int) $target['id'], 'name' => (string) $target['name'], 'rider_code' => (string) $target['rider_code']],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $name      = trim((string) ($body['name'] ?? ''));
 $phone     = trim((string) ($body['phone'] ?? ''));
 $loginId   = trim((string) ($body['login_id'] ?? ''));

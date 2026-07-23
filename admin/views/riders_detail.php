@@ -252,30 +252,32 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 	<div class="row g-6 mb-8">
 		<div class="col-xl-6">
 			<div class="card card-flush h-100">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">플랫폼 연동</h3></div>
+				<div class="card-header pt-5"><h3 class="card-title fw-bold">플랫폼 아이디 연동 <span class="text-muted fs-8">(정산 매칭 키)</span></h3></div>
 				<div class="card-body pt-0">
-					<?php if (empty($platforms)): ?>
-					<p class="text-gray-500 fs-7 mb-0">등록된 플랫폼 연동 정보가 없습니다.</p>
-					<?php else: ?>
-					<div class="table-responsive">
-						<table class="table table-row-bordered align-middle gs-0 gy-3">
-							<thead>
-								<tr class="fw-bold text-muted fs-7">
-									<th>플랫폼</th><th>연동</th><th>외부 ID</th>
-								</tr>
-							</thead>
-							<tbody>
-								<?php foreach ($platforms as $p): ?>
-								<tr>
-									<td><?= htmlspecialchars($pfLabel[$p['platform']] ?? $p['platform'], ENT_QUOTES, 'UTF-8') ?></td>
-									<td><span class="badge badge-light-success">연동됨</span></td>
-									<td class="font-monospace fs-7"><?= htmlspecialchars($p['external_id'] ?: '—', ENT_QUOTES, 'UTF-8') ?></td>
-								</tr>
-								<?php endforeach; ?>
-							</tbody>
-						</table>
+					<?php
+					$pfExt = ['coupang' => '', 'baemin' => ''];
+					foreach ($platforms as $p) {
+					    if (isset($pfExt[$p['platform']]) && $pfExt[$p['platform']] === '') {
+					        $pfExt[$p['platform']] = (string) $p['external_id'];
+					    }
+					}
+					?>
+					<div class="alert bg-light-info fs-8 p-3 mb-4">쿠팡 정산서는 <strong>성함</strong>(정산서 표기 그대로, 예: 박성준1682), 배민 정산서는 <strong>UserID</strong>(예: adammins)를 넣으면 업로드 시 자동 매칭됩니다. <span class="text-muted">같은 대리점 안에서만 유일하면 됩니다.</span></div>
+					<div class="mb-4">
+						<label class="form-label fs-7 fw-semibold">쿠팡이츠 성함</label>
+						<div class="input-group">
+							<input type="text" class="form-control form-control-sm form-control-solid" id="pf_coupang" value="<?= htmlspecialchars($pfExt['coupang'], ENT_QUOTES, 'UTF-8') ?>" placeholder="예: 박성준1682" />
+							<button type="button" class="btn btn-sm btn-light-primary pf-save-btn" data-pf="coupang" data-input="pf_coupang">저장</button>
+						</div>
 					</div>
-					<?php endif; ?>
+					<div class="mb-2">
+						<label class="form-label fs-7 fw-semibold">배달의민족 UserID</label>
+						<div class="input-group">
+							<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="pf_baemin" value="<?= htmlspecialchars($pfExt['baemin'], ENT_QUOTES, 'UTF-8') ?>" placeholder="예: adammins" />
+							<button type="button" class="btn btn-sm btn-light-primary pf-save-btn" data-pf="baemin" data-input="pf_baemin">저장</button>
+						</div>
+						<div class="form-text fs-8">비우고 저장하면 연동이 해제됩니다.</div>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -313,7 +315,7 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 					</div>
 					<div class="mb-4">
 						<span class="text-gray-500 fw-semibold d-block fs-7">계약 서명일</span>
-						<span class="text-gray-900"><?= htmlspecialchars($rider['contract_signed_at'] ? substr((string)$rider['contract_signed_at'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
+						<span class="text-gray-900"><?= htmlspecialchars(!empty($rider['contract_signed_at']) ? substr((string) $rider['contract_signed_at'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
 					</div>
 					<div class="mb-4">
 						<span class="text-gray-500 fw-semibold d-block fs-7">보험</span>
@@ -321,7 +323,7 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 					</div>
 					<div>
 						<span class="text-gray-500 fw-semibold d-block fs-7">보험 만기</span>
-						<span class="text-gray-900"><?= htmlspecialchars($rider['insurance_expires'] ? substr((string)$rider['insurance_expires'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
+						<span class="text-gray-900"><?= htmlspecialchars(!empty($rider['insurance_expires']) ? substr((string) $rider['insurance_expires'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
 					</div>
 				</div>
 			</div>
@@ -400,6 +402,14 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 	document.getElementById('hold_toggle').addEventListener('change', function () {
 		var hold = this.checked;
 		apiPatch({ action: 'withdrawal_hold', hold: hold }, hold ? '출금 보류로 설정했습니다.' : '출금 보류를 해제했습니다.');
+	});
+
+	document.querySelectorAll('.pf-save-btn').forEach(function (btn) {
+		btn.addEventListener('click', function () {
+			var pf = btn.getAttribute('data-pf');
+			var ext = (document.getElementById(btn.getAttribute('data-input')).value || '').trim();
+			apiPatch({ action: 'set_platform', platform: pf, external_id: ext }, ext ? '플랫폼 ID가 저장되었습니다.' : '연동을 해제했습니다.');
+		});
 	});
 
 	var zeroBtn = document.getElementById('btn_zero_close');

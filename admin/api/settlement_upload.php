@@ -121,10 +121,23 @@ $parser    = new XlsxParser();
 try {
     $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords, $platform);
     $parser->open($parsePath);
-    $parsed       = $parser->parseDailySheet($settlementDate);
-    $deductions   = $parser->parseDeductionSheet();
-    $orderDetails = $parser->parseOrderDetailSheet();
-    $hourlyIns    = $parser->parseHourlyInsuranceSheet();
+    if ($platform === 'baemin') {
+        // 배민: 시트 1개(주문 단위) → 라이더·운행일별 집계로 정규화
+        $baeminOrders           = $parser->parseBaeminOrders();
+        [$parsed, $orderDetails] = settlement_baemin_normalize($baeminOrders, $settlementDate);
+        $deductions             = [];
+        $hourlyIns              = [];
+        // 업로드 표기일 = 파일명 범위 시작 대신 실제 최소 운행일(더 정확)
+        $baeminDates = array_column($parsed['rows'], 'settlement_date');
+        if ($baeminDates !== []) {
+            $settlementDate = min($baeminDates);
+        }
+    } else {
+        $parsed       = $parser->parseDailySheet($settlementDate);
+        $deductions   = $parser->parseDeductionSheet();
+        $orderDetails = $parser->parseOrderDetailSheet();
+        $hourlyIns    = $parser->parseHourlyInsuranceSheet();
+    }
 } catch (Throwable $e) {
     if (isset($parser)) {
         $parser->close();
@@ -171,7 +184,8 @@ if ($dryRun) {
     $matchedCnt = 0;
     $unmatchedCnt = 0;
     foreach ($rows as $row) {
-        $rid = settlement_match_rider_id($platform, (string) $row['license_id'], (string) $row['name'], $agencyId);
+        $matchKey = settlement_row_match_key($platform, $row);
+        $rid = settlement_match_rider_id($platform, $matchKey, (string) $row['name'], $agencyId);
         $rInfo = null;
         if ($rid !== null) {
             $rInfo = db_row('SELECT name, rider_code FROM riders WHERE id = ? LIMIT 1', [$rid]);
@@ -181,6 +195,7 @@ if ($dryRun) {
         }
         $previewRows[] = [
             'license_id'    => (string) $row['license_id'],
+            'match_key'     => $matchKey,   // 연결/등록 시 external_id 로 사용(쿠팡=성함, 배민=UserID)
             'name_raw'      => (string) $row['name_raw'],
             'name'          => (string) $row['name'],
             'order_count'   => (int) $row['order_count'],
@@ -267,7 +282,7 @@ try {
         $nameRawToRiderId = [];
 
         foreach ($rows as $row) {
-            $riderId = settlement_match_rider_id($platform, (string) $row['license_id'], (string) $row['name'], $agencyId);
+            $riderId = settlement_match_rider_id($platform, settlement_row_match_key($platform, $row), (string) $row['name'], $agencyId);
 
             if ($riderId !== null) {
                 $matched++;
@@ -277,6 +292,7 @@ try {
             }
 
             $hourlyForRider = (int) ($hourlyByNameRaw[$row['name_raw']] ?? 0);
+            $rowDate        = (string) ($row['settlement_date'] ?? $settlementDate);
 
             db_insert(
                 'INSERT INTO settlement_daily_riders
@@ -288,7 +304,7 @@ try {
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $uploadId,
-                    $settlementDate,
+                    $rowDate,
                     $platform,
                     $riderId,
                     $row['license_id'],
@@ -333,7 +349,7 @@ try {
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $uploadId,
-                    $settlementDate,
+                    (string) ($od['settlement_date'] ?? $settlementDate),
                     $riderId,
                     $od['name_raw'],
                     $od['order_no'],
@@ -483,29 +499,125 @@ function settlement_parse_date($value): ?string
 }
 
 /**
- * 정산 행 라이더 매칭 (대리점 범위 내). 라이선스 ID → 이름 순.
+ * 정산 행 라이더 매칭 — **반드시 대리점(agency_id) 범위 내에서만** 매칭.
+ * 라이더는 대리점 이동 시 별도 등록되므로 매칭키(쿠팡=성함, 배민=UserID)는 전역 유일이 아니라
+ * 대리점 안에서만 유일하다고 가정한다.
+ *
+ * @param string $matchKey rider_platforms.external_id 와 대조할 값(쿠팡=성함, 배민=UserID)
+ * @param string $nameFallback 정리된 이름(폴백 매칭용)
  */
-function settlement_match_rider_id(string $platform, string $licenseId, string $name, int $agencyId): ?int
+function settlement_match_rider_id(string $platform, string $matchKey, string $nameFallback, int $agencyId): ?int
 {
-    if ($licenseId !== '') {
+    if ($agencyId < 1) {
+        return null;
+    }
+    if ($matchKey !== '') {
         $rp = db_row(
             'SELECT rp.rider_id FROM rider_platforms rp
                INNER JOIN riders r ON r.id = rp.rider_id
-              WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ?',
-            [$platform, $licenseId, $agencyId]
+              WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ? LIMIT 1',
+            [$platform, $matchKey, $agencyId]
         );
         if ($rp) {
             return (int) $rp['rider_id'];
         }
     }
-    if ($name !== '') {
-        $r = db_row('SELECT id FROM riders WHERE name = ? AND agency_id = ? LIMIT 1', [$name, $agencyId]);
+    if ($nameFallback !== '') {
+        $r = db_row('SELECT id FROM riders WHERE name = ? AND agency_id = ? LIMIT 1', [$nameFallback, $agencyId]);
         if ($r) {
             return (int) $r['id'];
         }
     }
 
     return null;
+}
+
+/**
+ * 플랫폼별 매칭키 추출 — 쿠팡=성함(name_raw, "박성준1682"), 배민=UserID(K), 기타=license_id.
+ *
+ * @param array<string,mixed> $row
+ */
+function settlement_row_match_key(string $platform, array $row): string
+{
+    return match ($platform) {
+        'coupang' => (string) ($row['name_raw'] ?? ''),
+        'baemin'  => (string) ($row['alt_id'] ?? ''),
+        default   => (string) ($row['license_id'] ?? ''),
+    };
+}
+
+/**
+ * 배민 주문 행들을 라이더·운행일별로 집계해 종합(daily) 행 + 오더별 상세 행으로 정규화.
+ * 쿠팡 parseDailySheet/parseOrderDetailSheet의 반환 shape에 맞춘다(기존 저장 로직 재사용).
+ *
+ * @param list<array<string,mixed>> $orders
+ * @return array{0: array{rows: list<array<string,mixed>>}, 1: list<array<string,mixed>>}
+ */
+function settlement_baemin_normalize(array $orders, string $fallbackDate): array
+{
+    $agg          = [];
+    $orderDetails = [];
+    foreach ($orders as $o) {
+        $date  = (string) ($o['settlement_date'] ?? $fallbackDate);
+        $riderKey = (string) ($o['rider_id'] ?? '');
+        if ($riderKey === '') {
+            $riderKey = (string) ($o['user_id'] ?? $o['name_raw'] ?? '');
+        }
+        $key = $riderKey . '|' . $date;
+
+        if (!isset($agg[$key])) {
+            $agg[$key] = [
+                'license_id'       => (string) ($o['rider_id'] ?? ''),  // 배민 라이더ID를 외부ID로 사용
+                'alt_id'           => (string) ($o['user_id'] ?? ''),
+                'name_raw'         => (string) ($o['name_raw'] ?? ''),
+                'name'             => (string) ($o['name'] ?? ''),
+                'settlement_date'  => $date,
+                'order_count'      => 0,
+                'gross_amount'     => 0,
+                // 쿠팡 전용 세부 수수료 컬럼은 배민 체계와 달라 0으로 둠(금액은 payout이 정확)
+                'fee_pickup'       => 0, 'fee_delivery' => 0, 'fee_area' => 0,
+                'fee_dist_cnt'     => 0, 'fee_dist_surge' => 0, 'fee_pickup_cnt' => 0, 'fee_pickup_surge' => 0,
+                'fee_dest_cnt'     => 0, 'fee_dest_surge' => 0, 'fee_weather_cnt' => 0, 'fee_weather' => 0,
+                'fee_promo1'       => 0, 'fee_promo2' => 0, 'fee_promo3' => 0, 'fee_promo4' => 0,
+                'payout_amount'    => 0,
+            ];
+        }
+        $agg[$key]['order_count']++;
+        $agg[$key]['gross_amount']  += (int) ($o['payout'] ?? 0);
+        $agg[$key]['payout_amount'] += (int) ($o['payout'] ?? 0);
+
+        // 오더별 상세 (settlement_order_details shape). 배민 수수료는 net_amount(배달처리비)만 정확 저장.
+        $orderDetails[] = [
+            'settlement_date'  => $date,
+            'name_raw'         => (string) ($o['name_raw'] ?? ''),
+            'name'             => (string) ($o['name'] ?? ''),
+            'order_no'         => (string) ($o['order_no'] ?? ''),
+            'store_name'       => (string) ($o['store_name'] ?? ''),
+            'pickup_area'      => (string) ($o['pickup_area'] ?? ''),
+            'delivery_area'    => (string) ($o['delivery_area'] ?? ''),
+            'assigned_at'      => $o['assigned_at'] ?? null,
+            'accepted_at'      => $o['accepted_at'] ?? null,
+            'delivered_at'     => $o['delivered_at'] ?? null,
+            'duration_minutes' => 0,
+            'peak_time'        => '',
+            'distance_m'       => (int) ($o['distance_m'] ?? 0),
+            'delivery_type'    => (string) ($o['delivery_type'] ?? ''),
+            'fee_pickup'       => 0,
+            'fee_delivery'     => (int) ($o['fee_base'] ?? 0),
+            'fee_area'         => (int) ($o['fee_area'] ?? 0),
+            'fee_dist_surge'   => 0,
+            'fee_pickup_surge' => 0,
+            'fee_dest_surge'   => 0,
+            'fee_weather'      => (int) ($o['fee_weather'] ?? 0),
+            'fee_promo1'       => (int) ($o['fee_peak'] ?? 0),
+            'fee_promo2'       => (int) ($o['fee_extra'] ?? 0),
+            'fee_promo3'       => (int) ($o['fee_bulk'] ?? 0),
+            'fee_promo4'       => 0,
+            'net_amount'       => (int) ($o['payout'] ?? 0),
+        ];
+    }
+
+    return [['rows' => array_values($agg)], $orderDetails];
 }
 
 /**

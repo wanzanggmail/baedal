@@ -367,25 +367,45 @@ $platformLabels = [
 				<div class="modal-body py-lg-6 px-lg-8">
 					<div id="quickRiderAlert" class="d-none mb-4"></div>
 					<input type="hidden" id="qrLicense" />
-					<div class="mb-4">
-						<label class="form-label required">이름</label>
-						<input type="text" class="form-control form-control-solid" id="qrName" maxlength="50" />
-					</div>
-					<div class="mb-4">
-						<label class="form-label">휴대전화</label>
-						<input type="text" class="form-control form-control-solid" id="qrPhone" maxlength="20" placeholder="01012345678" />
-					</div>
-					<div class="row">
-						<div class="col-md-6 mb-4">
-							<label class="form-label required">로그인 ID</label>
-							<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" autocomplete="off" />
+
+					<!-- 모드 토글: 신규 등록 / 기존 라이더 연결 -->
+					<ul class="nav nav-tabs nav-line-tabs fs-7 mb-5" id="qrModeTabs">
+						<li class="nav-item"><a class="nav-link active" data-mode="create" href="#">신규 라이더 등록</a></li>
+						<li class="nav-item"><a class="nav-link" data-mode="link" href="#">기존 라이더에 연결</a></li>
+					</ul>
+
+					<!-- 신규 등록 -->
+					<div id="qrCreatePane">
+						<div class="mb-4">
+							<label class="form-label required">이름</label>
+							<input type="text" class="form-control form-control-solid" id="qrName" maxlength="50" />
 						</div>
-						<div class="col-md-6 mb-4">
-							<label class="form-label required">비밀번호</label>
-							<input type="text" class="form-control form-control-solid" id="qrPassword" maxlength="60" autocomplete="off" />
+						<div class="mb-4">
+							<label class="form-label">휴대전화</label>
+							<input type="text" class="form-control form-control-solid" id="qrPhone" maxlength="20" placeholder="01012345678" />
 						</div>
+						<div class="row">
+							<div class="col-md-6 mb-4">
+								<label class="form-label required">로그인 ID</label>
+								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" autocomplete="off" />
+							</div>
+							<div class="col-md-6 mb-4">
+								<label class="form-label required">비밀번호</label>
+								<input type="text" class="form-control form-control-solid" id="qrPassword" maxlength="60" autocomplete="off" />
+							</div>
+						</div>
+						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
 					</div>
-					<div class="form-text">최소 정보로 등록하고 license <code id="qrLicenseLabel">-</code> 를 연동합니다. 상세 정보는 라이더 상세에서 보완하세요.</div>
+
+					<!-- 기존 라이더 연결 -->
+					<div id="qrLinkPane" class="d-none">
+						<div class="alert bg-light-info fs-8 p-3 mb-4">쿠팡만/배민만 등록돼 있던 라이더에 <strong id="qrLinkPlatformLabel">이 플랫폼</strong> ID(<code id="qrLinkLicenseLabel">-</code>)를 연결합니다.</div>
+						<div class="input-group mb-3">
+							<input type="text" class="form-control form-control-solid" id="qrSearchInput" placeholder="이름·코드로 검색" />
+							<button type="button" class="btn btn-light-primary" id="qrSearchBtn">검색</button>
+						</div>
+						<div id="qrSearchResults" class="d-flex flex-column gap-2" style="max-height:240px;overflow-y:auto"></div>
+					</div>
 				</div>
 				<div class="modal-footer flex-center">
 					<button type="button" class="btn btn-light me-3" data-bs-dismiss="modal">취소</button>
@@ -651,9 +671,9 @@ $platformLabels = [
 	function rowHtml(r, i) {
 		const matchCell = r.matched
 			? `<span class="badge badge-light-success">${escHtml(r.rider_name)} <span class="text-muted">${escHtml(r.rider_code)}</span></span>`
-			: `<button type="button" class="btn btn-sm btn-light-danger py-1 btn-reg" data-i="${i}" data-license="${escHtml(r.license_id)}" data-name="${escHtml(r.name_raw)}">미매칭 · 라이더 등록</button>`;
+			: `<button type="button" class="btn btn-sm btn-light-danger py-1 btn-reg" data-i="${i}" data-license="${escHtml(r.match_key || r.license_id)}" data-name="${escHtml(r.name_raw)}">미매칭 · 연결/등록</button>`;
 		return `<tr data-i="${i}">
-			<td class="font-monospace">${escHtml(r.license_id || '-')}</td>
+			<td class="font-monospace">${escHtml((r.match_key || r.license_id) || '-')}</td>
 			<td>${escHtml(r.name_raw)}</td>
 			<td class="text-end">${won(r.order_count)}</td>
 			<td class="text-end fw-bold">${won(r.payout_amount)}</td>
@@ -680,7 +700,65 @@ $platformLabels = [
 		document.getElementById('qrLoginId').value = suggestLogin(license);
 		document.getElementById('qrPassword').value = randomPw();
 		const al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
+		const pfLabels = { coupang: '쿠팡이츠', baemin: '배달의민족', other: '기타' };
+		document.getElementById('qrLinkPlatformLabel').textContent = pfLabels[previewState.platform] || previewState.platform;
+		document.getElementById('qrLinkLicenseLabel').textContent = license || '(없음)';
+		document.getElementById('qrSearchInput').value = name || '';
+		document.getElementById('qrSearchResults').innerHTML = '';
+		setQrMode('create');
 		bootstrap.Modal.getOrCreateInstance(quickModalEl).show();
+	});
+
+	// 모드 토글 (신규 등록 / 기존 연결)
+	let qrMode = 'create';
+	function setQrMode(mode) {
+		qrMode = mode;
+		document.getElementById('qrCreatePane').classList.toggle('d-none', mode !== 'create');
+		document.getElementById('qrLinkPane').classList.toggle('d-none', mode !== 'link');
+		document.getElementById('qrSubmitBtn').classList.toggle('d-none', mode !== 'create');
+		document.querySelectorAll('#qrModeTabs .nav-link').forEach(function (a) {
+			a.classList.toggle('active', a.getAttribute('data-mode') === mode);
+		});
+	}
+	document.querySelectorAll('#qrModeTabs .nav-link').forEach(function (a) {
+		a.addEventListener('click', function (ev) { ev.preventDefault(); setQrMode(a.getAttribute('data-mode')); });
+	});
+
+	// 기존 라이더 검색 → 연결
+	async function qrSearch() {
+		const q = document.getElementById('qrSearchInput').value.trim();
+		const box = document.getElementById('qrSearchResults');
+		box.innerHTML = '<div class="text-muted fs-8">검색 중…</div>';
+		try {
+			const resp = await fetch(registerApiUrl + '?q=' + encodeURIComponent(q) + '&platform=' + encodeURIComponent(previewState.platform), { credentials: 'same-origin' });
+			const data = await resp.json();
+			if (!data.ok) throw new Error(data.message || '검색 실패');
+			if (!data.riders.length) { box.innerHTML = '<div class="text-muted fs-8">결과가 없습니다.</div>'; return; }
+			box.innerHTML = data.riders.map(function (r) {
+				const has = r.platform_ext ? `<span class="badge badge-light-warning fs-8 ms-1">기존:${escHtml(r.platform_ext)}</span>` : '';
+				return `<div class="d-flex align-items-center justify-content-between border border-gray-300 rounded p-2">
+					<div><span class="fw-bold">${escHtml(r.name)}</span> <span class="text-muted fs-8 font-monospace">${escHtml(r.rider_code)}</span>${has}</div>
+					<button type="button" class="btn btn-sm btn-light-primary qr-link-btn" data-id="${r.id}">연결</button>
+				</div>`;
+			}).join('');
+		} catch (e) { box.innerHTML = `<div class="text-danger fs-8">${escHtml(e.message)}</div>`; }
+	}
+	document.getElementById('qrSearchBtn').addEventListener('click', qrSearch);
+	document.getElementById('qrSearchInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); qrSearch(); } });
+	document.getElementById('qrSearchResults').addEventListener('click', async function (ev) {
+		const b = ev.target.closest('.qr-link-btn'); if (!b) return;
+		const al = document.getElementById('quickRiderAlert');
+		b.disabled = true;
+		try {
+			const resp = await fetch(registerApiUrl, {
+				method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+				body: JSON.stringify({ action: 'link', rider_id: Number(b.getAttribute('data-id')), agency_id: previewState.agencyId, platform: previewState.platform, license_id: document.getElementById('qrLicense').value })
+			});
+			const data = await resp.json();
+			if (!data.ok) throw new Error(data.message || '연결 실패');
+			markRowMatched(activeRegRow, data.rider, '연결');
+			bootstrap.Modal.getInstance(quickModalEl).hide();
+		} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '연결 실패'; b.disabled = false; }
 	});
 
 	function suggestLogin(license) {
@@ -718,11 +796,11 @@ $platformLabels = [
 		}
 	});
 
-	function markRowMatched(i, rider) {
+	function markRowMatched(i, rider, badgeLabel) {
 		const tr = previewTbody.querySelector(`tr[data-i="${i}"]`);
 		if (tr) {
 			const cell = tr.querySelector('.match-cell');
-			if (cell) cell.innerHTML = `<span class="badge badge-light-success">${escHtml(rider.name)} <span class="text-muted">${escHtml(rider.rider_code)}</span> <span class="badge badge-success ms-1">신규</span></span>`;
+			if (cell) cell.innerHTML = `<span class="badge badge-light-success">${escHtml(rider.name)} <span class="text-muted">${escHtml(rider.rider_code)}</span> <span class="badge badge-success ms-1">${escHtml(badgeLabel || '신규')}</span></span>`;
 		}
 		previewState.matched++;
 		previewState.unmatched = Math.max(0, previewState.unmatched - 1);

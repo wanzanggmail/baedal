@@ -440,23 +440,23 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			html += '<div class="separator separator-dashed mb-4"></div>';
 			html += '<div class="fw-bold text-gray-800 mb-2">수수료 상세</div>';
 			html += '<div class="row g-0 mb-4">';
-			html += '<div class="col-6">' + row('픽업', won(d.fee_pickup)) + '</div>';
-			html += '<div class="col-6">' + row('배달', won(d.fee_delivery)) + '</div>';
-			html += '<div class="col-6">' + row('지역단가', won(d.fee_area)) + '</div>';
-			html += '<div class="col-6">' + row('거리구간(건수/할증)', d.fee_dist_cnt + '건 / ' + won(d.fee_dist_surge)) + '</div>';
-			html += '<div class="col-6">' + row('픽업콜(건수/할증)', d.fee_pickup_cnt + '건 / ' + won(d.fee_pickup_surge)) + '</div>';
-			html += '<div class="col-6">' + row('도착콜(건수/할증)', d.fee_dest_cnt + '건 / ' + won(d.fee_dest_surge)) + '</div>';
-			html += '<div class="col-6">' + row('기상할증(건수/금액)', d.fee_weather_cnt + '건 / ' + won(d.fee_weather)) + '</div>';
-			html += '<div class="col-6">' + row('시간제보험', won(d.hourly_insurance)) + '</div>';
+			html += '<div class="col-6 pe-8">' + row('픽업', won(d.fee_pickup)) + '</div>';
+			html += '<div class="col-6 ">' + row('배달', won(d.fee_delivery)) + '</div>';
+			html += '<div class="col-6 pe-8">' + row('지역단가', won(d.fee_area)) + '</div>';
+			html += '<div class="col-6 ">' + row('거리구간(건수/할증)', d.fee_dist_cnt + '건 / ' + won(d.fee_dist_surge)) + '</div>';
+			html += '<div class="col-6 pe-8">' + row('픽업콜(건수/할증)', d.fee_pickup_cnt + '건 / ' + won(d.fee_pickup_surge)) + '</div>';
+			html += '<div class="col-6 ">' + row('도착콜(건수/할증)', d.fee_dest_cnt + '건 / ' + won(d.fee_dest_surge)) + '</div>';
+			html += '<div class="col-6 pe-8">' + row('기상할증(건수/금액)', d.fee_weather_cnt + '건 / ' + won(d.fee_weather)) + '</div>';
+			html += '<div class="col-6 ">' + row('시간제보험', won(d.hourly_insurance)) + '</div>';
 			html += '</div>';
 
 			if (d.fee_promo1 || d.fee_promo2 || d.fee_promo3 || d.fee_promo4) {
 				html += '<div class="fw-bold text-gray-800 mb-2">프로모션</div>';
 				html += '<div class="row g-0 mb-4">';
-				html += '<div class="col-6">' + row('프로모션1', won(d.fee_promo1)) + '</div>';
-				html += '<div class="col-6">' + row('프로모션2', won(d.fee_promo2)) + '</div>';
-				html += '<div class="col-6">' + row('프로모션3', won(d.fee_promo3)) + '</div>';
-				html += '<div class="col-6">' + row('프로모션4', won(d.fee_promo4)) + '</div>';
+				html += '<div class="col-6 pe-8">' + row('프로모션1', won(d.fee_promo1)) + '</div>';
+				html += '<div class="col-6 ">' + row('프로모션2', won(d.fee_promo2)) + '</div>';
+				html += '<div class="col-6 pe-8">' + row('프로모션3', won(d.fee_promo3)) + '</div>';
+				html += '<div class="col-6 ">' + row('프로모션4', won(d.fee_promo4)) + '</div>';
 				html += '</div>';
 			}
 

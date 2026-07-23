@@ -167,6 +167,44 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
+    if ($action === 'set_platform') {
+        // 쿠팡/배민 등 플랫폼 외부 ID 연동/수정/해제 (정산 매칭 키)
+        $pf  = trim((string) ($body['platform'] ?? ''));
+        $ext = trim((string) ($body['external_id'] ?? ''));
+        if (!in_array($pf, ['coupang', 'baemin', 'other'], true)) {
+            $err('플랫폼이 올바르지 않습니다.');
+        }
+        $agencyId = (int) ($rider['agency_id'] ?? 0);
+
+        if ($ext === '') {
+            db_execute('DELETE FROM rider_platforms WHERE rider_id = ? AND platform = ?', [$id, $pf]);
+            AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$pf} 연동 해제");
+            echo json_encode(['ok' => true, 'message' => '연동을 해제했습니다.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // 같은 대리점 내 다른 라이더가 이미 이 플랫폼 ID를 쓰고 있으면 거부
+        $dup = db_row(
+            'SELECT rp.rider_id FROM rider_platforms rp
+               INNER JOIN riders r ON r.id = rp.rider_id
+              WHERE rp.platform = ? AND rp.external_id = ? AND r.agency_id = ? AND rp.rider_id <> ? LIMIT 1',
+            [$pf, $ext, $agencyId, $id]
+        );
+        if ($dup !== null) {
+            $err('이 ' . ($pf === 'coupang' ? '쿠팡' : ($pf === 'baemin' ? '배민' : '')) . ' ID는 이미 다른 라이더(#' . (int) $dup['rider_id'] . ')에 연결돼 있습니다.');
+        }
+
+        $existing = db_row('SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? ORDER BY id ASC LIMIT 1', [$id, $pf]);
+        if ($existing !== null) {
+            db_execute('UPDATE rider_platforms SET external_id = ?, is_connected = 1 WHERE id = ?', [$ext, (int) $existing['id']]);
+        } else {
+            db_insert('INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id) VALUES (?, ?, 1, ?)', [$id, $pf, $ext]);
+        }
+        AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$pf} ID 연동 · {$ext}");
+        echo json_encode(['ok' => true, 'message' => '플랫폼 ID가 저장되었습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($action === 'withholding_tax') {
         // #15 원천세 공제 대상 여부 — 대리점이 라이더별로 설정. 세율(3.3%)은 고정.
         $on = !empty($body['enabled']) ? 1 : 0;

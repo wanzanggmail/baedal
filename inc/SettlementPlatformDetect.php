@@ -5,8 +5,8 @@ declare(strict_types=1);
 /**
  * 정산 엑셀 파일 플랫폼 자동 감지
  *
- * 현재 XlsxParser가 검증·지원하는 형식은 쿠팡이츠 일간 정산서뿐입니다.
- * 파싱 성공 = 쿠팡이츠 형식으로 간주합니다. (배민 정산서는 아직 미지원)
+ * 쿠팡이츠 일간 정산서(종합/오더별상세 등 다중 시트)와 배달의민족 정산서(배달 내역 상세 단일 시트)를
+ * 지원합니다. 각 파서로 파싱 가능 여부 + 헤더 마커로 플랫폼을 판정합니다.
  */
 final class SettlementPlatformDetect
 {
@@ -95,6 +95,23 @@ final class SettlementPlatformDetect
             $reasons[] = '내용에 배달의민족 관련 문구';
         }
 
+        /** 배민 정산서(배달 내역 상세) 고유 헤더 마커 */
+        /** @var array<string, int> $baeminMarkers */
+        $baeminMarkers = [
+            '배달처리비'  => 4,
+            '협력사아이디' => 3,
+            '배달번호'    => 2,
+            '전달완료'    => 1,
+        ];
+        foreach ($baeminMarkers as $marker => $score) {
+            if (str_contains($textParts, $marker)) {
+                $baemin += $score;
+                if ($score >= 3) {
+                    $reasons[] = "헤더「{$marker}」(배민 배달내역 형식)";
+                }
+            }
+        }
+
         /** 현재 파서가 기대하는 일간 정산 헤더 — 쿠팡이츠 정산서에서 확인된 형식 */
         /** @var array<string, int> $parserMarkers */
         $parserMarkers = [
@@ -139,34 +156,49 @@ final class SettlementPlatformDetect
             $coupang += 1;
         }
 
+        // 배민 파서로 주문이 파싱되면 강한 신호
+        $baeminRowCount = 0;
+        try {
+            $baeminRowCount = count($parser->parseBaeminOrders());
+            if ($baeminRowCount > 0) {
+                $baemin += 6;
+                $reasons[] = "배민 배달내역 형식으로 {$baeminRowCount}건 파싱 가능";
+            }
+        } catch (Throwable) {
+        }
+
         $platform   = null;
         $confidence = 'none';
 
-        if ($parseRowCount > 0 && $baemin <= $coupang) {
+        if ($parseRowCount > 0 && $coupang >= $baemin) {
             $platform   = 'coupang';
             $confidence = 'high';
+        } elseif ($baeminRowCount > 0 && $baemin > $coupang) {
+            $platform   = 'baemin';
+            $confidence = $baemin >= 6 ? 'high' : 'medium';
         } elseif ($coupang >= 4 && $coupang > $baemin) {
             $platform   = 'coupang';
             $confidence = $coupang >= 6 ? 'high' : 'medium';
-        } elseif ($baemin >= 4 && $baemin > $coupang && $parseRowCount === 0) {
+        } elseif ($baemin >= 4 && $baemin > $coupang) {
             $platform   = 'baemin';
             $confidence = 'medium';
         } elseif ($coupang >= 3) {
             $platform   = 'coupang';
             $confidence = 'medium';
-        } elseif ($baemin >= 3 && $parseRowCount === 0) {
+        } elseif ($baemin >= 3) {
             $platform   = 'baemin';
             $confidence = 'low';
         }
 
         return [
-            'platform'        => $platform,
-            'confidence'      => $confidence,
-            'baemin_score'    => $baemin,
-            'coupang_score'   => $coupang,
-            'reasons'         => array_values(array_unique($reasons)),
-            'sheet_names'     => $sheetNames,
-            'parse_row_count' => $parseRowCount,
+            'platform'         => $platform,
+            'confidence'       => $confidence,
+            'baemin_score'     => $baemin,
+            'coupang_score'    => $coupang,
+            'reasons'          => array_values(array_unique($reasons)),
+            'sheet_names'      => $sheetNames,
+            'parse_row_count'  => $parseRowCount,
+            'baemin_row_count' => $baeminRowCount,
         ];
     }
 
