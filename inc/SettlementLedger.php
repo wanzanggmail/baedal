@@ -382,6 +382,8 @@ final class SettlementLedger
             'hourly_ins'     => '시간제 보험',
             'ins_refund'     => '보험료 환급',
             'rental'         => '대여금',
+            'loan'           => '대여금',
+            'lease'          => '리스/렌탈',
             'advance'        => '선지급',
             'manual'         => '수동 차감',
         ];

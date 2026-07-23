@@ -22,6 +22,7 @@ final class MigrateRunner
         self::runSqlFile('redesign_wallet.sql');
         self::runSqlFile('redesign_gateway.sql');
         self::runSqlFile('redesign_settlement_detail.sql');
+        self::runSqlFile('rider_debts.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();

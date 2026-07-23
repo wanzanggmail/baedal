@@ -3,7 +3,7 @@
 > **목적:** 실제 DB에 어떤 테이블·컬럼·관계가 있는지 한눈에 파악하기 위한 기준 문서.
 > **원본:** `SHOW CREATE TABLE`(정보스키마) 기준 — 코드(`sql/*.sql`, `MigrateRunner.php`)가 아니라 **실제 서버 DB 상태**를 그대로 기술한다.
 > **갱신 규칙(필수):** 테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가 등 **스키마가 바뀌는 모든 작업에서 이 문서를 함께 갱신**한다. (`.cursor/rules/db-schema-sync.mdc`)
-> **최종 확인:** 2026-07-23, DB `my_web_db`, 테이블 27개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 반영 완료 시점)
+> **최종 확인:** 2026-07-24, DB `my_web_db`, 테이블 29개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 반영 완료 시점)
 
 ---
 
@@ -35,7 +35,8 @@ organizations (본사>총판>대리점, 자기참조 트리)
 
 riders ─┬─ rider_platforms     플랫폼(배민/쿠팡) 연동
         ├─ rider_wallets       임시 잔액(적립일수)
-        └─ deduction_entries   수동 차감(선지급 등)
+        ├─ deduction_entries   수동 차감(선지급 등)
+        └─ rider_debts ─ rider_debt_entries   부채 원장(대여금/리스/선지급) → deduction_entries 생성
 
 settlement_uploads → settlement_daily_riders → settlement_rider_cycles → settlement_fee_items
                                                         │
@@ -180,8 +181,14 @@ PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_f
 대리점 PG 결제 총 요율 = 대리점.pct + 상위총판.pct + 본사.pct (`PgFeeConfig::breakdownForAgency`).
 
 ### `deduction_entries` — 라이더별 수동 차감(선지급/대여금 등)
-`kind` varchar(자유값): `advance`(선지급, 🆕 2026-07-22 입력화면 완성) · `withholding`/`employment_ins`/`accident_ins`/`agency_fee`(수동 보정용) · `hourly_ins`/`ins_refund`/`rental`/`manual`.
+`kind` varchar(자유값): `advance`(선지급, 🆕 2026-07-22 입력화면 완성) · `loan`/`lease`(🆕 2026-07-24 부채원장이 생성) · `withholding`/`employment_ins`/`accident_ins`/`agency_fee`(수동 보정용) · `hourly_ins`/`ins_refund`/`rental`/`manual`.
 정산 반영 시 해당 `applied_date`의 항목이 자동으로 `settlement_fee_items`에 합산됨.
+
+### `rider_debts` — 🆕(2026-07-24) 라이더 부채 원장(대여금/리스/선지급)
+PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
+
+### `rider_debt_entries` — 🆕(2026-07-24) 부채 차감 이력
+차감 1회 = 1행. `applied_date`(차감 귀속일) · `days`(차감일수) · `amount`(차감액=일납×일수 또는 수동) · `balance_after`(차감후잔액) · `deduction_entry_id`(생성한 `deduction_entries` 연결). **핵심 연동**: 차감 실행 시 `deduction_entries` 행을 만들어 기존 `SettlementLedger::buildFeeItems` 흐름이 그대로 차감(중복 로직 없음). 이력 취소 시 연결된 `deduction_entries`도 삭제되고 상각형 잔액이 복구됨.
 
 ---
 
@@ -293,3 +300,4 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |
 | 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |
 | 2026-07-23 (2) | 배달의민족 정산서 지원. `settlement_daily_riders` UNIQUE를 `(upload_id,license_id)`→`(upload_id,license_id,settlement_date)`로 확장(배민 다중 운행일 대응, 인덱스명 `uq_sdr_upload_license_date`). 스키마 신규 테이블 없음 — 배민 주문을 기존 `settlement_daily_riders`/`settlement_order_details`에 집계·저장. |
+| 2026-07-24 | **라이더 부채 원장 신규.** `rider_debts`(대여금/리스/선지급 헤더: 원금·잔액·일납·채권자·상태) + `rider_debt_entries`(차감 이력) 추가 → **29개 테이블**. 라이더 정산명세서(PDF)의 대여금/리스/선지급 차감 명세 대응. 차감 실행 시 `deduction_entries`(kind=`loan`/`lease`/`advance`)를 생성해 기존 정산 반영 흐름이 그대로 차감. `sql/rider_debts.sql`, `inc/RiderDebt.php`, `admin/api/debt_action.php`, 라이더 상세 "부채" 카드. |
