@@ -76,11 +76,14 @@ final class Organization
 
         $rows = db_rows(
             "SELECT o.id, o.parent_id, o.level, o.code, o.name,
-                    o.contact_name, o.contact_phone, o.is_active, o.created_at,
+                    o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
+                    (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
                     (SELECT COUNT(*) FROM riders  r WHERE r.agency_id = o.id) AS rider_count,
-                    (SELECT a2.login_id FROM admins a2 WHERE a2.org_id = o.id ORDER BY a2.id ASC LIMIT 1) AS primary_login
+                    (SELECT COUNT(*) FROM riders  r2 WHERE r2.agency_id = o.id AND r2.status = 'active') AS active_rider_count,
+                    (SELECT a2.login_id FROM admins a2 WHERE a2.org_id = o.id ORDER BY a2.id ASC LIMIT 1) AS primary_login,
+                    (SELECT a3.role FROM admins a3 WHERE a3.org_id = o.id ORDER BY a3.id ASC LIMIT 1) AS primary_role
                FROM organizations o
                LEFT JOIN organizations p ON p.id = o.parent_id
               WHERE {$whereStr}
@@ -159,11 +162,14 @@ final class Organization
     {
         $row = db_row(
             "SELECT o.id, o.parent_id, o.level, o.code, o.name,
-                    o.contact_name, o.contact_phone, o.is_active, o.created_at,
+                    o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
+                    (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
                     (SELECT COUNT(*) FROM riders  r WHERE r.agency_id = o.id) AS rider_count,
-                    (SELECT a2.login_id FROM admins a2 WHERE a2.org_id = o.id ORDER BY a2.id ASC LIMIT 1) AS primary_login
+                    (SELECT COUNT(*) FROM riders  r2 WHERE r2.agency_id = o.id AND r2.status = 'active') AS active_rider_count,
+                    (SELECT a2.login_id FROM admins a2 WHERE a2.org_id = o.id ORDER BY a2.id ASC LIMIT 1) AS primary_login,
+                    (SELECT a3.role FROM admins a3 WHERE a3.org_id = o.id ORDER BY a3.id ASC LIMIT 1) AS primary_role
                FROM organizations o
                LEFT JOIN organizations p ON p.id = o.parent_id
               WHERE o.id = ? LIMIT 1",
@@ -205,6 +211,10 @@ final class Organization
 
         $code = strtoupper(trim((string) ($data['code'] ?? '')));
         $name = trim((string) ($data['name'] ?? ''));
+        // 코드 미입력 시 자동 생성 (레벨별 접두 + 순번, 중복 회피)
+        if ($code === '') {
+            $code = self::suggestCode($level);
+        }
         self::validateCode($code);
         if ($name === '') {
             throw new InvalidArgumentException('조직 이름을 입력하세요.');
@@ -252,6 +262,24 @@ final class Organization
                 [$loginId, $hash, $accName, $role, $orgId]
             );
 
+            // 신규 조직 기본값 시드 — 영업대행수수료 요율 1%(모든 조직), 대리점은 지갑·정산수수료 기본
+            if (db_table_exists('org_fee_config')) {
+                db_execute('INSERT IGNORE INTO org_fee_config (org_id, pg_service_fee_pct) VALUES (?, 1.00)', [$orgId]);
+            }
+            if ($level === Org::LEVEL_AGENCY) {
+                if (db_table_exists('agency_wallets')) {
+                    db_execute('INSERT IGNORE INTO agency_wallets (agency_id, balance, withholding_reserve) VALUES (?, 0, 0)', [$orgId]);
+                }
+                // 정산수수료 기본값(기준일수 7일·미만 80원·이상 40원)을 대리점 전용 행으로 세팅
+                if (db_table_exists('withdrawal_config')) {
+                    db_execute(
+                        'INSERT IGNORE INTO withdrawal_config (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long)
+                         VALUES (?, 50000, 7, 80, 40)',
+                        [$orgId]
+                    );
+                }
+            }
+
             return $orgId;
         });
 
@@ -265,7 +293,7 @@ final class Organization
     }
 
     /**
-     * 조직 기본 정보 수정 (이름·연락처). 레벨·상위·코드는 불변.
+     * 조직 기본 정보 수정 (이름·연락처·메모). 레벨·상위·코드는 불변. 계정은 addAccount/updateAccount로.
      *
      * @param array<string,mixed> $data
      * @return array<string,mixed>
@@ -280,10 +308,11 @@ final class Organization
         }
         $contactName  = trim((string) ($data['contact_name'] ?? ''));
         $contactPhone = trim((string) ($data['contact_phone'] ?? ''));
+        $memo         = mb_substr(trim((string) ($data['memo'] ?? '')), 0, 500);
 
         db_execute(
-            'UPDATE organizations SET name = ?, contact_name = ?, contact_phone = ?, updated_at = NOW() WHERE id = ?',
-            [$name, $contactName, $contactPhone, $id]
+            'UPDATE organizations SET name = ?, contact_name = ?, contact_phone = ?, memo = ?, updated_at = NOW() WHERE id = ?',
+            [$name, $contactName, $contactPhone, $memo, $id]
         );
 
         Org::clearCache();
@@ -316,6 +345,156 @@ final class Organization
         return $row;
     }
 
+    /**
+     * 조직 소속 계정 1건 반환 (관리 화면용). @return array<string,mixed>
+     */
+    private static function accountRow(int $orgId, int $accountId): array
+    {
+        $a = db_row(
+            'SELECT id, login_id, name, email, role, is_active, last_login_at FROM admins WHERE id = ? AND org_id = ? LIMIT 1',
+            [$accountId, $orgId]
+        );
+        if ($a === null) {
+            throw new InvalidArgumentException('이 조직 소속 계정이 아닙니다.');
+        }
+        $primaryId  = self::primaryAccountId($orgId);
+        $roleLabels = self::accountRoleLabels();
+        $role       = (string) $a['role'];
+
+        return [
+            'id'            => (int) $a['id'],
+            'login_id'      => (string) $a['login_id'],
+            'name'          => (string) $a['name'],
+            'email'         => (string) ($a['email'] ?? ''),
+            'role'          => $role,
+            'role_label'    => $roleLabels[$role] ?? $role,
+            'active'        => (int) $a['is_active'] === 1,
+            'is_primary'    => (int) $a['id'] === $primaryId,
+            'last_login_at' => $a['last_login_at'] ? date('Y-m-d H:i', strtotime((string) $a['last_login_at'])) : '',
+        ];
+    }
+
+    private static function primaryAccountId(int $orgId): int
+    {
+        $row = db_row('SELECT id FROM admins WHERE org_id = ? ORDER BY id ASC LIMIT 1', [$orgId]);
+
+        return $row !== null ? (int) $row['id'] : 0;
+    }
+
+    /**
+     * 조직에 역할별 계정 추가 (본사가 특정 총판·대리점에 서브계정 발급).
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public static function addAccount(int $orgId, array $data): array
+    {
+        self::assertManageable($orgId);
+        $org = Org::find($orgId);
+        if ($org === null || (string) $org['level'] === Org::LEVEL_ADMIN) {
+            throw new InvalidArgumentException('총판·대리점 조직만 계정을 추가할 수 있습니다.');
+        }
+
+        $loginId  = trim((string) ($data['login_id'] ?? ''));
+        $accName  = trim((string) ($data['name'] ?? ''));
+        $email    = trim((string) ($data['email'] ?? ''));
+        $role     = trim((string) ($data['role'] ?? ''));
+        $password = (string) ($data['password'] ?? '');
+
+        self::validateLoginId($loginId);
+        if ($accName === '') {
+            $accName = (string) $org['name'] . ' 담당자';
+        }
+        if (!in_array($role, self::ACCOUNT_ROLES, true)) {
+            throw new InvalidArgumentException('부여할 역할을 선택하세요.');
+        }
+        if (strlen($password) < 8) {
+            throw new InvalidArgumentException('비밀번호는 8자 이상이어야 합니다.');
+        }
+        if (db_row('SELECT id FROM admins WHERE login_id = ? LIMIT 1', [$loginId]) !== null) {
+            throw new InvalidArgumentException('이미 사용 중인 로그인 ID입니다.');
+        }
+
+        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+        $newId = db_insert(
+            'INSERT INTO admins (login_id, password_hash, name, email, role, org_id, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, 1)',
+            [$loginId, $hash, $accName, $email !== '' ? $email : null, $role, $orgId]
+        );
+
+        return self::accountRow($orgId, $newId);
+    }
+
+    /**
+     * 조직 계정 수정 (이름·역할·이메일·비밀번호 재설정). super 계정은 불가.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public static function updateAccount(int $orgId, int $accountId, array $data): array
+    {
+        self::assertManageable($orgId);
+        $target = db_row('SELECT id, role FROM admins WHERE id = ? AND org_id = ? LIMIT 1', [$accountId, $orgId]);
+        if ($target === null) {
+            throw new InvalidArgumentException('이 조직 소속 계정이 아닙니다.');
+        }
+        if ((string) $target['role'] === 'super') {
+            throw new InvalidArgumentException('최고 관리자 계정은 여기서 수정할 수 없습니다.');
+        }
+
+        $name     = trim((string) ($data['name'] ?? ''));
+        $email    = trim((string) ($data['email'] ?? ''));
+        $role     = trim((string) ($data['role'] ?? ''));
+        $password = (string) ($data['password'] ?? '');
+
+        if ($name === '') {
+            throw new InvalidArgumentException('이름을 입력하세요.');
+        }
+        if (!in_array($role, self::ACCOUNT_ROLES, true)) {
+            throw new InvalidArgumentException('역할을 선택하세요.');
+        }
+
+        $sets   = 'name = ?, email = ?, role = ?, updated_at = NOW()';
+        $params = [$name, $email !== '' ? $email : null, $role];
+        if ($password !== '') {
+            if (strlen($password) < 8) {
+                throw new InvalidArgumentException('비밀번호는 8자 이상이어야 합니다.');
+            }
+            $sets    .= ', password_hash = ?';
+            $params[] = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+        }
+        $params[] = $accountId;
+        db_execute("UPDATE admins SET {$sets} WHERE id = ?", $params);
+
+        return self::accountRow($orgId, $accountId);
+    }
+
+    /**
+     * 조직 계정 활성/비활성. 마지막 활성 계정은 비활성화 불가(로그인 보장).
+     *
+     * @return array<string,mixed>
+     */
+    public static function setAccountActive(int $orgId, int $accountId, bool $active): array
+    {
+        self::assertManageable($orgId);
+        $target = db_row('SELECT id, role, is_active FROM admins WHERE id = ? AND org_id = ? LIMIT 1', [$accountId, $orgId]);
+        if ($target === null) {
+            throw new InvalidArgumentException('이 조직 소속 계정이 아닙니다.');
+        }
+        if ((string) $target['role'] === 'super') {
+            throw new InvalidArgumentException('최고 관리자 계정은 변경할 수 없습니다.');
+        }
+        if (!$active) {
+            $activeCount = (int) (db_row('SELECT COUNT(*) AS c FROM admins WHERE org_id = ? AND is_active = 1', [$orgId])['c'] ?? 0);
+            if ($activeCount <= 1 && (int) $target['is_active'] === 1) {
+                throw new InvalidArgumentException('마지막 활성 계정은 비활성화할 수 없습니다. (조직 로그인이 불가능해집니다)');
+            }
+        }
+        db_execute('UPDATE admins SET is_active = ?, updated_at = NOW() WHERE id = ?', [$active ? 1 : 0, $accountId]);
+
+        return self::accountRow($orgId, $accountId);
+    }
+
     private static function assertManageable(int $id): void
     {
         $ids = self::manageableOrgIds();
@@ -337,22 +516,187 @@ final class Organization
         $level   = (string) ($row['level'] ?? '');
         $created = $row['created_at'] ?? null;
 
+        $primaryRole = (string) ($row['primary_role'] ?? '');
+        $roleLabels  = self::accountRoleLabels();
+
         return [
-            'id'            => (int) ($row['id'] ?? 0),
-            'parent_id'     => $row['parent_id'] !== null ? (int) $row['parent_id'] : null,
-            'parent_name'   => (string) ($row['parent_name'] ?? ''),
-            'level'         => $level,
-            'level_label'   => Org::levelLabel($level),
-            'code'          => (string) ($row['code'] ?? ''),
-            'name'          => (string) ($row['name'] ?? ''),
-            'contact_name'  => (string) ($row['contact_name'] ?? ''),
-            'contact_phone' => (string) ($row['contact_phone'] ?? ''),
-            'active'        => (int) ($row['is_active'] ?? 0) === 1,
-            'account_count' => (int) ($row['account_count'] ?? 0),
-            'rider_count'   => (int) ($row['rider_count'] ?? 0),
-            'primary_login' => (string) ($row['primary_login'] ?? ''),
-            'created_at'    => $created ? date('Y-m-d', strtotime((string) $created)) : '',
+            'id'                   => (int) ($row['id'] ?? 0),
+            'parent_id'            => $row['parent_id'] !== null ? (int) $row['parent_id'] : null,
+            'parent_name'          => (string) ($row['parent_name'] ?? ''),
+            'level'                => $level,
+            'level_label'          => Org::levelLabel($level),
+            'code'                 => (string) ($row['code'] ?? ''),
+            'name'                 => (string) ($row['name'] ?? ''),
+            'contact_name'         => (string) ($row['contact_name'] ?? ''),
+            'contact_phone'        => (string) ($row['contact_phone'] ?? ''),
+            'memo'                 => (string) ($row['memo'] ?? ''),
+            'active'               => (int) ($row['is_active'] ?? 0) === 1,
+            'account_count'        => (int) ($row['account_count'] ?? 0),
+            'active_account_count' => (int) ($row['active_account_count'] ?? 0),
+            'rider_count'          => (int) ($row['rider_count'] ?? 0),
+            'active_rider_count'   => (int) ($row['active_rider_count'] ?? 0),
+            'primary_login'        => (string) ($row['primary_login'] ?? ''),
+            'primary_role'         => $primaryRole,
+            'primary_role_label'   => $primaryRole !== '' ? ($roleLabels[$primaryRole] ?? $primaryRole) : '',
+            'created_at'           => $created ? date('Y-m-d', strtotime((string) $created)) : '',
         ];
+    }
+
+    /**
+     * 레벨별 조직 코드 자동 생성 — 접두(DIST/AG) + 4자리 순번, 중복 회피.
+     */
+    public static function suggestCode(string $level): string
+    {
+        $prefix = $level === Org::LEVEL_DISTRIBUTOR ? 'DIST' : 'AG';
+
+        // 같은 접두를 가진 기존 코드의 최대 순번 +1에서 시작
+        $rows = db_rows(
+            "SELECT code FROM organizations WHERE code LIKE ?",
+            [$prefix . '-%']
+        );
+        $max = 0;
+        foreach ($rows as $r) {
+            if (preg_match('/^' . $prefix . '-(\d+)$/', (string) $r['code'], $m)) {
+                $max = max($max, (int) $m[1]);
+            }
+        }
+        $seq = $max + 1;
+
+        // 만일을 대비한 중복 회피 루프
+        do {
+            $code   = sprintf('%s-%04d', $prefix, $seq);
+            $exists = db_row('SELECT id FROM organizations WHERE code = ? LIMIT 1', [$code]);
+            $seq++;
+        } while ($exists !== null && $seq < $max + 1000);
+
+        return $code;
+    }
+
+    /**
+     * 조직 상세 — 기본정보 + 소속 계정 목록 + (대리점) 라이더/지갑/설정 요약, (총판) 하위 대리점.
+     *
+     * @return array<string,mixed>
+     */
+    public static function detail(int $id): array
+    {
+        self::assertManageable($id);
+
+        $org = self::find($id);
+        if ($org === null) {
+            throw new InvalidArgumentException('조직을 찾을 수 없습니다.');
+        }
+
+        // 소속 계정
+        $primaryId  = 0;
+        $roleLabels = self::accountRoleLabels();
+        $accRows    = db_rows(
+            'SELECT id, login_id, name, email, role, is_active, last_login_at, created_at
+               FROM admins WHERE org_id = ? ORDER BY id ASC',
+            [$id]
+        );
+        $accounts = [];
+        foreach ($accRows as $i => $a) {
+            if ($i === 0) {
+                $primaryId = (int) $a['id'];
+            }
+            $role = (string) $a['role'];
+            $accounts[] = [
+                'id'            => (int) $a['id'],
+                'login_id'      => (string) $a['login_id'],
+                'name'          => (string) $a['name'],
+                'email'         => (string) ($a['email'] ?? ''),
+                'role'          => $role,
+                'role_label'    => $roleLabels[$role] ?? $role,
+                'active'        => (int) $a['is_active'] === 1,
+                'is_primary'    => (int) $a['id'] === $primaryId,
+                'last_login_at' => $a['last_login_at'] ? date('Y-m-d H:i', strtotime((string) $a['last_login_at'])) : '',
+            ];
+        }
+
+        $detail = [
+            'org'      => $org,
+            'accounts' => $accounts,
+        ];
+
+        if ($org['level'] === Org::LEVEL_AGENCY) {
+            // 라이더 상태 분해
+            $statusRows = db_rows(
+                "SELECT status, COUNT(*) AS c FROM riders WHERE agency_id = ? GROUP BY status",
+                [$id]
+            );
+            $riderStatus = ['active' => 0, 'suspended' => 0, 'leave_request' => 0, 'offboarded' => 0];
+            foreach ($statusRows as $s) {
+                $riderStatus[(string) $s['status']] = (int) $s['c'];
+            }
+
+            // 지갑 · 설정 요약 (있으면)
+            $wallet = null;
+            if (class_exists('AgencyWallet') || is_file(INC_PATH . '/AgencyWallet.php')) {
+                require_once INC_PATH . '/AgencyWallet.php';
+                if (AgencyWallet::tableExists()) {
+                    $wallet = AgencyWallet::withdrawable($id);
+                }
+            }
+
+            $feeCfg = null;
+            if (is_file(INC_PATH . '/WithdrawalConfig.php')) {
+                require_once INC_PATH . '/WithdrawalConfig.php';
+                $feeCfg = WithdrawalConfig::get($id);
+            }
+
+            $pgFee = null;
+            if (is_file(INC_PATH . '/PgFeeConfig.php')) {
+                require_once INC_PATH . '/PgFeeConfig.php';
+                $pgFee = PgFeeConfig::breakdownForAgency($id);
+            }
+
+            $cardCount = db_table_exists('agency_cards')
+                ? (int) (db_row('SELECT COUNT(*) AS c FROM agency_cards WHERE agency_id = ? AND is_active = 1', [$id])['c'] ?? 0)
+                : 0;
+            $hasBank = db_table_exists('agency_bank_accounts')
+                && db_row('SELECT agency_id FROM agency_bank_accounts WHERE agency_id = ? LIMIT 1', [$id]) !== null;
+            $uploadCount = db_table_exists('settlement_uploads')
+                ? (int) (db_row('SELECT COUNT(*) AS c FROM settlement_uploads WHERE agency_id = ?', [$id])['c'] ?? 0)
+                : 0;
+            $withholdingRiders = (int) (db_row('SELECT COUNT(*) AS c FROM riders WHERE agency_id = ? AND withholding_tax_enabled = 1', [$id])['c'] ?? 0);
+
+            $detail['agency'] = [
+                'rider_status'        => $riderStatus,
+                'wallet'              => $wallet,
+                'fee_config'          => $feeCfg,
+                'pg_fee'              => $pgFee,
+                'card_count'          => $cardCount,
+                'has_bank_account'    => $hasBank,
+                'upload_count'        => $uploadCount,
+                'withholding_riders'  => $withholdingRiders,
+            ];
+        } elseif ($org['level'] === Org::LEVEL_DISTRIBUTOR) {
+            $children = db_rows(
+                "SELECT o.id, o.code, o.name, o.is_active,
+                        (SELECT COUNT(*) FROM riders r WHERE r.agency_id = o.id) AS rider_count,
+                        (SELECT COUNT(*) FROM riders r2 WHERE r2.agency_id = o.id AND r2.status = 'active') AS active_rider_count
+                   FROM organizations o
+                  WHERE o.parent_id = ? AND o.level = 'agency'
+                  ORDER BY o.name ASC",
+                [$id]
+            );
+            $childList = array_map(static fn (array $c): array => [
+                'id'                 => (int) $c['id'],
+                'code'               => (string) $c['code'],
+                'name'               => (string) $c['name'],
+                'active'             => (int) $c['is_active'] === 1,
+                'rider_count'        => (int) $c['rider_count'],
+                'active_rider_count' => (int) $c['active_rider_count'],
+            ], $children);
+
+            $detail['distributor'] = [
+                'agency_count'     => count($childList),
+                'total_riders'     => array_sum(array_column($childList, 'rider_count')),
+                'children'         => $childList,
+            ];
+        }
+
+        return $detail;
     }
 
     private static function validateCode(string $code): void

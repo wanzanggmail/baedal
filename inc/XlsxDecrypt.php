@@ -913,6 +913,7 @@ final class XlsxDecrypt
 
         $roots = [
             getenv('LOCALAPPDATA') . '\\Programs\\Python',
+            getenv('LOCALAPPDATA') . '\\Python',
             'C:\\Python312',
             'C:\\Python311',
             'C:\\Python310',
@@ -932,6 +933,29 @@ final class XlsxDecrypt
                 if (!in_array($exe, $found, true)) {
                     $found[] = $exe;
                 }
+            }
+            // python.org / Windows Store: ...\Python\pythoncore-3.xx-64\python.exe
+            $glob = glob($root . '\\pythoncore-*\\python.exe') ?: [];
+            foreach ($glob as $exe) {
+                if (!in_array($exe, $found, true)) {
+                    $found[] = $exe;
+                }
+            }
+            $bin = $root . '\\bin\\python.exe';
+            if (is_file($bin) && !in_array($bin, $found, true)) {
+                $found[] = $bin;
+            }
+        }
+
+        // Apache가 SYSTEM으로 돌면 LOCALAPPDATA가 시스템 프로필이라, 사용자 설치본을 직접 탐색
+        foreach (glob('C:\\Users\\*\\AppData\\Local\\Python\\pythoncore-*\\python.exe') ?: [] as $exe) {
+            if (!in_array($exe, $found, true)) {
+                $found[] = $exe;
+            }
+        }
+        foreach (glob('C:\\Users\\*\\AppData\\Local\\Python\\bin\\python.exe') ?: [] as $exe) {
+            if (!in_array($exe, $found, true)) {
+                $found[] = $exe;
             }
         }
 

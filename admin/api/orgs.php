@@ -38,6 +38,29 @@ $err = static function (string $msg, int $code = 422): never {
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
+    // 상세 조회: ?detail=<orgId>
+    $detailId = (int) ($_GET['detail'] ?? 0);
+    if ($detailId > 0) {
+        try {
+            echo json_encode(['ok' => true, 'detail' => Organization::detail($detailId)], JSON_UNESCAPED_UNICODE);
+        } catch (InvalidArgumentException $e) {
+            $err($e->getMessage(), 404);
+        } catch (Throwable $e) {
+            $err('상세 조회 실패: ' . $e->getMessage(), 500);
+        }
+        exit;
+    }
+
+    // 코드 자동 추천: ?suggest_code=<level>
+    $suggestLevel = trim((string) ($_GET['suggest_code'] ?? ''));
+    if ($suggestLevel !== '') {
+        if (!in_array($suggestLevel, [Org::LEVEL_DISTRIBUTOR, Org::LEVEL_AGENCY], true)) {
+            $err('레벨이 올바르지 않습니다.', 400);
+        }
+        echo json_encode(['ok' => true, 'code' => Organization::suggestCode($suggestLevel)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     try {
         $rows = Organization::listManageable();
         echo json_encode(['ok' => true, 'rows' => $rows, 'count' => count($rows)], JSON_UNESCAPED_UNICODE);
@@ -79,8 +102,35 @@ try {
         exit;
     }
 
+    // 조직 소속 계정 관리 (본사가 특정 총판·대리점 계정 CRUD)
+    if ($action === 'account_add') {
+        $orgId = (int) ($body['org_id'] ?? 0);
+        $acc   = Organization::addAccount($orgId, $body);
+        AuditLog::record('admin.create', (string) $acc['id'], sprintf('조직#%d 계정 추가 · %s (%s)', $orgId, (string) $acc['login_id'], (string) $acc['role_label']));
+        echo json_encode(['ok' => true, 'message' => '계정이 추가되었습니다.', 'account' => $acc], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($action === 'account_update') {
+        $orgId = (int) ($body['org_id'] ?? 0);
+        $acc   = Organization::updateAccount($orgId, (int) ($body['account_id'] ?? 0), $body);
+        AuditLog::record('admin.update', (string) $acc['id'], sprintf('조직#%d 계정 수정 · %s (%s)', $orgId, (string) $acc['login_id'], (string) $acc['role_label']));
+        echo json_encode(['ok' => true, 'message' => '계정이 수정되었습니다.', 'account' => $acc], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($action === 'account_toggle') {
+        $orgId  = (int) ($body['org_id'] ?? 0);
+        $active = filter_var($body['active'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($active === null) {
+            $err('active 값이 올바르지 않습니다.');
+        }
+        $acc = Organization::setAccountActive($orgId, (int) ($body['account_id'] ?? 0), $active);
+        AuditLog::record('admin.update', (string) $acc['id'], sprintf('조직#%d 계정 %s · %s', $orgId, $active ? '활성화' : '비활성화', (string) $acc['login_id']));
+        echo json_encode(['ok' => true, 'message' => '변경되었습니다.', 'account' => $acc], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($action !== 'save') {
-        $err('action=save 또는 toggle_active', 400);
+        $err('action=save 또는 toggle_active / account_*', 400);
     }
 
     $editId = (int) ($body['id'] ?? 0);

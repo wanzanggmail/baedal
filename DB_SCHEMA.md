@@ -69,6 +69,8 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 
 - 코드: `inc/Organization.php`, `inc/Org.php`(스코핑 엔진)
 - 규칙: **조직 생성은 본사만**(2026-07 재설계, `admin_can_manage_orgs()`)
+- 코드 자동생성: `Organization::suggestCode()`(레벨별 `DIST-`/`AG-` 접두 + 4자리 순번). `create()`에 코드 미입력 시 서버가 자동 채움.
+- **생성 시 설정 시딩**(2026-07-23): `create()`가 신규 조직에 `org_fee_config`(1%) 행을, 대리점이면 추가로 `agency_wallets`(0)·`withdrawal_config`(7/80/40) 행을 함께 생성 → 이 config 테이블들의 org행은 조직 생성 시점에 존재하게 됨(기존엔 migrate 백필 or 없으면 전역 폴백).
 
 ### `admins` — 관리자 계정
 | 컬럼 | 설명 |
@@ -259,7 +261,7 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 
 | 테이블 | 주 도메인 클래스 |
 |---|---|
-| `organizations` | `Organization`, `Org`(스코핑) |
+| `organizations` | `Organization`(CRUD·`detail()`·`suggestCode()`·생성시 config 시딩), `Org`(스코핑) |
 | `admins` | `AdminAccount`(전체), `OrgAccount`(조직 서브계정) |
 | `riders`, `rider_platforms` | (라이더 CRUD — `admin/api/riders.php`, `rider_action.php`) |
 | `rider_wallets` | `RiderWallet` |
