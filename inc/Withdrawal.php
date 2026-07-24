@@ -315,7 +315,7 @@ final class Withdrawal
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $rows = db_rows(
-            "SELECT id, rider_id, kind, withhold_min_retain, status
+            "SELECT id, rider_id, kind, amount, withhold_other, withhold_min_retain, status
                FROM withdrawal_requests
               WHERE id IN ({$placeholders}) AND status = 'downloaded'",
             $ids
@@ -339,9 +339,11 @@ final class Withdrawal
                 }
                 $completed++;
                 if ((string) ($row['kind'] ?? '') === 'rider_manual') {
-                    RiderWallet::finalizeAfterComplete(
+                    // 지갑에서 실제로 빠지는 총액 = 실지급액 + 정산수수료(withhold_other).
+                    // 보증금(withhold_min_retain)은 지급하지 않고 지갑에 남는 몫이라 차감 대상이 아니다.
+                    RiderWallet::deductAfterWithdrawal(
                         (int) $row['rider_id'],
-                        (int) ($row['withhold_min_retain'] ?? 0)
+                        (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
                     );
                 }
             }

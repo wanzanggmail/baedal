@@ -1,0 +1,519 @@
+<?php
+
+declare(strict_types=1);
+
+require_once INC_PATH . '/RiderDebt.php';
+
+$debtApi  = ADMIN_BASE . '/api/debt_action.php';
+$riderApi = ADMIN_BASE . '/api/riders.php';
+$canWrite = admin_can_write('deduction');
+$needsMigrate = !RiderDebt::tableReady();
+
+$filterKind   = trim((string) ($_GET['kind']   ?? ''));
+$filterStatus = trim((string) ($_GET['status'] ?? ''));
+$filterQ      = trim((string) ($_GET['q']      ?? ''));
+
+$rows = [];
+$kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0];
+
+if (!$needsMigrate) {
+    [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+
+    $where  = ['1=1'];
+    $params = [];
+    if ($scopeSql !== '') {
+        $where[] = $scopeSql;
+        $params  = array_merge($params, $scopeParams);
+    }
+    if (isset(RiderDebt::KINDS[$filterKind])) { $where[] = 'd.kind = ?';   $params[] = $filterKind; }
+    if (in_array($filterStatus, ['active', 'paused', 'closed'], true)) { $where[] = 'd.status = ?'; $params[] = $filterStatus; }
+    if ($filterQ !== '') {
+        $like    = '%' . $filterQ . '%';
+        $where[] = '(r.name LIKE ? OR r.rider_code LIKE ? OR d.title LIKE ? OR d.creditor LIKE ?)';
+        $params  = array_merge($params, [$like, $like, $like, $like]);
+    }
+    $whereStr = implode(' AND ', $where);
+
+    $rows = db_rows(
+        "SELECT d.*, r.id AS rider_id, r.name AS rider_name, r.rider_code, o.name AS agency_name,
+                (SELECT COUNT(*) FROM rider_debt_entries e WHERE e.debt_id = d.id) AS entry_count
+           FROM rider_debts d
+           INNER JOIN riders r ON r.id = d.rider_id
+           LEFT JOIN organizations o ON o.id = r.agency_id
+          WHERE {$whereStr}
+          ORDER BY (d.status = 'active') DESC, d.id DESC
+          LIMIT 300",
+        $params
+    );
+
+    // KPI — 필터와 무관하게 스코프 전체 기준
+    $kWhere  = $scopeSql !== '' ? ' AND ' . $scopeSql : '';
+    $k = db_row(
+        "SELECT
+            SUM(CASE WHEN d.status = 'active' THEN 1 ELSE 0 END) AS active_cnt,
+            SUM(CASE WHEN d.status = 'active' AND d.kind IN ('loan','advance') THEN d.balance_amount ELSE 0 END) AS balance_sum,
+            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' THEN d.daily_amount ELSE 0 END) AS lease_daily,
+            SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt
+           FROM rider_debts d INNER JOIN riders r ON r.id = d.rider_id
+          WHERE 1=1 {$kWhere}",
+        $scopeParams
+    ) ?: [];
+    $kpi = [
+        'active'      => (int) ($k['active_cnt']  ?? 0),
+        'balance'     => (int) ($k['balance_sum'] ?? 0),
+        'lease_daily' => (int) ($k['lease_daily'] ?? 0),
+        'closed'      => (int) ($k['closed_cnt']  ?? 0),
+    ];
+}
+
+$kindBadge   = ['loan' => 'primary', 'lease' => 'warning', 'advance' => 'info'];
+$statusLabel = ['active' => '진행 중', 'paused' => '일시중지', 'closed' => '완납/종료'];
+$won = static fn ($n): string => number_format((int) $n) . '원';
+
+$riderDetailBase = admin_url('riders/detail');
+$riderDetailBase .= str_contains($riderDetailBase, '?') ? '&id=' : '?id=';
+$currentUrl = admin_url('deduction/debts');
+?>
+<!--begin::Toolbar-->
+<div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
+	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
+		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
+			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">대여금 · 리스 원장</h1>
+			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
+				<li class="breadcrumb-item text-muted"><a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a></li>
+				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
+				<li class="breadcrumb-item text-gray-900">대여금·리스·선지급</li>
+			</ul>
+		</div>
+		<?php if ($canWrite && !$needsMigrate): ?>
+		<div class="d-flex gap-2">
+			<button type="button" class="btn btn-sm btn-primary fw-bold" id="btn_debt_new">
+				<i class="ki-duotone ki-plus fs-4"></i>부채 등록
+			</button>
+		</div>
+		<?php endif; ?>
+	</div>
+</div>
+<!--end::Toolbar-->
+<?php require_once INC_PATH . '/app_content_open.php'; ?>
+
+	<?php if ($needsMigrate): ?>
+	<div class="alert alert-warning p-5">부채 원장 테이블이 아직 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
+	<?php else: ?>
+
+	<div id="debt_toast" class="alert alert-dismissible d-none mb-6"><span id="debt_toast_msg"></span></div>
+
+	<!--begin::KPI-->
+	<div class="row g-5 g-xl-8 mb-8">
+		<div class="col-xl-3 col-md-6">
+			<div class="card card-flush h-100"><div class="card-body py-6">
+				<div class="text-gray-500 fw-semibold fs-7 mb-1">진행 중 부채</div>
+				<div class="fw-bold fs-2 text-gray-900"><?= number_format($kpi['active']) ?>건</div>
+			</div></div>
+		</div>
+		<div class="col-xl-3 col-md-6">
+			<div class="card card-flush h-100"><div class="card-body py-6">
+				<div class="text-gray-500 fw-semibold fs-7 mb-1">총 미상환 잔액 <span class="text-muted fs-8">(대여금·선지급)</span></div>
+				<div class="fw-bold fs-2 text-danger"><?= $won($kpi['balance']) ?></div>
+			</div></div>
+		</div>
+		<div class="col-xl-3 col-md-6">
+			<div class="card card-flush h-100"><div class="card-body py-6">
+				<div class="text-gray-500 fw-semibold fs-7 mb-1">리스 일납 합계 <span class="text-muted fs-8">(1일)</span></div>
+				<div class="fw-bold fs-2 text-warning"><?= $won($kpi['lease_daily']) ?></div>
+			</div></div>
+		</div>
+		<div class="col-xl-3 col-md-6">
+			<div class="card card-flush h-100"><div class="card-body py-6">
+				<div class="text-gray-500 fw-semibold fs-7 mb-1">완납/종료</div>
+				<div class="fw-bold fs-2 text-gray-600"><?= number_format($kpi['closed']) ?>건</div>
+			</div></div>
+		</div>
+	</div>
+	<!--end::KPI-->
+
+	<!--begin::Filter-->
+	<form method="get" action="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>">
+		<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL): ?>
+		<input type="hidden" name="route" value="deduction/debts" />
+		<?php endif; ?>
+		<div class="card card-flush mb-8"><div class="card-body py-5">
+			<div class="row g-4 align-items-end">
+				<div class="col-md-4">
+					<label class="form-label fw-semibold">검색</label>
+					<input type="text" class="form-control form-control-solid" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="라이더명·코드·항목·채권자" />
+				</div>
+				<div class="col-md-2">
+					<label class="form-label fw-semibold">종류</label>
+					<select class="form-select form-select-solid" name="kind">
+						<option value="">전체</option>
+						<?php foreach (RiderDebt::KINDS as $k => $lbl): ?>
+						<option value="<?= htmlspecialchars($k, ENT_QUOTES, 'UTF-8') ?>" <?= $filterKind === $k ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<div class="col-md-2">
+					<label class="form-label fw-semibold">상태</label>
+					<select class="form-select form-select-solid" name="status">
+						<option value="">전체</option>
+						<?php foreach ($statusLabel as $k => $lbl): ?>
+						<option value="<?= htmlspecialchars($k, ENT_QUOTES, 'UTF-8') ?>" <?= $filterStatus === $k ? 'selected' : '' ?>><?= htmlspecialchars($lbl, ENT_QUOTES, 'UTF-8') ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<div class="col-md-4 d-flex gap-2 justify-content-md-end">
+					<button type="submit" class="btn btn-primary">필터 적용</button>
+					<a href="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light">초기화</a>
+				</div>
+			</div>
+		</div></div>
+	</form>
+	<!--end::Filter-->
+
+	<div class="card card-flush">
+		<div class="card-header pt-5">
+			<h3 class="card-title fw-bold m-0">부채 목록 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($rows)) ?>건</span></h3>
+		</div>
+		<div class="card-body pt-2">
+			<?php if (empty($rows)): ?>
+			<div class="text-center text-gray-500 py-10">
+				<?= ($filterQ !== '' || $filterKind !== '' || $filterStatus !== '') ? '조건에 맞는 부채가 없습니다.' : '등록된 대여금·리스·선지급이 없습니다. 우측 상단 「부채 등록」으로 추가하세요.' ?>
+			</div>
+			<?php else: ?>
+			<div class="table-responsive">
+				<table class="table table-row-bordered table-row-gray-300 align-middle gy-3">
+					<thead>
+						<tr class="fw-bold text-muted fs-7">
+							<th class="min-w-140px">라이더</th>
+							<th class="min-w-100px">종류 · 항목</th>
+							<th class="text-end min-w-90px">원금</th>
+							<th class="text-end min-w-90px">남은 잔액</th>
+							<th class="text-end min-w-80px">일납</th>
+							<th class="min-w-90px">채권자</th>
+							<th class="min-w-90px">미납갱신</th>
+							<th class="min-w-80px">상태</th>
+							<th class="text-end min-w-140px">관리</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ($rows as $d):
+							$dk = (string) $d['kind'];
+							$isAmort = in_array($dk, ['loan', 'advance'], true);
+						?>
+						<tr>
+							<td>
+								<a href="<?= htmlspecialchars($riderDetailBase . (int) $d['rider_id'], ENT_QUOTES, 'UTF-8') ?>" class="fw-bold text-gray-900 text-hover-primary"><?= htmlspecialchars((string) $d['rider_name'], ENT_QUOTES, 'UTF-8') ?></a>
+								<div class="text-muted fs-8 font-monospace"><?= htmlspecialchars((string) $d['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+							</td>
+							<td>
+								<span class="badge badge-light-<?= $kindBadge[$dk] ?? 'secondary' ?> mb-1"><?= htmlspecialchars(RiderDebt::kindLabel($dk), ENT_QUOTES, 'UTF-8') ?></span>
+								<div class="text-gray-800 fs-7"><?= htmlspecialchars((string) ($d['title'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></div>
+							</td>
+							<td class="text-end text-gray-700"><?= $isAmort ? $won($d['principal_amount']) : '—' ?></td>
+							<td class="text-end fw-bold <?= $isAmort && (int) $d['balance_amount'] > 0 ? 'text-danger' : 'text-gray-500' ?>"><?= $isAmort ? $won($d['balance_amount']) : '—' ?></td>
+							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $won($d['daily_amount']) : '—' ?></td>
+							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) ($d['due_updated_on'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
+							<td><span class="badge badge-light-<?= $d['status'] === 'active' ? 'success' : ($d['status'] === 'closed' ? 'dark' : 'warning') ?> fs-8"><?= htmlspecialchars($statusLabel[$d['status']] ?? $d['status'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td class="text-end text-nowrap">
+								<?php if ($canWrite && $d['status'] === 'active'): ?>
+								<button type="button" class="btn btn-sm btn-light-danger py-1 px-3 debt-repay-btn"
+									data-id="<?= (int) $d['id'] ?>" data-kind="<?= htmlspecialchars($dk, ENT_QUOTES, 'UTF-8') ?>"
+									data-title="<?= htmlspecialchars((string) ($d['title'] ?: RiderDebt::kindLabel($dk)), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars((string) $d['rider_name'], ENT_QUOTES, 'UTF-8') ?>"
+									data-daily="<?= (int) $d['daily_amount'] ?>" data-balance="<?= (int) $d['balance_amount'] ?>">차감</button>
+								<?php endif; ?>
+								<?php if ($canWrite): ?>
+								<button type="button" class="btn btn-sm btn-icon btn-light-warning debt-edit-btn"
+									data-id="<?= (int) $d['id'] ?>" data-title="<?= htmlspecialchars((string) $d['title'], ENT_QUOTES, 'UTF-8') ?>"
+									data-daily="<?= (int) $d['daily_amount'] ?>" data-creditor="<?= htmlspecialchars((string) $d['creditor'], ENT_QUOTES, 'UTF-8') ?>"
+									data-balance="<?= (int) $d['balance_amount'] ?>" data-status="<?= htmlspecialchars((string) $d['status'], ENT_QUOTES, 'UTF-8') ?>"
+									data-amort="<?= $isAmort ? 1 : 0 ?>" title="수정">
+									<i class="ki-duotone ki-pencil fs-5"><span class="path1"></span><span class="path2"></span></i>
+								</button>
+								<?php endif; ?>
+								<a href="<?= htmlspecialchars($riderDetailBase . (int) $d['rider_id'], ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light py-1 px-3" title="이력은 라이더 상세에서">이력 <?= (int) $d['entry_count'] ?></a>
+							</td>
+						</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+			<?php endif; ?>
+			<div class="text-muted fs-8 mt-3">차감을 실행하면 해당 귀속일의 정산 반영 시 자동으로 차감됩니다. 리스/렌탈은 일납×일수만큼 매 정산 부과되며 잔액은 줄지 않습니다. 차감 이력·취소는 라이더 상세의 「부채」 카드에서 확인합니다.</div>
+		</div>
+	</div>
+
+	<?php if ($canWrite): ?>
+	<!--begin::New Modal-->
+	<div class="modal fade" id="kt_debt_new_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-650px"><div class="modal-content">
+			<div class="modal-header"><h2 class="fw-bold">부채 등록</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+			<div class="modal-body py-lg-8 px-lg-10">
+				<div id="debt_new_alert" class="d-none mb-4"></div>
+				<div class="mb-4">
+					<label class="form-label fs-7 fw-semibold required">라이더</label>
+					<div class="input-group">
+						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_rider_q" placeholder="이름 또는 라이더코드" />
+						<button class="btn btn-sm btn-light-primary" type="button" id="dn_rider_search">검색</button>
+					</div>
+					<select class="form-select form-select-sm form-select-solid mt-2 d-none" id="dn_rider_sel" size="4"></select>
+					<input type="hidden" id="dn_rider_id" />
+					<div class="form-text fs-8" id="dn_rider_picked"></div>
+				</div>
+				<div class="row g-4">
+					<div class="col-md-4">
+						<label class="form-label fs-7 fw-semibold required">종류</label>
+						<select class="form-select form-select-sm form-select-solid" id="dn_kind">
+							<option value="loan">대여금</option>
+							<option value="lease">리스/렌탈</option>
+							<option value="advance">선지급금</option>
+						</select>
+					</div>
+					<div class="col-md-8">
+						<label class="form-label fs-7 fw-semibold">항목명</label>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_title" maxlength="120" placeholder="예: 차량대여금, 오토바이리스" />
+					</div>
+					<div class="col-md-6" id="dn_principal_wrap">
+						<label class="form-label fs-7 fw-semibold">원금(대여금·선지급)</label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="dn_principal" min="0" step="1000" placeholder="예: 1250000" />
+						<div class="form-text fs-8">남은 잔액의 시작값. 리스는 불필요.</div>
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">일납금액</label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="dn_daily" min="0" step="100" placeholder="예: 24000" />
+						<div class="form-text fs-8">차감 시 일납×일수로 자동 계산.</div>
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_creditor" maxlength="120" placeholder="예: 본사, XX리스" />
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">개시일/출고일</label>
+						<input type="date" class="form-control form-control-sm form-control-solid" id="dn_opened" />
+					</div>
+					<div class="col-12">
+						<label class="form-label fs-7 fw-semibold">메모</label>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_note" maxlength="255" />
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary" id="dn_save">등록</button></div>
+		</div></div>
+	</div>
+	<!--end::New Modal-->
+
+	<!--begin::Repay Modal-->
+	<div class="modal fade" id="kt_debt_repay_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-500px"><div class="modal-content">
+			<div class="modal-header"><h2 class="fw-bold">차감 실행</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+			<div class="modal-body py-lg-8 px-lg-10">
+				<div id="debt_repay_alert" class="d-none mb-4"></div>
+				<input type="hidden" id="dr_debt_id" />
+				<div class="mb-4 p-3 bg-light-primary rounded fs-7">
+					<span id="dr_title" class="fw-bold"></span>
+					<span class="text-muted ms-2">남은 잔액 <span id="dr_balance" class="fw-bold"></span></span>
+				</div>
+				<div class="row g-4">
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold required">차감 귀속일</label>
+						<input type="date" class="form-control form-control-sm form-control-solid" id="dr_date" value="<?= date('Y-m-d') ?>" />
+						<div class="form-text fs-8">이 날짜의 정산 반영 시 차감됩니다.</div>
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">차감일수</label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="dr_days" min="0" value="7" />
+					</div>
+					<div class="col-12">
+						<label class="form-label fs-7 fw-semibold">차감액 <span class="text-muted fs-8">(비우면 일납×일수)</span></label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="dr_amount" min="0" step="100" placeholder="자동 계산" />
+						<div class="form-text fs-8" id="dr_hint"></div>
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger" id="dr_save">차감</button></div>
+		</div></div>
+	</div>
+	<!--end::Repay Modal-->
+
+	<!--begin::Edit Modal-->
+	<div class="modal fade" id="kt_debt_edit_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-500px"><div class="modal-content">
+			<div class="modal-header"><h2 class="fw-bold">부채 수정</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+			<div class="modal-body py-lg-8 px-lg-10">
+				<div id="debt_edit_alert" class="d-none mb-4"></div>
+				<input type="hidden" id="de_debt_id" />
+				<div class="row g-4">
+					<div class="col-12">
+						<label class="form-label fs-7 fw-semibold">항목명</label>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="de_title" maxlength="120" />
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">일납금액</label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="de_daily" min="0" step="100" />
+					</div>
+					<div class="col-md-6" id="de_balance_wrap">
+						<label class="form-label fs-7 fw-semibold">남은 잔액 보정</label>
+						<input type="number" class="form-control form-control-sm form-control-solid" id="de_balance" min="0" step="1000" />
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="de_creditor" maxlength="120" />
+					</div>
+					<div class="col-md-6">
+						<label class="form-label fs-7 fw-semibold">상태</label>
+						<select class="form-select form-select-sm form-select-solid" id="de_status">
+							<option value="active">진행 중</option>
+							<option value="paused">일시중지</option>
+							<option value="closed">완납/종료</option>
+						</select>
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary" id="de_save">저장</button></div>
+		</div></div>
+	</div>
+	<!--end::Edit Modal-->
+	<?php endif; ?>
+
+	<script>
+	(function () {
+		var DEBT_API  = <?= json_encode($debtApi, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+		var RIDER_API = <?= json_encode($riderApi, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+		var canWrite  = <?= $canWrite ? 'true' : 'false' ?>;
+		if (!canWrite) { return; }
+
+		var won = function (n) { return (Number(n) || 0).toLocaleString() + '원'; };
+		function post(p) {
+			return fetch(DEBT_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) })
+				.then(function (r) { return r.json(); });
+		}
+		function setAlert(id, msg, type) {
+			var el = document.getElementById(id);
+			el.className = 'alert alert-' + (type || 'danger') + ' mb-4';
+			el.textContent = msg;
+		}
+		function modal(id) { return bootstrap.Modal.getOrCreateInstance(document.getElementById(id)); }
+
+		// ── 등록 ──
+		var kindEl = document.getElementById('dn_kind');
+		function syncPrincipal() { document.getElementById('dn_principal_wrap').style.display = (kindEl.value === 'lease') ? 'none' : ''; }
+		kindEl.addEventListener('change', syncPrincipal);
+
+		document.getElementById('btn_debt_new').addEventListener('click', function () {
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_note', 'dn_rider_q', 'dn_rider_id'].forEach(function (i) { document.getElementById(i).value = ''; });
+			document.getElementById('dn_rider_picked').textContent = '';
+			document.getElementById('dn_rider_sel').classList.add('d-none');
+			kindEl.value = 'loan'; syncPrincipal();
+			document.getElementById('debt_new_alert').className = 'd-none';
+			modal('kt_debt_new_modal').show();
+		});
+		document.getElementById('dn_rider_search').addEventListener('click', function () {
+			var q = document.getElementById('dn_rider_q').value.trim();
+			fetch(RIDER_API + '?q=' + encodeURIComponent(q) + '&limit=20', { credentials: 'same-origin' })
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					var sel = document.getElementById('dn_rider_sel');
+					sel.innerHTML = '';
+					(res.items || []).forEach(function (it) {
+						var o = document.createElement('option');
+						o.value = it.id; o.textContent = it.name + ' (' + it.rider_code + ')';
+						sel.appendChild(o);
+					});
+					sel.classList.toggle('d-none', (res.items || []).length === 0);
+					if ((res.items || []).length === 0) { setAlert('debt_new_alert', '검색 결과가 없습니다.', 'warning'); }
+				});
+		});
+		document.getElementById('dn_rider_sel').addEventListener('change', function () {
+			document.getElementById('dn_rider_id').value = this.value;
+			document.getElementById('dn_rider_picked').textContent = '선택: ' + this.options[this.selectedIndex].textContent;
+		});
+		document.getElementById('dn_save').addEventListener('click', function () {
+			var rid = parseInt(document.getElementById('dn_rider_id').value, 10) || 0;
+			if (!rid) { setAlert('debt_new_alert', '라이더를 검색해서 선택하세요.'); return; }
+			var btn = this; btn.disabled = true;
+			post({
+				action: 'create', rider_id: rid, kind: kindEl.value,
+				title: document.getElementById('dn_title').value.trim(),
+				principal_amount: Number(document.getElementById('dn_principal').value) || 0,
+				daily_amount: Number(document.getElementById('dn_daily').value) || 0,
+				creditor: document.getElementById('dn_creditor').value.trim(),
+				opened_on: document.getElementById('dn_opened').value,
+				note: document.getElementById('dn_note').value.trim()
+			}).then(function (d) {
+				if (d.ok) { location.reload(); } else { setAlert('debt_new_alert', d.message || '오류'); btn.disabled = false; }
+			}).catch(function () { setAlert('debt_new_alert', '네트워크 오류'); btn.disabled = false; });
+		});
+
+		// ── 차감 ──
+		function recalcHint() {
+			var daily = Number(document.getElementById('kt_debt_repay_modal').dataset.daily) || 0;
+			var days  = Number(document.getElementById('dr_days').value) || 0;
+			var amt   = document.getElementById('dr_amount').value;
+			var calc  = amt !== '' ? Number(amt) : daily * days;
+			document.getElementById('dr_hint').textContent = amt !== ''
+				? ('입력 금액 ' + won(calc))
+				: ('예상 차감 ' + won(calc) + ' (일납 ' + won(daily) + ' × ' + days + '일)');
+		}
+		document.querySelectorAll('.debt-repay-btn').forEach(function (b) {
+			b.addEventListener('click', function () {
+				var m = document.getElementById('kt_debt_repay_modal');
+				m.dataset.daily = b.dataset.daily;
+				document.getElementById('dr_debt_id').value = b.dataset.id;
+				document.getElementById('dr_title').textContent = b.dataset.title;
+				document.getElementById('dr_balance').textContent = (b.dataset.kind === 'lease') ? '해당없음' : won(b.dataset.balance);
+				document.getElementById('dr_amount').value = '';
+				document.getElementById('dr_days').value = 7;
+				document.getElementById('debt_repay_alert').className = 'd-none';
+				recalcHint();
+				modal('kt_debt_repay_modal').show();
+			});
+		});
+		['dr_days', 'dr_amount'].forEach(function (i) { document.getElementById(i).addEventListener('input', recalcHint); });
+		document.getElementById('dr_save').addEventListener('click', function () {
+			var btn = this; btn.disabled = true;
+			post({
+				action: 'repay', debt_id: Number(document.getElementById('dr_debt_id').value),
+				applied_date: document.getElementById('dr_date').value,
+				days: Number(document.getElementById('dr_days').value) || 0,
+				amount: document.getElementById('dr_amount').value, memo: ''
+			}).then(function (d) {
+				if (d.ok) { location.reload(); } else { setAlert('debt_repay_alert', d.message || '오류'); btn.disabled = false; }
+			}).catch(function () { setAlert('debt_repay_alert', '네트워크 오류'); btn.disabled = false; });
+		});
+
+		// ── 수정 ──
+		document.querySelectorAll('.debt-edit-btn').forEach(function (b) {
+			b.addEventListener('click', function () {
+				document.getElementById('de_debt_id').value = b.dataset.id;
+				document.getElementById('de_title').value = b.dataset.title || '';
+				document.getElementById('de_daily').value = b.dataset.daily || 0;
+				document.getElementById('de_creditor').value = b.dataset.creditor || '';
+				document.getElementById('de_status').value = b.dataset.status || 'active';
+				document.getElementById('de_balance').value = b.dataset.balance || 0;
+				document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
+				document.getElementById('debt_edit_alert').className = 'd-none';
+				modal('kt_debt_edit_modal').show();
+			});
+		});
+		document.getElementById('de_save').addEventListener('click', function () {
+			var btn = this; btn.disabled = true;
+			var payload = {
+				action: 'update', debt_id: Number(document.getElementById('de_debt_id').value),
+				title: document.getElementById('de_title').value.trim(),
+				daily_amount: Number(document.getElementById('de_daily').value) || 0,
+				creditor: document.getElementById('de_creditor').value.trim(),
+				status: document.getElementById('de_status').value
+			};
+			if (document.getElementById('de_balance_wrap').style.display !== 'none') {
+				payload.balance_amount = Number(document.getElementById('de_balance').value) || 0;
+			}
+			post(payload).then(function (d) {
+				if (d.ok) { location.reload(); } else { setAlert('debt_edit_alert', d.message || '오류'); btn.disabled = false; }
+			}).catch(function () { setAlert('debt_edit_alert', '네트워크 오류'); btn.disabled = false; });
+		});
+	})();
+	</script>
+
+	<?php endif; ?>
+
+<?php require_once INC_PATH . '/app_content_close.php'; ?>

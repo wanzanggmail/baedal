@@ -187,16 +187,27 @@ final class DailyPayout
     }
 
     /**
-     * §7 #17 — 탈퇴/정지 라이더 잔여 잔액 0원 이체 종결.
-     * 실제 송금 없이(0원 이체) 워크플로우를 종결하고 잔여 잔액을 정리한다.
+     * §7 #17 — 탈퇴/정지 라이더 잔여 정리(종결).
      *
-     * @return array{rider_id:int, written_off:int}
+     * 🔧 2026-07-24 정책 변경: 기존에는 잔여 잔액(보증금 포함)을 **0원 이체로 상각**해
+     * 라이더에게 지급하지 않고 소멸시켰다. 보증금은 "만약을 위해 남겨두는 예치금"이므로
+     * 정상 종결 시 **라이더에게 실제로 지급**하도록 변경(사용자 확정).
+     *
+     * 자금 흐름은 payRider와 동일: 대리점 잔액 확인 → 이체 → 성공 시 대리점 잔액 차감 + 라이더 지갑 0.
+     * 종결 지급에는 정산수수료를 부과하지 않는다(예치금 반환 성격).
+     * 잔액이 0이면 이체 없이 종결 기록만 남긴다(구 동작과 동일).
+     *
+     * @return array{rider_id:int, paid:int, tx_id:string}
      */
-    public static function zeroClose(int $riderId, ?int $adminId = null): array
+    public static function closeOut(int $riderId, ?int $adminId = null): array
     {
         if ($riderId < 1) {
             throw new InvalidArgumentException('라이더 정보가 없습니다.');
         }
+        if (!db_table_exists('withdrawal_requests') || !db_table_exists('rider_wallets') || !AgencyWallet::tableExists()) {
+            throw new RuntimeException('지갑/출금 테이블이 없습니다. php migrate.php 를 실행하세요.');
+        }
+
         $rider = db_row(
             'SELECT id, name, status, agency_id, bank_code, bank_account, account_holder
                FROM riders WHERE id = ? LIMIT 1',
@@ -205,39 +216,89 @@ final class DailyPayout
         if ($rider === null) {
             throw new InvalidArgumentException('라이더를 찾을 수 없습니다.');
         }
-        if (in_array((string) $rider['status'], ['active'], true)) {
-            throw new InvalidArgumentException('활동 중인 라이더는 0원 종결 대상이 아닙니다.');
+        if ((string) $rider['status'] === 'active') {
+            throw new InvalidArgumentException('활동 중인 라이더는 종결 대상이 아닙니다.');
         }
 
         RiderWallet::ensure($riderId);
         $balance  = (int) (db_row('SELECT balance FROM rider_wallets WHERE rider_id = ? LIMIT 1', [$riderId])['balance'] ?? 0);
         $agencyId = (int) ($rider['agency_id'] ?? 0);
+        $hasAcct  = trim((string) $rider['bank_code']) !== '' && trim((string) $rider['bank_account']) !== '';
 
-        // 0원 이체 처리(mock은 amount<=0을 성공 처리)
+        // 지급할 잔액이 있으면 계좌·대리점 잔액이 반드시 있어야 한다(돈을 말없이 없애지 않음)
+        if ($balance > 0) {
+            if (!$hasAcct) {
+                throw new InvalidArgumentException(
+                    $rider['name'] . ': 잔여 ' . number_format($balance) . '원을 지급해야 하는데 출금 계좌가 없습니다. 계좌 등록 후 다시 종결하세요.'
+                );
+            }
+            if ($agencyId < 1) {
+                throw new InvalidArgumentException('라이더 소속 대리점이 없어 지급할 수 없습니다.');
+            }
+            $agencyBalance = AgencyWallet::get($agencyId)['balance'];
+            if ($agencyBalance < $balance) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s: 대리점 잔액 부족(잔액 %s < 지급 %s). PG 충전이 필요합니다.',
+                    $rider['name'],
+                    number_format($agencyBalance),
+                    number_format($balance)
+                ));
+            }
+        }
+
         require_once __DIR__ . '/Disbursement.php';
-        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], (string) $rider['bank_account'], 0);
+        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], (string) $rider['bank_account'], $balance);
 
-        db_transaction(static function () use ($riderId, $agencyId, $balance, $rider, $res): void {
+        if (!$res->success) {
             db_insert(
                 "INSERT INTO withdrawal_requests
                     (rider_id, agency_id, kind, amount, gross_amount,
                      bank_code, bank_account, account_holder,
+                     status, fail_reason, note, requested_at)
+                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'failed', ?, ?, NOW())",
+                [
+                    $riderId, $agencyId > 0 ? $agencyId : null, $balance, $balance,
+                    (string) $rider['bank_code'], (string) $rider['bank_account'],
+                    (string) ($rider['account_holder'] ?: $rider['name']),
+                    mb_substr($res->failReason, 0, 300), '탈퇴/정지 잔여 지급 실패',
+                ]
+            );
+            throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
+        }
+
+        db_transaction(static function () use ($riderId, $agencyId, $balance, $rider, $res, $adminId): void {
+            $reqId = db_insert(
+                "INSERT INTO withdrawal_requests
+                    (rider_id, agency_id, kind, amount, gross_amount,
+                     bank_code, bank_account, account_holder,
                      status, note, requested_at, completed_at)
-                 VALUES (?, ?, 'auto_daily', 0, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
+                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
                 [
                     $riderId,
                     $agencyId > 0 ? $agencyId : null,
                     $balance,
+                    $balance,
                     (string) $rider['bank_code'],
                     (string) $rider['bank_account'],
                     (string) ($rider['account_holder'] ?: $rider['name']),
-                    '탈퇴/정지 0원 종결 · ' . $res->txId,
+                    ($balance > 0 ? '탈퇴/정지 잔여 지급 종결 · ' : '탈퇴/정지 종결(잔액 0) · ') . $res->txId,
                 ]
             );
+
+            if ($balance > 0 && $agencyId > 0) {
+                AgencyWallet::debit($agencyId, $balance, 'rider_payout', $reqId, (string) $rider['name'] . ' 탈퇴 잔여 지급', $adminId);
+            }
+
             db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
         });
 
-        return ['rider_id' => $riderId, 'written_off' => $balance];
+        return ['rider_id' => $riderId, 'paid' => $balance, 'tx_id' => $res->txId];
+    }
+
+    /** @deprecated 2026-07-24 — closeOut()으로 대체(상각 → 실지급). 호출 호환용 별칭. */
+    public static function zeroClose(int $riderId, ?int $adminId = null): array
+    {
+        return self::closeOut($riderId, $adminId);
     }
 
     /**

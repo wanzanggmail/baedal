@@ -87,16 +87,21 @@ $route = $route ?? '';
 										</div>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php // 구 "선지급(대여금) 입력"(deduction/advance)은 2026-07-24 부채 원장(deduction/debts)으로 대체돼 메뉴에서 제거.
+										      // 라우트·화면은 남아 있어 직접 URL로는 접근 가능. ?>
 										<div class="menu-item">
-											<a class="menu-link<?= nav_active('deduction/advance') ?>" href="<?= htmlspecialchars(admin_url('deduction/advance'), ENT_QUOTES, 'UTF-8') ?>">
+											<a class="menu-link<?= nav_active('deduction/debts') ?>" href="<?= htmlspecialchars(admin_url('deduction/debts'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
-													<i class="ki-duotone ki-dollar fs-2">
+													<i class="ki-duotone ki-bill fs-2">
 														<span class="path1"></span>
 														<span class="path2"></span>
 														<span class="path3"></span>
+														<span class="path4"></span>
+														<span class="path5"></span>
+														<span class="path6"></span>
 													</i>
 												</span>
-												<span class="menu-title">선지급(대여금)</span>
+												<span class="menu-title">대여금·리스 원장</span>
 											</a>
 										</div>
 										<!--end:Menu item-->

@@ -187,8 +187,8 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 					</div>
 					<?php if ((string) ($rider['status'] ?? '') !== 'active') : ?>
 					<div class="separator separator-dashed my-4"></div>
-					<button type="button" class="btn btn-sm btn-light-danger w-100" id="btn_zero_close">잔여 잔액 0원 종결</button>
-					<div class="form-text text-center">탈퇴/정지 라이더의 잔여 지갑 잔액을 0원 이체로 종결합니다.</div>
+					<button type="button" class="btn btn-sm btn-light-danger w-100" id="btn_zero_close">잔여 지급 후 종결</button>
+					<div class="form-text text-center">탈퇴/정지 라이더의 잔여 잔액(보증금 포함)을 계좌로 지급하고 종결합니다. 잔액이 0이면 이체 없이 종결됩니다.</div>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -756,8 +756,8 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	var zeroBtn = document.getElementById('btn_zero_close');
 	if (zeroBtn) {
 		zeroBtn.addEventListener('click', function () {
-			if (!confirm('잔여 지갑 잔액을 0원 이체로 종결할까요? 되돌릴 수 없습니다.')) return;
-			apiPatch({ action: 'zero_close' }, '0원 이체로 종결했습니다.');
+			if (!confirm('잔여 잔액(보증금 포함)을 라이더 계좌로 지급하고 종결할까요? 되돌릴 수 없습니다.')) return;
+			apiPatch({ action: 'close_out' }, '잔여 지급 후 종결했습니다.');
 		});
 	}
 

@@ -114,4 +114,81 @@ final class WithdrawalConfig
             ? $cfg['fee_per_tx_short']
             : $cfg['fee_per_tx_long'];
     }
+
+    /**
+     * §7 #18 정산수수료 — age-bucket 모델.
+     *
+     * 구 모델(feeForAccruedDays)은 "마지막 출금 이후 경과일" 하나로 출금 전체에 단일 요율을
+     * 매겼으나, 실제 규칙은 **주문 건별로** 매겨진다(LOGIC.md §5.4):
+     *   - 기준일수(기본 7일) 이내 주문 → 건당 fee_per_tx_short(80원)
+     *   - 기준일수를 지난 주문   → 건당 fee_per_tx_long(40원)
+     * 따라서 한 번의 출금 안에 80원 구간과 40원 구간이 섞여 합산된다.
+     *
+     * 같은 정산일의 주문은 경과일이 모두 같으므로, 주문 1건씩이 아니라
+     * 사이클(라이더·일자)의 order_count 단위로 계산해도 결과가 동일하다.
+     *
+     * @param list<array{settlement_date:string, order_count:int|string}> $cycles
+     * @param string|null $asOf 기준일(YYYY-MM-DD). 기본 오늘.
+     * @return array{total:int, short_orders:int, long_orders:int, short_amount:int, long_amount:int, rate_short:int, rate_long:int, threshold:int}
+     */
+    public static function feeForCycles(array $cycles, ?int $orgId = null, ?string $asOf = null): array
+    {
+        $cfg       = self::get($orgId);
+        $threshold = (int) $cfg['fee_day_threshold'];
+        $rateShort = (int) $cfg['fee_per_tx_short'];
+        $rateLong  = (int) $cfg['fee_per_tx_long'];
+
+        $base = self::toDate($asOf ?? date('Y-m-d')) ?? new DateTimeImmutable('today');
+
+        $shortOrders = 0;
+        $longOrders  = 0;
+
+        foreach ($cycles as $c) {
+            $orders = (int) ($c['order_count'] ?? 0);
+            if ($orders <= 0) {
+                continue;
+            }
+            $settled = self::toDate((string) ($c['settlement_date'] ?? ''));
+            if ($settled === null) {
+                // 정산일을 알 수 없으면 보수적으로 비싼 구간(최근)으로 처리
+                $shortOrders += $orders;
+                continue;
+            }
+            // 경과일: 미래 정산일(음수)은 0일로 취급
+            $elapsed = (int) $base->diff($settled)->days;
+            if ($settled > $base) {
+                $elapsed = 0;
+            }
+            if ($elapsed < $threshold) {
+                $shortOrders += $orders;
+            } else {
+                $longOrders += $orders;
+            }
+        }
+
+        $shortAmount = $shortOrders * $rateShort;
+        $longAmount  = $longOrders * $rateLong;
+
+        return [
+            'total'        => $shortAmount + $longAmount,
+            'short_orders' => $shortOrders,
+            'long_orders'  => $longOrders,
+            'short_amount' => $shortAmount,
+            'long_amount'  => $longAmount,
+            'rate_short'   => $rateShort,
+            'rate_long'    => $rateLong,
+            'threshold'    => $threshold,
+        ];
+    }
+
+    private static function toDate(string $ymd): ?DateTimeImmutable
+    {
+        $ymd = substr(trim($ymd), 0, 10);
+        if ($ymd === '') {
+            return null;
+        }
+        $d = DateTimeImmutable::createFromFormat('!Y-m-d', $ymd);
+
+        return ($d && $d->format('Y-m-d') === $ymd) ? $d : null;
+    }
 }

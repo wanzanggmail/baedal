@@ -151,14 +151,24 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
-    if ($action === 'zero_close') {
-        // #17 탈퇴/정지 라이더 잔여 잔액 0원 이체 종결
+    if ($action === 'close_out' || $action === 'zero_close') {
+        // #17 탈퇴/정지 라이더 잔여 정리 — 2026-07-24부터 잔여(보증금 포함)를 실제 지급하고 종결
         require_once INC_PATH . '/DailyPayout.php';
         try {
             $adminId = (int) ($_SESSION['admin_id'] ?? 0);
-            $r = DailyPayout::zeroClose($id, $adminId > 0 ? $adminId : null);
-            AuditLog::record('rider.zero_close', (string) ($rider['rider_code'] ?? $id), sprintf('0원 종결(잔여 %s원 정리)', number_format((int) $r['written_off'])));
-            echo json_encode(['ok' => true, 'message' => sprintf('0원 이체로 종결했습니다. (잔여 %s원 정리)', number_format((int) $r['written_off']))], JSON_UNESCAPED_UNICODE);
+            $r    = DailyPayout::closeOut($id, $adminId > 0 ? $adminId : null);
+            $paid = (int) $r['paid'];
+            AuditLog::record(
+                'rider.close_out',
+                (string) ($rider['rider_code'] ?? $id),
+                $paid > 0 ? sprintf('탈퇴 종결 · 잔여 %s원 지급', number_format($paid)) : '탈퇴 종결 · 잔액 0'
+            );
+            echo json_encode([
+                'ok'      => true,
+                'message' => $paid > 0
+                    ? sprintf('잔여 %s원을 지급하고 종결했습니다.', number_format($paid))
+                    : '잔액이 없어 이체 없이 종결했습니다.',
+            ], JSON_UNESCAPED_UNICODE);
         } catch (InvalidArgumentException $e) {
             $err($e->getMessage());
         } catch (Throwable $e) {

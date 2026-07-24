@@ -73,18 +73,31 @@ final class RiderWallet
     }
 
     /**
-     * 출금 완료 후 지갑 정리 — 보증금만 남기고 적립 일수 초기화
+     * 출금 완료 후 지갑 정리 — 실제로 빠져나간 금액만큼 **차감**한다.
+     *
+     * 🐛 2026-07-24 수정: 이전 구현은 `balance = 보증금`으로 **대입**했다. 전액출금이라
+     * 정상 경로에서는 결과가 같지만, **출금 신청(pending) ~ 완료 사이에 정산이 반영되면**
+     * (`credit()`으로 잔액이 늘어남) 그 금액이 완료 시점에 덮어써져 **소멸**했다.
+     *   예) 신청 시 159,000(보증금 50,000·수수료 3,640·지급 105,360)
+     *       → 중간에 정산 +40,000 → 잔액 199,000
+     *       → 완료 시 `balance = 50,000` 이 되며 40,000 증발
+     * 차감 방식으로 바꾸면 199,000 − 109,000 = 90,000 으로 신규 입금분이 보존된다.
+     *
+     * @param int $deductedTotal 지갑에서 실제로 빠져나가는 총액 = 실지급액 + 정산수수료
      */
-    public static function finalizeAfterComplete(int $riderId, int $reserveAmount): void
+    public static function deductAfterWithdrawal(int $riderId, int $deductedTotal): void
     {
         if ($riderId < 1 || !db_table_exists('rider_wallets')) {
             return;
         }
 
         self::ensure($riderId);
+        // GREATEST(0, ...): 완료 전 잔액이 수동조정 등으로 줄어든 경우에도 음수 방지
         db_execute(
-            'UPDATE rider_wallets SET balance = ?, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?',
-            [max(0, $reserveAmount), $riderId]
+            'UPDATE rider_wallets
+                SET balance = GREATEST(0, balance - ?), accrued_days = 0, updated_at = NOW()
+              WHERE rider_id = ?',
+            [max(0, $deductedTotal), $riderId]
         );
     }
 
