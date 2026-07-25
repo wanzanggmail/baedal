@@ -132,7 +132,11 @@ $password  = (string) ($body['password'] ?? '');
 if ($name === '') {
     $err('이름을 입력하세요.');
 }
-if ($loginId === '' || !preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) {
+// 로그인 ID — 비워두면 휴대전화번호 기반으로 자동생성(충돌 시 대리점코드 접미사)
+require_once INC_PATH . '/RiderLoginId.php';
+if ($loginId === '') {
+    $loginId = RiderLoginId::generate($phone);
+} elseif (!preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) {
     $err('로그인 ID는 영문·숫자·_·.·@·- 3~60자입니다.');
 }
 if (strlen($password) < 4) {

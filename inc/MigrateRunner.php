@@ -23,6 +23,7 @@ final class MigrateRunner
         self::runSqlFile('redesign_gateway.sql');
         self::runSqlFile('redesign_settlement_detail.sql');
         self::runSqlFile('rider_debts.sql');
+        self::runSqlFile('withdrawal_cycles.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
@@ -37,6 +38,7 @@ final class MigrateRunner
         self::migrateHourlyInsuranceColumn();
         self::migrateDeductionRegisterColumn();
         self::migrateDailyRidersUniqueDate();
+        self::migrateCycleWithdrawnColumn();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -522,6 +524,41 @@ final class MigrateRunner
             echo "OK    uq_sdr_upload_license_date\n";
         } catch (Throwable $e) {
             echo 'ERROR uq date → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * §7 #18 — 정산 사이클별 출금 추적 컬럼.
+     * withdrawn_amount 는 부분출금까지 표현 가능(0=미출금, net_amount=완전출금).
+     */
+    private static function migrateCycleWithdrawnColumn(): void
+    {
+        echo "== settlement_rider_cycles.withdrawn_amount ==\n";
+
+        if (!db_table_exists('settlement_rider_cycles')) {
+            echo "SKIP  settlement_rider_cycles (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field');
+        if (in_array('withdrawn_amount', $cols, true)) {
+            echo "SKIP  withdrawn_amount (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE settlement_rider_cycles
+                    ADD COLUMN withdrawn_amount INT NOT NULL DEFAULT 0
+                        COMMENT '출금 완료/예약된 금액. net_amount와 같으면 완전 출금' AFTER net_amount,
+                    ADD KEY idx_src_rider_withdrawn (rider_id, withdrawn_amount)"
+            );
+            echo "OK    withdrawn_amount + idx_src_rider_withdrawn\n";
+        } catch (Throwable $e) {
+            echo 'ERROR withdrawn_amount → ' . $e->getMessage() . "\n";
             exit(1);
         }
     }

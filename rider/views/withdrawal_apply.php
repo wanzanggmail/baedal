@@ -58,18 +58,40 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 				<span class="text-gray-600 fs-7">지갑 잔액</span>
 				<span class="fw-bold">₩ <?= number_format((int) ($preview['balance'] ?? 0)) ?></span>
 			</div>
+			<?php if (empty($preview['fee_cycle_based'])) : ?>
 			<div class="d-flex justify-content-between mb-2">
 				<span class="text-gray-600 fs-7">적립 일수</span>
 				<span><?= (int) ($preview['accrued_days'] ?? 0) ?>일</span>
 			</div>
+			<?php endif; ?>
 			<div class="d-flex justify-content-between mb-2">
 				<span class="text-gray-600 fs-7">보증금 (출금 후 유지)</span>
 				<span class="text-danger">− ₩ <?= number_format((int) ($preview['reserve_amount'] ?? 0)) ?></span>
 			</div>
+			<?php if (!empty($preview['fee_cycle_based'])) : ?>
+			<?php // §7 #18 — 정산수수료는 주문 건별로 매겨진다. 최근 주문일수록 비싸므로 구간을 나눠 보여준다. ?>
+			<?php if ((int) ($preview['fee_short_orders'] ?? 0) > 0) : ?>
+			<div class="d-flex justify-content-between mb-1">
+				<span class="text-gray-600 fs-8">└ 최근 <?= (int) ($preview['fee_day_threshold'] ?? 7) ?>일 이내 <?= number_format((int) $preview['fee_short_orders']) ?>건 × <?= number_format((int) $preview['fee_rate_short']) ?>원</span>
+				<span class="text-danger fs-8">− ₩ <?= number_format((int) $preview['fee_short_amount']) ?></span>
+			</div>
+			<?php endif; ?>
+			<?php if ((int) ($preview['fee_long_orders'] ?? 0) > 0) : ?>
+			<div class="d-flex justify-content-between mb-1">
+				<span class="text-gray-600 fs-8">└ <?= (int) ($preview['fee_day_threshold'] ?? 7) ?>일 지난 <?= number_format((int) $preview['fee_long_orders']) ?>건 × <?= number_format((int) $preview['fee_rate_long']) ?>원</span>
+				<span class="text-danger fs-8">− ₩ <?= number_format((int) $preview['fee_long_amount']) ?></span>
+			</div>
+			<?php endif; ?>
+			<div class="d-flex justify-content-between mb-2">
+				<span class="text-gray-600 fs-7 fw-semibold">정산수수료 합계</span>
+				<span class="text-danger fw-semibold">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
+			</div>
+			<?php else : ?>
 			<div class="d-flex justify-content-between mb-2">
 				<span class="text-gray-600 fs-7">출금 수수료 (건당)</span>
 				<span class="text-danger">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
 			</div>
+			<?php endif; ?>
 			<div class="border-top pt-3 mt-2 d-flex justify-content-between align-items-center">
 				<span class="fw-bold text-gray-800">실지급 예정액</span>
 				<span class="fs-3 fw-bold text-primary">₩ <?= number_format((int) ($preview['payout_amount'] ?? 0)) ?></span>

@@ -319,9 +319,10 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<?php endif; ?>
 						<div class="row g-6 mb-6">
 							<div class="col-md-6">
-								<label class="form-label required">앱 로그인 ID</label>
+								<label class="form-label">앱 로그인 ID</label>
 								<input type="text" class="form-control form-control-solid" id="reg_login_id"
-								       required maxlength="60" placeholder="영문·숫자·_·. 3~60자" autocomplete="off" />
+								       maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
+								<div class="form-text fs-8">비워두면 휴대전화번호가 그대로 로그인 ID가 됩니다(겹치면 a, b, c…가 자동으로 붙어요).</div>
 							</div>
 							<div class="col-md-6">
 								<label class="form-label">라이더 코드 (선택)</label>
@@ -445,7 +446,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 		var name    = document.getElementById('reg_name').value.trim();
 		var phone   = document.getElementById('reg_phone').value.trim();
 
-		if (!loginId)        { showAlert('로그인 ID를 입력하세요.'); return; }
 		if (pw.length < 4)   { showAlert('비밀번호는 4자 이상이어야 합니다.'); return; }
 		if (pw !== pw2)      { showAlert('비밀번호가 일치하지 않습니다.'); return; }
 		if (!name)           { showAlert('이름을 입력하세요.'); return; }

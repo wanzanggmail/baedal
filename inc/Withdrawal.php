@@ -365,12 +365,29 @@ final class Withdrawal
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $reason       = mb_substr(trim($reason), 0, 300);
 
-        return db_execute(
-            "UPDATE withdrawal_requests
-                SET status = 'rejected', rejected_reason = ?
-              WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded')",
-            array_merge([$reason], $ids)
-        );
+        require_once INC_PATH . '/WithdrawalCycles.php';
+
+        return db_transaction(static function () use ($placeholders, $reason, $ids): int {
+            // 실제로 반려된 건만 대상으로 사이클 점유를 해제한다.
+            $rejected = db_rows(
+                "SELECT id FROM withdrawal_requests
+                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded')",
+                $ids
+            );
+            $rejectedIds = array_map(static fn (array $r): int => (int) $r['id'], $rejected);
+
+            $n = db_execute(
+                "UPDATE withdrawal_requests
+                    SET status = 'rejected', rejected_reason = ?
+                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded')",
+                array_merge([$reason], $ids)
+            );
+
+            // §7 #18 — 반려된 출금이 점유했던 사이클을 미출금 상태로 되돌린다.
+            WithdrawalCycles::release($rejectedIds);
+
+            return $n;
+        });
     }
 
     /**
@@ -484,63 +501,86 @@ final class Withdrawal
         $fee      = (int) $preview['fee_per_tx'];
         $payout   = (int) $preview['payout_amount'];
         $accrued  = (int) $preview['accrued_days'];
+        $picked   = (array) ($preview['picked_cycles'] ?? []);
 
         $hasAccruedCol = self::hasAccruedDaysColumn();
-        $note = sprintf(
-            '라이더 전액 출금 · 적립 %d일 · 보증금 %s원 · 수수료 %s원(건당)',
-            $accrued,
-            number_format($reserve),
-            number_format($fee)
-        );
+        // §7 #18 — 사이클 기반이면 수수료 구간 내역을 메모에 남긴다(80원/40원 구간 분리 표기).
+        $note = (bool) ($preview['fee_cycle_based'] ?? false)
+            ? sprintf(
+                '라이더 전액 출금 · 보증금 %s원 · 정산수수료 %s원(%d건×%d원 + %d건×%d원)',
+                number_format($reserve),
+                number_format($fee),
+                (int) $preview['fee_short_orders'],
+                (int) $preview['fee_rate_short'],
+                (int) $preview['fee_long_orders'],
+                (int) $preview['fee_rate_long']
+            )
+            : sprintf(
+                '라이더 전액 출금 · 적립 %d일 · 보증금 %s원 · 수수료 %s원(건당)',
+                $accrued,
+                number_format($reserve),
+                number_format($fee)
+            );
 
-        if ($hasAccruedCol) {
-            $newId = db_insert(
-                'INSERT INTO withdrawal_requests
-                    (rider_id, kind, amount, gross_amount,
-                     withhold_min_retain, withhold_other, accrued_days,
-                     bank_code, bank_account, account_holder,
-                     status, note, requested_at)
-                 VALUES (?, \'rider_manual\', ?, ?,
-                         ?, ?, ?,
-                         ?, ?, ?,
-                         \'pending\', ?, NOW())',
-                [
-                    $riderId,
-                    $payout,
-                    $balance,
-                    $reserve,
-                    $fee,
-                    $accrued,
-                    (string) $rider['bank_code'],
-                    (string) $rider['bank_account'],
-                    (string) ($rider['account_holder'] ?: $rider['name']),
-                    $note,
-                ]
-            );
-        } else {
-            $newId = db_insert(
-                'INSERT INTO withdrawal_requests
-                    (rider_id, kind, amount, gross_amount,
-                     withhold_min_retain, withhold_other,
-                     bank_code, bank_account, account_holder,
-                     status, note, requested_at)
-                 VALUES (?, \'rider_manual\', ?, ?,
-                         ?, ?,
-                         ?, ?, ?,
-                         \'pending\', ?, NOW())',
-                [
-                    $riderId,
-                    $payout,
-                    $balance,
-                    $reserve,
-                    $fee,
-                    (string) $rider['bank_code'],
-                    (string) $rider['bank_account'],
-                    (string) ($rider['account_holder'] ?: $rider['name']),
-                    $note,
-                ]
-            );
-        }
+        // 신청 기록 + 사이클 점유를 한 트랜잭션으로 — 중간 실패 시 점유가 남지 않게 한다.
+        require_once INC_PATH . '/WithdrawalCycles.php';
+        $newId = db_transaction(static function () use (
+            $hasAccruedCol, $riderId, $payout, $balance, $reserve, $fee, $accrued, $rider, $note, $picked
+        ): int {
+            if ($hasAccruedCol) {
+                $id = db_insert(
+                    'INSERT INTO withdrawal_requests
+                        (rider_id, kind, amount, gross_amount,
+                         withhold_min_retain, withhold_other, accrued_days,
+                         bank_code, bank_account, account_holder,
+                         status, note, requested_at)
+                     VALUES (?, \'rider_manual\', ?, ?,
+                             ?, ?, ?,
+                             ?, ?, ?,
+                             \'pending\', ?, NOW())',
+                    [
+                        $riderId,
+                        $payout,
+                        $balance,
+                        $reserve,
+                        $fee,
+                        $accrued,
+                        (string) $rider['bank_code'],
+                        (string) $rider['bank_account'],
+                        (string) ($rider['account_holder'] ?: $rider['name']),
+                        $note,
+                    ]
+                );
+            } else {
+                $id = db_insert(
+                    'INSERT INTO withdrawal_requests
+                        (rider_id, kind, amount, gross_amount,
+                         withhold_min_retain, withhold_other,
+                         bank_code, bank_account, account_holder,
+                         status, note, requested_at)
+                     VALUES (?, \'rider_manual\', ?, ?,
+                             ?, ?,
+                             ?, ?, ?,
+                             \'pending\', ?, NOW())',
+                    [
+                        $riderId,
+                        $payout,
+                        $balance,
+                        $reserve,
+                        $fee,
+                        (string) $rider['bank_code'],
+                        (string) $rider['bank_account'],
+                        (string) ($rider['account_holder'] ?: $rider['name']),
+                        $note,
+                    ]
+                );
+            }
+
+            // §7 #18 — 이번 출금이 소진하는 사이클을 연결하고 점유(이중 출금 방지)
+            WithdrawalCycles::attach($id, $picked);
+
+            return $id;
+        });
 
         $row = db_row(
             'SELECT wr.*, r.name AS rider_name, r.rider_code, sc.label AS bank_label

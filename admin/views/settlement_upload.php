@@ -386,8 +386,8 @@ $platformLabels = [
 						</div>
 						<div class="row">
 							<div class="col-md-6 mb-4">
-								<label class="form-label required">로그인 ID</label>
-								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" autocomplete="off" />
+								<label class="form-label">로그인 ID</label>
+								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
 							</div>
 							<div class="col-md-6 mb-4">
 								<label class="form-label required">비밀번호</label>
@@ -697,7 +697,7 @@ $platformLabels = [
 		document.getElementById('qrLicenseLabel').textContent = license || '(없음)';
 		document.getElementById('qrName').value = name;
 		document.getElementById('qrPhone').value = '';
-		document.getElementById('qrLoginId').value = suggestLogin(license);
+		document.getElementById('qrLoginId').value = '';
 		document.getElementById('qrPassword').value = randomPw();
 		const al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
 		const pfLabels = { coupang: '쿠팡이츠', baemin: '배달의민족', other: '기타' };
@@ -761,11 +761,6 @@ $platformLabels = [
 		} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '연결 실패'; b.disabled = false; }
 	});
 
-	function suggestLogin(license) {
-		let base = (license || '').replace(/[^a-zA-Z0-9_.@-]/g, '');
-		if (base.length < 3) base = 'r' + Math.random().toString(36).slice(2, 8);
-		return base.slice(0, 30);
-	}
 	function randomPw() { return Math.random().toString(36).slice(2, 8); }
 
 	document.getElementById('qrSubmitBtn').addEventListener('click', async function () {
@@ -780,7 +775,7 @@ $platformLabels = [
 			password: document.getElementById('qrPassword').value
 		};
 		if (!payload.name) { al.className = 'alert alert-danger mb-4'; al.textContent = '이름을 입력하세요.'; return; }
-		if (payload.login_id.length < 3) { al.className = 'alert alert-danger mb-4'; al.textContent = '로그인 ID는 3자 이상이어야 합니다.'; return; }
+		if (payload.login_id && payload.login_id.length < 3) { al.className = 'alert alert-danger mb-4'; al.textContent = '로그인 ID는 3자 이상이어야 합니다.'; return; }
 		if (payload.password.length < 4) { al.className = 'alert alert-danger mb-4'; al.textContent = '비밀번호는 4자 이상이어야 합니다.'; return; }
 		this.disabled = true;
 		try {

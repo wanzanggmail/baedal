@@ -40,15 +40,9 @@ if ($method === 'POST') {
     $name     = trim((string) ($body['name']    ?? ''));
     $phone    = trim((string) ($body['phone']   ?? ''));
 
-    if ($loginId === '')    $err('로그인 ID를 입력하세요.');
-    if (!preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) $err('로그인 ID는 영문·숫자·_·.·@·- 3~60자입니다.');
     if (strlen($password) < 4) $err('비밀번호는 4자 이상이어야 합니다.');
     if ($name === '')       $err('이름을 입력하세요.');
     if ($phone === '')      $err('휴대전화를 입력하세요.');
-
-    if (db_row('SELECT id FROM riders WHERE login_id = ?', [$loginId])) {
-        $err('이미 사용 중인 로그인 ID입니다.');
-    }
 
     // 멀티테넌시: 소속 대리점 결정 (대리점 계정은 자기 대리점, 본사/총판은 선택)
     require_once INC_PATH . '/Organization.php';
@@ -62,6 +56,17 @@ if ($method === 'POST') {
         $agencyOrg = Org::find($agencyId);
         if ($agencyOrg === null || (string) $agencyOrg['level'] !== Org::LEVEL_AGENCY || !Org::canAccessAgency($agencyId)) {
             $err('선택한 대리점에 접근할 수 없습니다.');
+        }
+    }
+
+    // 로그인 ID — 비워두면 휴대전화번호 기반으로 자동생성(충돌 시 대리점코드 접미사)
+    require_once INC_PATH . '/RiderLoginId.php';
+    if ($loginId === '') {
+        $loginId = RiderLoginId::generate($phone);
+    } else {
+        if (!preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) $err('로그인 ID는 영문·숫자·_·.·@·- 3~60자입니다.');
+        if (db_row('SELECT id FROM riders WHERE login_id = ?', [$loginId])) {
+            $err('이미 사용 중인 로그인 ID입니다.');
         }
     }
 

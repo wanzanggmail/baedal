@@ -12,6 +12,13 @@ declare(strict_types=1);
  */
 final class PgFeeConfig
 {
+    /**
+     * ⚠️ TODO(갑확인): 영업대행수수료 분배비율 — **미확정, 임시값**
+     * 대리점·총판·본사 각 1%는 갑이 "나중에 다시 정해줄 예정"이라고 밝힌 잠정치.
+     * 확정되면 이 기본값 + 기존 `org_fee_config` 행들을 함께 갱신해야 한다
+     * (`Organization::create()`의 시드값 1.00 도 같이 — 그쪽에도 동일 태그가 있음).
+     * 참고: LOGIC.md §8-A #2.
+     */
     private const DEFAULT_PCT = 1.00;
 
     public static function tableExists(): bool

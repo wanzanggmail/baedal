@@ -3,7 +3,7 @@
 > **목적:** 실제 DB에 어떤 테이블·컬럼·관계가 있는지 한눈에 파악하기 위한 기준 문서.
 > **원본:** `SHOW CREATE TABLE`(정보스키마) 기준 — 코드(`sql/*.sql`, `MigrateRunner.php`)가 아니라 **실제 서버 DB 상태**를 그대로 기술한다.
 > **갱신 규칙(필수):** 테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가 등 **스키마가 바뀌는 모든 작업에서 이 문서를 함께 갱신**한다. (`.cursor/rules/db-schema-sync.mdc`)
-> **최종 확인:** 2026-07-24, DB `my_web_db`, 테이블 29개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 반영 완료 시점)
+> **최종 확인:** 2026-07-24, DB `my_web_db`, 테이블 30개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 반영 완료 시점)
 
 ---
 
@@ -300,4 +300,5 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |
 | 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |
 | 2026-07-23 (2) | 배달의민족 정산서 지원. `settlement_daily_riders` UNIQUE를 `(upload_id,license_id)`→`(upload_id,license_id,settlement_date)`로 확장(배민 다중 운행일 대응, 인덱스명 `uq_sdr_upload_license_date`). 스키마 신규 테이블 없음 — 배민 주문을 기존 `settlement_daily_riders`/`settlement_order_details`에 집계·저장. |
+| 2026-07-24 (2) | **정산수수료 age-bucket용 사이클 출금 추적.** `settlement_rider_cycles`에 `withdrawn_amount`(INT, 0=미출금 / net_amount=완전출금, 부분출금까지 표현) + `idx_src_rider_withdrawn` 인덱스 추가. 신규 `withdrawal_request_cycles`(출금↔사이클 연결: `request_id`·`cycle_id`·`amount`·`order_count`, UNIQUE(request,cycle), 양쪽 FK CASCADE) → **30개 테이블**. 출금 신청 시점에 사이클을 점유하고 반려 시 해제한다(`inc/WithdrawalCycles.php`). 보증금 경계 정책(통째/부분)이 미확정이지만 **두 정책 모두 이 스키마로 수용**되므로 재마이그레이션 불필요. |
 | 2026-07-24 | **라이더 부채 원장 신규.** `rider_debts`(대여금/리스/선지급 헤더: 원금·잔액·일납·채권자·상태) + `rider_debt_entries`(차감 이력) 추가 → **29개 테이블**. 라이더 정산명세서(PDF)의 대여금/리스/선지급 차감 명세 대응. 차감 실행 시 `deduction_entries`(kind=`loan`/`lease`/`advance`)를 생성해 기존 정산 반영 흐름이 그대로 차감. `sql/rider_debts.sql`, `inc/RiderDebt.php`, `admin/api/debt_action.php`, 라이더 상세 "부채" 카드. |
