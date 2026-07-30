@@ -74,5 +74,6 @@ $initial = $name !== '' ? (function_exists('mb_substr') ? mb_substr($name, 0, 1,
 <?php endif; ?>
 <div class="d-grid gap-3 mt-5">
 	<a href="<?= htmlspecialchars(rider_url('profile/bank'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light-primary">계좌 정보</a>
+	<a href="<?= htmlspecialchars(rider_url('profile/debt'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light-primary">대여금·리스</a>
 	<a href="<?= htmlspecialchars(rider_url('profile/password'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light">비밀번호 변경</a>
 </div>

@@ -7,16 +7,11 @@ require_once INC_PATH . '/RiderAuth.php';
 $ru = rider_current_user();
 $row = $ru ? RiderAuth::findById((int) $ru['id']) : null;
 
-$bankLabels = [
-    '088' => '신한은행',
-    '004' => '국민은행',
-    '020' => '우리은행',
-    '090' => '카카오뱅크',
-    '081' => '하나은행',
-];
-
 $bankCode = (string) ($row['bank_code'] ?? '');
-$bankName = $bankLabels[$bankCode] ?? ($bankCode !== '' ? $bankCode : '—');
+$bankLabelRow = $bankCode !== ''
+    ? db_row("SELECT label FROM system_codes WHERE category = 'bank' AND code = ? LIMIT 1", [$bankCode])
+    : null;
+$bankName = $bankLabelRow['label'] ?? ($bankCode !== '' ? $bankCode : '—');
 $account  = (string) ($row['bank_account'] ?? '');
 $holder   = (string) ($row['account_holder'] ?? ($row['name'] ?? ''));
 ?>
