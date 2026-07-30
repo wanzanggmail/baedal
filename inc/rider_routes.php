@@ -11,6 +11,7 @@ return [
     'settlement/detail' => ['title' => '정산 상세', 'view' => 'settlement_detail'],
     'withdrawal/apply' => ['title' => '출금 신청', 'view' => 'withdrawal_apply'],
     'withdrawal/history' => ['title' => '출금 신청 내역', 'view' => 'withdrawal_history'],
+    'withdrawal/detail' => ['title' => '정산조회 상세', 'view' => 'withdrawal_detail'],
     'notices' => ['title' => '공지', 'view' => 'notices_list'],
     'notices/detail' => ['title' => '공지 상세', 'view' => 'notice_detail'],
     'profile' => ['title' => '내 정보', 'view' => 'profile'],

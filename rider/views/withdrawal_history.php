@@ -7,6 +7,8 @@ require_once INC_PATH . '/Withdrawal.php';
 $riderUser = rider_current_user();
 $riderId   = $riderUser ? (int) $riderUser['id'] : 0;
 $rows      = $riderId > 0 ? Withdrawal::listForRider($riderId) : [];
+$detailBase = rider_url('withdrawal/detail');
+$detailBase .= str_contains($detailBase, '?') ? '&' : '?';
 ?>
 <div class="card card-flush shadow-sm">
 	<div class="card-header border-0 pt-5">
@@ -18,7 +20,7 @@ $rows      = $riderId > 0 ? Withdrawal::listForRider($riderId) : [];
 		<?php else : ?>
 		<div class="d-flex flex-column gap-3">
 			<?php foreach ($rows as $row) : ?>
-			<div class="border border-gray-200 rounded p-4">
+			<a href="<?= htmlspecialchars($detailBase . 'id=' . (int) $row['db_id'], ENT_QUOTES, 'UTF-8') ?>" class="border border-gray-200 rounded p-4 text-decoration-none text-gray-800 d-block">
 				<div class="d-flex justify-content-between mb-2">
 					<span class="fw-bold">₩ <?= number_format((int) $row['amount']) ?></span>
 					<span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>">
@@ -34,7 +36,7 @@ $rows      = $riderId > 0 ? Withdrawal::listForRider($riderId) : [];
 				<?php if ($row['completed_at'] !== '') : ?>
 				<div class="fs-8 text-gray-600">완료 <?= htmlspecialchars($row['completed_at'], ENT_QUOTES, 'UTF-8') ?></div>
 				<?php endif; ?>
-			</div>
+			</a>
 			<?php endforeach; ?>
 		</div>
 		<?php endif; ?>
