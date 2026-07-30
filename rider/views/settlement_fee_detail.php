@@ -46,6 +46,12 @@ $fees = $cycle['fees'] ?? [];
 			<span>플랫폼 지급액</span>
 			<span class="fw-semibold">₩ <?= number_format((int) $cycle['platform_payout']) ?></span>
 		</div>
+		<?php if ((int) ($cycle['support_amount'] ?? 0) > 0) : ?>
+		<div class="d-flex justify-content-between py-3 border-bottom border-gray-200">
+			<span>지원금</span>
+			<span class="fw-semibold text-success">+ ₩ <?= number_format((int) $cycle['support_amount']) ?></span>
+		</div>
+		<?php endif; ?>
 		<?php foreach ($fees as $fee) : ?>
 		<div class="d-flex justify-content-between py-3 border-bottom border-gray-200">
 			<span><?= htmlspecialchars($fee['label'], ENT_QUOTES, 'UTF-8') ?></span>

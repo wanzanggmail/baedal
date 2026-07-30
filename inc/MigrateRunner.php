@@ -24,6 +24,7 @@ final class MigrateRunner
         self::runSqlFile('redesign_settlement_detail.sql');
         self::runSqlFile('rider_debts.sql');
         self::runSqlFile('withdrawal_cycles.sql');
+        self::runSqlFile('settlement_support.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
@@ -39,6 +40,10 @@ final class MigrateRunner
         self::migrateDeductionRegisterColumn();
         self::migrateDailyRidersUniqueDate();
         self::migrateCycleWithdrawnColumn();
+        self::migrateSupportAmountColumn();
+        self::migrateCycleSupportAmountColumn();
+        self::migrateLeasePlannedEndColumn();
+        self::migrateDebtEntryUniqueKey();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -559,6 +564,152 @@ final class MigrateRunner
             echo "OK    withdrawn_amount + idx_src_rider_withdrawn\n";
         } catch (Throwable $e) {
             echo 'ERROR withdrawn_amount → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 지원금/추가지원금 합계 — settlement_daily_riders에 채워 net_amount 계산 시 가산.
+     * parser.py 확인 결과 지원금은 정산금액과 별개로 존재하고 최종 지급액에 +가산된다.
+     */
+    private static function migrateSupportAmountColumn(): void
+    {
+        echo "== settlement_daily_riders.support_amount ==\n";
+
+        if (!db_table_exists('settlement_daily_riders')) {
+            echo "SKIP  settlement_daily_riders (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_daily_riders'), 'Field');
+        if (in_array('support_amount', $cols, true)) {
+            echo "SKIP  support_amount (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE settlement_daily_riders
+                    ADD COLUMN support_amount INT NOT NULL DEFAULT 0
+                        COMMENT '지원금+추가지원금 합계(정산금액과 별개, 지급액에 가산)' AFTER hourly_insurance"
+            );
+            echo "OK    support_amount\n";
+        } catch (Throwable $e) {
+            echo 'ERROR support_amount → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /** 정산 사이클에 지원금 합계를 남겨 net_amount 산출 근거를 명시적으로 보여준다. */
+    private static function migrateCycleSupportAmountColumn(): void
+    {
+        echo "== settlement_rider_cycles.support_amount ==\n";
+
+        if (!db_table_exists('settlement_rider_cycles')) {
+            echo "SKIP  settlement_rider_cycles (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field');
+        if (in_array('support_amount', $cols, true)) {
+            echo "SKIP  support_amount (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE settlement_rider_cycles
+                    ADD COLUMN support_amount INT NOT NULL DEFAULT 0
+                        COMMENT '지원금+추가지원금 합계(gross_amount에 가산돼 net_amount 계산에 반영됨)' AFTER gross_amount"
+            );
+            echo "OK    support_amount\n";
+        } catch (Throwable $e) {
+            echo 'ERROR support_amount → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 리스/렌탈 계약 종료 예정일 — parser.py는 "출고일~종료일"로 계약기간을 정의하고
+     * 정산기간과 겹치는 일수를 자동 계산해 차감한다. 우리는 opened_on(출고일)만 있어서
+     * 종료일 관리가 안 됐음.
+     */
+    private static function migrateLeasePlannedEndColumn(): void
+    {
+        echo "== rider_debts.planned_end_on ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM rider_debts'), 'Field');
+        if (in_array('planned_end_on', $cols, true)) {
+            echo "SKIP  planned_end_on (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE rider_debts
+                    ADD COLUMN planned_end_on DATE NULL
+                        COMMENT '계약 종료 예정일(리스/렌탈). opened_on과 함께 계약기간을 이룸' AFTER opened_on"
+            );
+            echo "OK    planned_end_on\n";
+        } catch (Throwable $e) {
+            echo 'ERROR planned_end_on → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 부채 차감 재실행 멱등성 — 같은 정산(같은 귀속일)을 다시 반영해도 이중 차감되지 않도록
+     * (debt_id, applied_date) UNIQUE. parser.py의 "처리키" 기반 재실행 방지와 같은 목적.
+     */
+    private static function migrateDebtEntryUniqueKey(): void
+    {
+        echo "== rider_debt_entries UNIQUE(debt_id, applied_date) ==\n";
+
+        if (!db_table_exists('rider_debt_entries')) {
+            echo "SKIP  rider_debt_entries (테이블 없음)\n";
+
+            return;
+        }
+
+        $idx = db_rows('SHOW INDEX FROM rider_debt_entries');
+        foreach ($idx as $r) {
+            if (($r['Key_name'] ?? '') === 'uq_rde_debt_applied') {
+                echo "SKIP  uq_rde_debt_applied (이미 있음)\n";
+
+                return;
+            }
+        }
+
+        // 기존 데이터에 중복(debt_id, applied_date)이 있으면 UNIQUE 추가가 실패하므로 먼저 점검.
+        $dup = db_row(
+            "SELECT debt_id, applied_date, COUNT(*) c
+               FROM rider_debt_entries
+              GROUP BY debt_id, applied_date
+             HAVING c > 1
+              LIMIT 1"
+        );
+        if ($dup !== null) {
+            echo "SKIP  uq_rde_debt_applied (기존 중복 데이터 존재 — 수동 정리 후 재실행 필요)\n";
+
+            return;
+        }
+
+        try {
+            db_execute('ALTER TABLE rider_debt_entries ADD UNIQUE KEY uq_rde_debt_applied (debt_id, applied_date)');
+            echo "OK    uq_rde_debt_applied\n";
+        } catch (Throwable $e) {
+            echo 'ERROR uq_rde_debt_applied → ' . $e->getMessage() . "\n";
             exit(1);
         }
     }

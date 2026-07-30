@@ -101,6 +101,13 @@ $hourlyInsCount = (int) (db_row(
     [$uploadId]
 )['cnt'] ?? 0);
 
+$supportRow = db_row(
+    "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total FROM settlement_support_amounts WHERE upload_id = ?",
+    [$uploadId]
+) ?: [];
+$supportCount = (int) ($supportRow['cnt'] ?? 0);
+$supportTotal = (int) ($supportRow['total'] ?? 0);
+
 $meta = json_decode((string) ($upload['stored_path'] ?? ''), true);
 $teamRegion = is_array($meta)
     ? trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? ''))
@@ -206,7 +213,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<div class="text-gray-500 fw-semibold fs-7 mb-1">파일 · 상태</div>
 					<div class="text-gray-800 fs-7 text-break mb-2"><?= htmlspecialchars((string) $upload['original_filename'], ENT_QUOTES, 'UTF-8') ?></div>
 					<span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
-					<div class="text-muted fs-8 mt-2">차감 <?= number_format($deductionCount) ?>건 · 오더상세 <?= number_format($orderDetailCount) ?>건 · 시간제보험 <?= number_format($hourlyInsCount) ?>건</div>
+					<div class="text-muted fs-8 mt-2">차감 <?= number_format($deductionCount) ?>건 · 오더상세 <?= number_format($orderDetailCount) ?>건 · 시간제보험 <?= number_format($hourlyInsCount) ?>건<?php if ($supportCount > 0): ?> · 지원금 <?= number_format($supportCount) ?>건(<?= $fmtWon($supportTotal) ?>)<?php endif; ?></div>
 					<div class="text-muted fs-8"><?= htmlspecialchars((string) ($upload['operator_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(substr((string) $upload['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></div>
 				</div>
 			</div>
@@ -434,6 +441,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			html += '<div class="mb-4">';
 			html += row('오더 건수', esc(d.order_count) + '건');
 			html += row('정산예정(gross)', won(d.gross_amount));
+			if (d.support_amount > 0) {
+				html += row('지원금(+추가지원금)', '+' + won(d.support_amount));
+			}
 			html += row('실지급(payout)', won(d.payout_amount));
 			html += '</div>';
 

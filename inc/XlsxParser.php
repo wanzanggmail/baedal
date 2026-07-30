@@ -400,6 +400,132 @@ class XlsxParser
     }
 
     /**
+     * 지원금 탭 — 주문일자·축약형ID·성함·스토어명·픽업/배달지역·배정/수락/배달시간·
+     * 배달소요시간·피크타임·지원금(주문 단위). 정산금액과 별개로 존재하며 최종 지급액에
+     * **가산**되는 항목(parser.py 확인). "추가지원금" 시트와 이름이 겹치므로(부분일치) 배제한다.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function parseSupportSheet(): array
+    {
+        $sheetIdx = $this->findSheetIndexExact('지원금', ['추가지원금']);
+        if ($sheetIdx === null) {
+            return [];
+        }
+
+        // ⚠️ '지원금'을 헤더 판정 키워드에 넣으면 시트 제목("지원금 상세 내역서")에도
+        // 포함돼 있어 제목 행을 헤더로 오판한다(실 파일로 발견). '주문일자'만 사용.
+        $allRows   = $this->readSheet($sheetIdx, 1, 0);
+        $headerRow = $this->findHeaderRow($allRows, ['주문일자']);
+        if ($headerRow === null) {
+            return [];
+        }
+
+        $map = $this->mapHeaderColumns($allRows[$headerRow] ?? [], [
+            'order_date'    => ['주문일자'],
+            'order_no'      => ['축약형 ID', '축약형ID'],
+            'name'          => ['성함', '이름'],
+            'store_name'    => ['스토어명'],
+            'pickup_area'   => ['픽업지역'],
+            'delivery_area' => ['배달지역'],
+            'assigned_at'   => ['배정시간'],
+            'accepted_at'   => ['수락시간'],
+            'delivered_at'  => ['배달시간'],
+            'duration'      => ['배달소요시간'],
+            'peak_time'     => ['피크타임'],
+            'amount'        => ['지원금'],
+        ]);
+
+        $rows = [];
+        foreach ($allRows as $rowNum => $cols) {
+            if ($rowNum <= $headerRow) {
+                continue;
+            }
+            if (!array_filter((array) $cols, static fn ($v) => $v !== null && $v !== '')) {
+                continue;
+            }
+
+            $name = (string) ($cols[$map['name'] ?? ''] ?? '');
+            if ($name === '') {
+                continue;
+            }
+
+            $durationDays = (float) ($cols[$map['duration'] ?? ''] ?? 0);
+
+            $rows[] = [
+                'order_date'       => self::excelDateOnly($cols[$map['order_date'] ?? ''] ?? null),
+                'order_no'         => (string) ($cols[$map['order_no'] ?? ''] ?? ''),
+                'name_raw'         => $name,
+                'name'             => self::cleanName($name),
+                'store_name'       => (string) ($cols[$map['store_name'] ?? ''] ?? ''),
+                'pickup_area'      => (string) ($cols[$map['pickup_area'] ?? ''] ?? ''),
+                'delivery_area'    => (string) ($cols[$map['delivery_area'] ?? ''] ?? ''),
+                'assigned_at'      => self::excelDateTime($cols[$map['assigned_at'] ?? ''] ?? null),
+                'accepted_at'      => self::excelDateTime($cols[$map['accepted_at'] ?? ''] ?? null),
+                'delivered_at'     => self::excelDateTime($cols[$map['delivered_at'] ?? ''] ?? null),
+                'duration_minutes' => round($durationDays * 24 * 60, 1),
+                'peak_time'        => (string) ($cols[$map['peak_time'] ?? ''] ?? ''),
+                'amount'           => (int) round((float) ($cols[$map['amount'] ?? ''] ?? 0)),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * 추가지원금 탭 — 주문일자·축약형ID·성함·구분·금액. 지원금과 마찬가지로 지급액에 가산.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function parseAddSupportSheet(): array
+    {
+        $sheetIdx = $this->findSheetIndex('추가지원금');
+        if ($sheetIdx === null) {
+            return [];
+        }
+
+        $allRows   = $this->readSheet($sheetIdx, 1, 0);
+        $headerRow = $this->findHeaderRow($allRows, ['주문일자']);
+        if ($headerRow === null) {
+            return [];
+        }
+
+        $map = $this->mapHeaderColumns($allRows[$headerRow] ?? [], [
+            'order_date' => ['주문일자'],
+            'order_no'   => ['축약형 ID', '축약형ID'],
+            'name'       => ['성함', '이름'],
+            'category'   => ['구분'],
+            'amount'     => ['금액'],
+        ]);
+
+        $rows = [];
+        foreach ($allRows as $rowNum => $cols) {
+            if ($rowNum <= $headerRow) {
+                continue;
+            }
+            if (!array_filter((array) $cols, static fn ($v) => $v !== null && $v !== '')) {
+                continue;
+            }
+
+            $name = (string) ($cols[$map['name'] ?? ''] ?? '');
+            if ($name === '') {
+                continue;
+            }
+
+            $rows[] = [
+                'order_date' => self::excelDateOnly($cols[$map['order_date'] ?? ''] ?? null),
+                'order_no'   => (string) ($cols[$map['order_no'] ?? ''] ?? ''),
+                'name_raw'   => $name,
+                'name'       => self::cleanName($name),
+                'category'   => (string) ($cols[$map['category'] ?? ''] ?? ''),
+                'amount'     => (int) round((float) ($cols[$map['amount'] ?? ''] ?? 0)),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * 헤더 행 탐색 — 각 행의 셀 값 중 하나라도 키워드를 포함하면 그 행을 헤더로 판정.
      *
      * @param array<int, array<string, mixed>> $allRows
@@ -620,6 +746,32 @@ class XlsxParser
     {
         foreach ($this->sheetNames as $i => $name) {
             if (str_contains($name, $keyword)) {
+                return $i;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 부분일치 키워드가 겹치는 시트명을 구분할 때 사용(예: "지원금" vs "추가지원금").
+     *
+     * @param list<string> $excludeKeywords 이 키워드를 포함하면 후보에서 제외
+     */
+    private function findSheetIndexExact(string $keyword, array $excludeKeywords = []): ?int
+    {
+        foreach ($this->sheetNames as $i => $name) {
+            if (!str_contains($name, $keyword)) {
+                continue;
+            }
+            $excluded = false;
+            foreach ($excludeKeywords as $ex) {
+                if (str_contains($name, $ex)) {
+                    $excluded = true;
+                    break;
+                }
+            }
+            if (!$excluded) {
                 return $i;
             }
         }

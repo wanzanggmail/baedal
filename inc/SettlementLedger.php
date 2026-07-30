@@ -99,7 +99,55 @@ final class SettlementLedger
             }
         });
 
+        // 리스/렌탈 자동 일수계산(§7 격차) — 업로드의 정산기간(min~max)과 계약기간이
+        // 겹치는 일수만큼, 매칭된 라이더의 활성 리스마다 1회 부과한다. 정산 사이클 생성과
+        // 별개 관심사라 트랜잭션 밖에서 처리하고, 개별 실패는 정산 반영 자체를 막지 않는다.
+        self::applyActiveLeasesForUpload($rows);
+
         return ['applied' => $applied, 'skipped' => $skipped, 'errors' => $errors];
+    }
+
+    /**
+     * 업로드에 매칭된 라이더들의 정산기간(min~max settlement_date)을 구해
+     * 각 라이더의 활성 리스에 자동 일수계산을 1회씩 적용한다(§7 격차, RiderDebt::applyLeaseForPeriod).
+     *
+     * @param list<array<string, mixed>> $rows settlement_daily_riders 행 목록(applyUpload에서 조회한 것)
+     */
+    private static function applyActiveLeasesForUpload(array $rows): void
+    {
+        if (!class_exists('RiderDebt')) {
+            require_once __DIR__ . '/RiderDebt.php';
+        }
+        if (!RiderDebt::tableReady()) {
+            return;
+        }
+
+        $dates = array_column($rows, 'settlement_date');
+        if ($dates === []) {
+            return;
+        }
+        $periodStart = min($dates);
+        $periodEnd   = max($dates);
+
+        $riderIds = array_unique(array_filter(array_map(
+            static fn ($r) => (int) ($r['rider_id'] ?? 0),
+            $rows
+        )));
+
+        foreach ($riderIds as $riderId) {
+            $leases = array_filter(
+                RiderDebt::forRider($riderId, true),
+                static fn (array $d): bool => (string) $d['kind'] === 'lease'
+            );
+            foreach ($leases as $debt) {
+                try {
+                    RiderDebt::applyLeaseForPeriod((int) $debt['id'], (string) $periodStart, (string) $periodEnd);
+                } catch (Throwable) {
+                    // 리스 자동계산 실패가 정산 반영 자체를 막지 않는다(개별 부채 데이터 이상 등).
+                    continue;
+                }
+            }
+        }
     }
 
     /**
@@ -209,6 +257,11 @@ final class SettlementLedger
         $payout  = (int) ($dailyRow['payout_amount'] ?? 0);
         $base    = $payout > 0 ? $payout : $gross;
 
+        // 지원금+추가지원금(2026-07-30 발견) — 정산금액과 별개로 존재하며 지급액에 **가산**되는 항목.
+        // parser.py 확인 결과 최종 지급액에 그대로 더해지고 차감 항목이 아니므로 fee_items가 아니라 base에 얹는다.
+        $support = (int) ($dailyRow['support_amount'] ?? 0);
+        $base   += $support;
+
         $fees = self::buildFeeItems($base, $riderId, (string) $dailyRow['settlement_date'], $cfg, $orgId);
 
         // #6 시간제보험 — 쿠팡 정산서 파일에 포함된 값(계산 아님). 파싱된 값이 있으면 공제.
@@ -223,9 +276,9 @@ final class SettlementLedger
         $cycleId = db_insert(
             'INSERT INTO settlement_rider_cycles
                 (rider_id, upload_id, daily_rider_id, settlement_date, platform,
-                 gross_amount, platform_payout, total_fee_amount, net_amount, order_count,
+                 gross_amount, support_amount, platform_payout, total_fee_amount, net_amount, order_count,
                  completed_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderId,
                 $uploadId,
@@ -233,6 +286,7 @@ final class SettlementLedger
                 (string) $dailyRow['settlement_date'],
                 (string) ($dailyRow['platform'] ?? 'baemin'),
                 $gross,
+                $support,
                 $payout,
                 $totalFee,
                 $net,
@@ -476,6 +530,7 @@ final class SettlementLedger
             'platform'         => $platform,
             'platform_label'   => self::PLATFORM_LABELS[$platform] ?? $platform,
             'gross_amount'     => (int) $row['gross_amount'],
+            'support_amount'   => (int) ($row['support_amount'] ?? 0),
             'platform_payout'  => (int) $row['platform_payout'],
             'total_fee_amount' => (int) $row['total_fee_amount'],
             'net_amount'       => (int) $row['net_amount'],

@@ -294,6 +294,69 @@ final class RiderDebt
         });
     }
 
+    /**
+     * 리스/렌탈 자동 일수계산(§7 격차 — parser.py 확인 결과, 실제 운영은 계약기간
+     * (opened_on~planned_end_on)과 정산기간이 겹치는 일수만큼 자동 차감한다).
+     *
+     * 트리거: 정산 반영(SettlementLedger::applyUpload)이 업로드의 정산기간(min~max
+     * settlement_date)을 구해 매칭된 라이더의 활성 리스마다 1회 호출한다.
+     *
+     * 재실행 멱등성: applyRepayment()가 (debt_id, applied_date) UNIQUE에 걸리면
+     * "이미 이 귀속일로 처리됨"으로 보고 조용히 null을 반환한다(같은 업로드를
+     * 재반영해도 이중 차감되지 않음 — parser.py의 "처리키" 방지와 같은 목적).
+     *
+     * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}|null
+     */
+    public static function applyLeaseForPeriod(int $debtId, string $periodStart, string $periodEnd): ?array
+    {
+        $debt = self::find($debtId);
+        if ($debt === null || (string) $debt['kind'] !== 'lease' || (string) $debt['status'] !== 'active') {
+            return null;
+        }
+
+        $daily = (int) $debt['daily_amount'];
+        $opened = self::normDate($debt['opened_on'] ?? null);
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        // 계약기간(출고일~종료예정일)이 설정 안 된 리스는 자동계산 불가 — 수동 차감(applyRepayment)으로 처리해야 함.
+        if ($daily <= 0 || $opened === null || $plannedEnd === null) {
+            return null;
+        }
+
+        $ps = self::normDate($periodStart);
+        $pe = self::normDate($periodEnd);
+        if ($ps === null || $pe === null) {
+            throw new InvalidArgumentException('정산기간 형식이 올바르지 않습니다. (YYYY-MM-DD)');
+        }
+
+        $overlapStart = max($ps, $opened);
+        $overlapEnd   = min($pe, $plannedEnd);
+        if ($overlapStart > $overlapEnd) {
+            return null; // 계약기간과 정산기간이 겹치지 않음
+        }
+
+        $days = (int) (new DateTime($overlapStart))->diff(new DateTime($overlapEnd))->days + 1;
+        $amount = $days * $daily;
+        if ($amount <= 0) {
+            return null;
+        }
+
+        try {
+            return self::applyRepayment(
+                $debtId,
+                $pe,
+                $days,
+                $amount,
+                sprintf('자동계산: 계약기간∩정산기간(%s~%s) %d일', $overlapStart, $overlapEnd, $days)
+            );
+        } catch (Throwable $e) {
+            // (debt_id, applied_date) UNIQUE 위반 = 이미 이 정산기간으로 처리됨 → 재실행 시 조용히 skip
+            if (str_contains($e->getMessage(), 'uq_rde_debt_applied') || str_contains($e->getMessage(), 'Duplicate entry')) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
     private static function normDate(mixed $v): ?string
     {
         $s = trim((string) ($v ?? ''));

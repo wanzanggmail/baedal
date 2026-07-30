@@ -85,6 +85,7 @@ echo json_encode([
         'fee_promo3'       => (int) $row['fee_promo3'],
         'fee_promo4'       => (int) $row['fee_promo4'],
         'hourly_insurance' => (int) ($row['hourly_insurance'] ?? 0),
+        'support_amount'   => (int) ($row['support_amount'] ?? 0),
         'created_at'       => substr((string) $row['created_at'], 0, 19),
         'matched'          => $matched,
         'rider'            => $matched ? [

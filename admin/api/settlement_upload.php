@@ -127,6 +127,8 @@ try {
         [$parsed, $orderDetails] = settlement_baemin_normalize($baeminOrders, $settlementDate);
         $deductions             = [];
         $hourlyIns              = [];
+        $supports               = [];
+        $addSupports            = [];
         // 업로드 표기일 = 파일명 범위 시작 대신 실제 최소 운행일(더 정확)
         $baeminDates = array_column($parsed['rows'], 'settlement_date');
         if ($baeminDates !== []) {
@@ -137,6 +139,9 @@ try {
         $deductions   = $parser->parseDeductionSheet();
         $orderDetails = $parser->parseOrderDetailSheet();
         $hourlyIns    = $parser->parseHourlyInsuranceSheet();
+        // 지원금/추가지원금(§7 격차): 정산금액과 별개로 존재하며 최종 지급액에 가산되는 항목(parser.py 확인).
+        $supports     = $parser->parseSupportSheet();
+        $addSupports  = $parser->parseAddSupportSheet();
     }
 } catch (Throwable $e) {
     if (isset($parser)) {
@@ -230,6 +235,8 @@ if ($dryRun) {
             'deductions'       => $dedCount,
             'order_details'    => count($orderDetails),
             'hourly_insurance' => count($hourlyIns),
+            'support'          => count($supports),
+            'add_support'      => count($addSupports),
         ],
         'rows'              => $previewRows,
         'duplicate_warning' => $dupWarning,
@@ -253,6 +260,8 @@ try {
         $deductions,
         $orderDetails,
         $hourlyIns,
+        $supports,
+        $addSupports,
         $adminId,
         $agencyId
     ): array {
@@ -276,6 +285,15 @@ try {
             $hourlyByNameRaw[$hi['name_raw']] = ($hourlyByNameRaw[$hi['name_raw']] ?? 0) + (int) $hi['amount'];
         }
 
+        // 지원금+추가지원금 합계: 라이더 이름(원본 문자열) → 금액. daily_riders.support_amount 채우기 + 원본은 별도 저장.
+        $supportByNameRaw = [];
+        foreach ($supports as $sp) {
+            $supportByNameRaw[$sp['name_raw']] = ($supportByNameRaw[$sp['name_raw']] ?? 0) + (int) $sp['amount'];
+        }
+        foreach ($addSupports as $as) {
+            $supportByNameRaw[$as['name_raw']] = ($supportByNameRaw[$as['name_raw']] ?? 0) + (int) $as['amount'];
+        }
+
         $inserted        = 0;
         $matched         = 0;
         $unmatched       = [];
@@ -292,6 +310,7 @@ try {
             }
 
             $hourlyForRider = (int) ($hourlyByNameRaw[$row['name_raw']] ?? 0);
+            $supportForRider = (int) ($supportByNameRaw[$row['name_raw']] ?? 0);
             $rowDate        = (string) ($row['settlement_date'] ?? $settlementDate);
 
             db_insert(
@@ -300,8 +319,9 @@ try {
                      order_count, gross_amount, fee_pickup, fee_delivery, fee_area,
                      fee_dist_cnt, fee_dist_surge, fee_pickup_cnt, fee_pickup_surge,
                      fee_dest_cnt, fee_dest_surge, fee_weather_cnt, fee_weather,
-                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, payout_amount, hourly_insurance)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                     fee_promo1, fee_promo2, fee_promo3, fee_promo4, payout_amount, hourly_insurance,
+                     support_amount)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $uploadId,
                     $rowDate,
@@ -328,6 +348,7 @@ try {
                     $row['fee_promo4'],
                     $row['payout_amount'],
                     $hourlyForRider,
+                    $supportForRider,
                 ]
             );
             $inserted++;
@@ -395,6 +416,58 @@ try {
             $hourlyInsCount++;
         }
 
+        // 지원금/추가지원금 원본 저장(신고/조회용) — daily_riders.support_amount의 근거.
+        $supportCount = 0;
+        foreach ($supports as $sp) {
+            $riderId = $nameRawToRiderId[$sp['name_raw']]
+                ?? settlement_match_rider_id($platform, '', $sp['name'], $agencyId);
+
+            db_insert(
+                'INSERT INTO settlement_support_amounts
+                    (upload_id, settlement_date, rider_id, rider_name_raw, kind, order_no, store_name,
+                     pickup_area, delivery_area, assigned_at, accepted_at, delivered_at, duration_minutes,
+                     peak_time, amount)
+                 VALUES (?,?,?,?,\'support\',?,?,?,?,?,?,?,?,?,?)',
+                [
+                    $uploadId,
+                    (string) ($sp['order_date'] ?: $settlementDate),
+                    $riderId,
+                    $sp['name_raw'],
+                    $sp['order_no'],
+                    $sp['store_name'],
+                    $sp['pickup_area'],
+                    $sp['delivery_area'],
+                    $sp['assigned_at'],
+                    $sp['accepted_at'],
+                    $sp['delivered_at'],
+                    $sp['duration_minutes'],
+                    $sp['peak_time'],
+                    $sp['amount'],
+                ]
+            );
+            $supportCount++;
+        }
+        foreach ($addSupports as $as) {
+            $riderId = $nameRawToRiderId[$as['name_raw']]
+                ?? settlement_match_rider_id($platform, '', $as['name'], $agencyId);
+
+            db_insert(
+                'INSERT INTO settlement_support_amounts
+                    (upload_id, settlement_date, rider_id, rider_name_raw, kind, order_no, category, amount)
+                 VALUES (?,?,?,?,\'add_support\',?,?,?)',
+                [
+                    $uploadId,
+                    (string) ($as['order_date'] ?: $settlementDate),
+                    $riderId,
+                    $as['name_raw'],
+                    $as['order_no'],
+                    $as['category'],
+                    $as['amount'],
+                ]
+            );
+            $supportCount++;
+        }
+
         // 차감내역 — 헤더 기반 매핑으로 정정(구 버전은 배달비를 실제 금액으로 잘못 저장하던 버그가 있었음).
         $deductionCount = 0;
         foreach ($deductions as $ded) {
@@ -444,6 +517,7 @@ try {
             'deductions'     => $deductionCount,
             'order_details'  => $orderDetailCount,
             'hourly_insurance' => $hourlyInsCount,
+            'support'        => $supportCount,
         ];
     });
 } catch (Throwable $e) {
@@ -473,8 +547,9 @@ echo json_encode([
     'deductions' => $result['deductions'],
     'order_details' => $result['order_details'],
     'hourly_insurance' => $result['hourly_insurance'],
+    'support'    => $result['support'],
     'unmatched'  => $result['unmatched'],
-    'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명, 오더 상세 {$result['order_details']}건, 시간제보험 {$result['hourly_insurance']}건)",
+    'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명, 오더 상세 {$result['order_details']}건, 시간제보험 {$result['hourly_insurance']}건, 지원금 {$result['support']}건)",
 ], JSON_UNESCAPED_UNICODE);
 
 /**

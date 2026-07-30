@@ -121,7 +121,12 @@ $detailBase .= str_contains($detailBase, '?') ? '&' : '?';
 								<span class="text-muted fs-7 d-block"><?= htmlspecialchars($row['rider_code'], ENT_QUOTES, 'UTF-8') ?></span>
 							</td>
 							<td><?= htmlspecialchars($row['platform_label'], ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-end"><?= number_format((int) $row['platform_payout']) ?>원</td>
+							<td class="text-end">
+								<?= number_format((int) $row['platform_payout']) ?>원
+								<?php if ((int) ($row['support_amount'] ?? 0) > 0) : ?>
+								<span class="text-success fs-8 d-block">+지원금 <?= number_format((int) $row['support_amount']) ?>원</span>
+								<?php endif; ?>
+							</td>
 							<td class="text-end text-danger">−<?= number_format((int) $row['total_fee_amount']) ?>원</td>
 							<td class="text-end fw-bold"><?= number_format((int) $row['net_amount']) ?>원</td>
 							<td class="text-end">

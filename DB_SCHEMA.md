@@ -3,7 +3,7 @@
 > **목적:** 실제 DB에 어떤 테이블·컬럼·관계가 있는지 한눈에 파악하기 위한 기준 문서.
 > **원본:** `SHOW CREATE TABLE`(정보스키마) 기준 — 코드(`sql/*.sql`, `MigrateRunner.php`)가 아니라 **실제 서버 DB 상태**를 그대로 기술한다.
 > **갱신 규칙(필수):** 테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가 등 **스키마가 바뀌는 모든 작업에서 이 문서를 함께 갱신**한다. (`.cursor/rules/db-schema-sync.mdc`)
-> **최종 확인:** 2026-07-24, DB `my_web_db`, 테이블 30개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 반영 완료 시점)
+> **최종 확인:** 2026-07-30, DB `my_web_db`, 테이블 31개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 + 지원금 파싱 반영 완료 시점)
 
 ---
 
@@ -142,8 +142,12 @@ settlement_uploads (1건 업로드)
 ### `settlement_hourly_insurance` — 🆕(2026-07-23) 엑셀 "시간제보험" 탭 원본, 라이더·일자별 1행
 `occurred_date`(발생일자, 파일 값) · `amount`(양수로 정규화 — 종합탭 AH컬럼은 음수 표기이나 이 테이블·`settlement_daily_riders.hourly_insurance`는 양수 공제액 컨벤션).
 
+### `settlement_support_amounts` — 🆕(2026-07-30) 엑셀 "지원금"·"추가지원금" 탭 원본
+`kind` enum(`support`=지원금, `add_support`=추가지원금). 실제 운영 파서(`parser.py`) 확인 결과 **정산금액과 별개로 존재하며 최종 지급액에 가산되는 항목** — 우리 시스템이 이 탭을 파싱하지 않아 라이더 지급액이 누락돼 있었음(2026-07-30 발견). `settlement_daily_riders.support_amount`(합계)를 거쳐 `settlement_rider_cycles.support_amount`로 이어져 `gross_amount`에 가산된 뒤 `net_amount` 계산에 반영된다.
+⚠️ `XlsxParser::parseSupportSheet()` 헤더 판정 시 키워드 `'지원금'`을 쓰면 시트 제목("지원금 **상세 내역서**")에도 포함돼 있어 제목 행을 헤더로 오판한다(실 파일로 발견·수정) — `'주문일자'`만 사용할 것.
+
 ### `settlement_rider_cycles` — 정산 반영 확정 1건
-`gross_amount`(플랫폼 총액) → `total_fee_amount`(차감 합) → `net_amount`(지갑 반영액, `rider_wallets.balance`에 적립).
+`gross_amount`(플랫폼 총액, 지원금 미포함 원본) · `support_amount`(🆕 2026-07-30, 지원금+추가지원금 합계 — net 계산 시 `gross_amount`에 가산됨) → `total_fee_amount`(차감 합) → `net_amount`(지갑 반영액, `rider_wallets.balance`에 적립. 실제로는 `platform_payout`이 있으면 그걸, 없으면 `gross_amount`를 base로 사용 — `SettlementLedger::createCycleFromDailyRow` 참고).
 UNIQUE(`rider_id`,`settlement_date`,`platform`) — 같은 날 중복 반영 방지.
 
 ### `settlement_fee_items` — 반영 시 차감 항목 상세(`SettlementLedger::buildFeeItems` 산출)
@@ -185,10 +189,11 @@ PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_f
 정산 반영 시 해당 `applied_date`의 항목이 자동으로 `settlement_fee_items`에 합산됨.
 
 ### `rider_debts` — 🆕(2026-07-24) 라이더 부채 원장(대여금/리스/선지급)
-PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
+PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일) · `planned_end_on`(🆕 2026-07-30, 계약 종료 예정일 — 리스 전용. `opened_on`과 함께 계약기간을 이뤄 자동 일수계산의 기준이 됨). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
 
 ### `rider_debt_entries` — 🆕(2026-07-24) 부채 차감 이력
 차감 1회 = 1행. `applied_date`(차감 귀속일) · `days`(차감일수) · `amount`(차감액=일납×일수 또는 수동) · `balance_after`(차감후잔액) · `deduction_entry_id`(생성한 `deduction_entries` 연결). **핵심 연동**: 차감 실행 시 `deduction_entries` 행을 만들어 기존 `SettlementLedger::buildFeeItems` 흐름이 그대로 차감(중복 로직 없음). 이력 취소 시 연결된 `deduction_entries`도 삭제되고 상각형 잔액이 복구됨.
+UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: 같은 부채에 같은 귀속일로 두 번 차감되지 않음(정산 업로드를 재반영해도 리스 이중 차감 방지, `RiderDebt::applyLeaseForPeriod`가 이 제약을 이용해 조용히 skip).
 
 ---
 
@@ -301,4 +306,5 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |
 | 2026-07-23 (2) | 배달의민족 정산서 지원. `settlement_daily_riders` UNIQUE를 `(upload_id,license_id)`→`(upload_id,license_id,settlement_date)`로 확장(배민 다중 운행일 대응, 인덱스명 `uq_sdr_upload_license_date`). 스키마 신규 테이블 없음 — 배민 주문을 기존 `settlement_daily_riders`/`settlement_order_details`에 집계·저장. |
 | 2026-07-24 (2) | **정산수수료 age-bucket용 사이클 출금 추적.** `settlement_rider_cycles`에 `withdrawn_amount`(INT, 0=미출금 / net_amount=완전출금, 부분출금까지 표현) + `idx_src_rider_withdrawn` 인덱스 추가. 신규 `withdrawal_request_cycles`(출금↔사이클 연결: `request_id`·`cycle_id`·`amount`·`order_count`, UNIQUE(request,cycle), 양쪽 FK CASCADE) → **30개 테이블**. 출금 신청 시점에 사이클을 점유하고 반려 시 해제한다(`inc/WithdrawalCycles.php`). 보증금 경계 정책(통째/부분)이 미확정이지만 **두 정책 모두 이 스키마로 수용**되므로 재마이그레이션 불필요. |
+| 2026-07-30 | **지원금 파싱 + 리스 자동계산(정산명세서 실 파서 `parser.py` 분석 결과 반영).** ① 신규 `settlement_support_amounts`(지원금·추가지원금 원본) → **31개 테이블**, `settlement_daily_riders.support_amount`·`settlement_rider_cycles.support_amount` 컬럼 추가. `XlsxParser::parseSupportSheet()`/`parseAddSupportSheet()` 신규 — 시트 제목("지원금 상세 내역서")에 헤더 키워드가 겹쳐 오판하던 버그를 실 파일로 발견·수정. `SettlementLedger`가 net_amount 계산 시 지원금을 gross에 가산하도록 수정. 실 파일+가짜데이터 e2e 검증(5,000+2,000원 정확히 가산 확인). ② `rider_debts.planned_end_on`(리스 계약 종료 예정일) + `rider_debt_entries` UNIQUE(debt_id,applied_date) 추가 — `RiderDebt::applyLeaseForPeriod()`가 계약기간∩정산기간 겹치는 일수를 자동 계산해 차감(수동 일수 입력 불필요), 재실행해도 이중 차감 안 됨(11/11 + SettlementLedger 배선 검증). |
 | 2026-07-24 | **라이더 부채 원장 신규.** `rider_debts`(대여금/리스/선지급 헤더: 원금·잔액·일납·채권자·상태) + `rider_debt_entries`(차감 이력) 추가 → **29개 테이블**. 라이더 정산명세서(PDF)의 대여금/리스/선지급 차감 명세 대응. 차감 실행 시 `deduction_entries`(kind=`loan`/`lease`/`advance`)를 생성해 기존 정산 반영 흐름이 그대로 차감. `sql/rider_debts.sql`, `inc/RiderDebt.php`, `admin/api/debt_action.php`, 라이더 상세 "부채" 카드. |
