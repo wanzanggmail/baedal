@@ -119,6 +119,10 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 				<i class="ki-duotone ki-pencil fs-3"><span class="path1"></span><span class="path2"></span></i>
 				정보 수정
 			</button>
+			<button type="button" class="btn btn-sm btn-light-danger fw-bold" data-bs-toggle="modal" data-bs-target="#kt_rider_password_modal">
+				<i class="ki-duotone ki-key fs-3"><span class="path1"></span><span class="path2"></span></i>
+				비밀번호 초기화
+			</button>
 			<a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">
 				<i class="ki-duotone ki-left fs-3"><span class="path1"></span><span class="path2"></span></i>
 				목록으로
@@ -426,36 +430,13 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	<!--end::Debt row-->
 	<?php endif; ?>
 
-	<!--begin::Contract & Memo row-->
+	<!--begin::Memo row-->
 	<div class="row g-6 mb-8">
-		<div class="col-xl-6">
-			<div class="card card-flush h-100">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">계약·보험</h3></div>
-				<div class="card-body pt-0 fs-6">
-					<div class="mb-4">
-						<span class="text-gray-500 fw-semibold d-block fs-7">본인인증 완료일</span>
-						<span class="text-gray-900"><?= htmlspecialchars($rider['id_verified_at'] ?? '—', ENT_QUOTES, 'UTF-8') ?></span>
-					</div>
-					<div class="mb-4">
-						<span class="text-gray-500 fw-semibold d-block fs-7">계약 서명일</span>
-						<span class="text-gray-900"><?= htmlspecialchars(!empty($rider['contract_signed_at']) ? substr((string) $rider['contract_signed_at'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
-					</div>
-					<div class="mb-4">
-						<span class="text-gray-500 fw-semibold d-block fs-7">보험</span>
-						<span class="text-gray-900"><?= htmlspecialchars($rider['insurance_name'] ?? '—', ENT_QUOTES, 'UTF-8') ?></span>
-					</div>
-					<div>
-						<span class="text-gray-500 fw-semibold d-block fs-7">보험 만기</span>
-						<span class="text-gray-900"><?= htmlspecialchars(!empty($rider['insurance_expires']) ? substr((string) $rider['insurance_expires'], 0, 10) : '—', ENT_QUOTES, 'UTF-8') ?></span>
-					</div>
-				</div>
-			</div>
-		</div>
-		<div class="col-xl-6">
-			<div class="card card-flush h-100">
+		<div class="col-12">
+			<div class="card card-flush">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">관리자 메모</h3></div>
 				<div class="card-body pt-0">
-					<textarea class="form-control form-control-solid" rows="6" id="admin_memo_ta"
+					<textarea class="form-control form-control-solid" rows="4" id="admin_memo_ta"
 					          placeholder="메모 없음"><?= htmlspecialchars($rider['admin_memo'] ?? '', ENT_QUOTES, 'UTF-8') ?></textarea>
 					<div class="d-flex justify-content-end mt-4">
 						<button type="button" class="btn btn-sm btn-primary" id="btn_memo_save">메모 저장</button>
@@ -464,7 +445,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			</div>
 		</div>
 	</div>
-	<!--end::Contract & Memo row-->
+	<!--end::Memo row-->
 
 	<!--begin::Edit Modal-->
 	<div class="modal fade" id="kt_rider_edit_modal" tabindex="-1" aria-hidden="true">
@@ -555,6 +536,35 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 		</div>
 	</div>
 	<!--end::Edit Modal-->
+
+	<!--begin::Password Reset Modal-->
+	<div class="modal fade" id="kt_rider_password_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-500px">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 class="fw-bold">비밀번호 초기화</h2>
+					<div class="btn btn-icon btn-sm btn-active-icon-primary" data-bs-dismiss="modal">
+						<i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i>
+					</div>
+				</div>
+				<div class="modal-body py-lg-8 px-lg-10">
+					<div id="pw_alert" class="d-none mb-5"></div>
+					<div class="alert bg-light-warning fs-8 p-3 mb-4">라이더 <?= htmlspecialchars($nm, ENT_QUOTES, 'UTF-8') ?>(<?= htmlspecialchars((string) $rider['login_id'], ENT_QUOTES, 'UTF-8') ?>)의 새 비밀번호를 지정합니다. 저장 즉시 적용되며, 이 값을 라이더에게 직접 전달해야 합니다.</div>
+					<label class="form-label fs-7 fw-semibold required">새 비밀번호</label>
+					<div class="input-group">
+						<input type="text" class="form-control form-control-sm form-control-solid" id="pw_new" maxlength="60" placeholder="4자 이상" autocomplete="off" />
+						<button type="button" class="btn btn-sm btn-light-primary" id="pw_random_btn" title="랜덤 비밀번호 생성">랜덤 생성</button>
+					</div>
+					<div class="form-text fs-8">화면에 그대로 표시됩니다 — 저장 후 이 값을 복사해 라이더에게 전달하세요.</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
+					<button type="button" class="btn btn-danger" id="pw_save_btn">저장</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::Password Reset Modal-->
 
 	<?php if ($debtReady): ?>
 	<!--begin::Debt New Modal-->
@@ -765,6 +775,52 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	document.getElementById('btn_memo_save').addEventListener('click', function () {
 		var memo = document.getElementById('admin_memo_ta').value;
 		apiPatch({ action: 'memo', memo: memo }, '메모가 저장되었습니다.');
+	});
+
+	// 비밀번호 초기화
+	var pwModalEl = document.getElementById('kt_rider_password_modal');
+	pwModalEl.addEventListener('hidden.bs.modal', function () {
+		document.getElementById('pw_new').value = '';
+		document.getElementById('pw_alert').className = 'd-none mb-5';
+		document.getElementById('pw_save_btn').disabled = false;
+	});
+	document.getElementById('pw_random_btn').addEventListener('click', function () {
+		var chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+		var pw = '';
+		for (var i = 0; i < 10; i++) { pw += chars.charAt(Math.floor(Math.random() * chars.length)); }
+		document.getElementById('pw_new').value = pw;
+	});
+	document.getElementById('pw_save_btn').addEventListener('click', function () {
+		var pwAlert = document.getElementById('pw_alert');
+		var pw = document.getElementById('pw_new').value;
+		if (pw.length < 4) {
+			pwAlert.className = 'alert alert-danger mb-5';
+			pwAlert.textContent = '비밀번호는 4자 이상이어야 합니다.';
+			return;
+		}
+		var btn = this;
+		btn.disabled = true;
+		fetch(API, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'reset_password', new_password: pw })
+		})
+		.then(function (r) { return r.json(); })
+		.then(function (data) {
+			if (data.ok) {
+				pwAlert.className = 'alert alert-success mb-5';
+				pwAlert.textContent = '저장되었습니다. 이 화면을 닫기 전에 비밀번호를 라이더에게 전달하세요.';
+			} else {
+				pwAlert.className = 'alert alert-danger mb-5';
+				pwAlert.textContent = data.message || '오류가 발생했습니다.';
+			}
+			btn.disabled = false;
+		})
+		.catch(function () {
+			pwAlert.className = 'alert alert-danger mb-5';
+			pwAlert.textContent = '네트워크 오류가 발생했습니다.';
+			btn.disabled = false;
+		});
 	});
 
 	// 프로필 정보 수정 저장

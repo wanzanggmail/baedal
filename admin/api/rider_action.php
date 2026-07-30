@@ -304,6 +304,19 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
+    if ($action === 'reset_password') {
+        // 관리자가 직접 새 비밀번호를 지정(라이더가 접속 불가 상태일 때 초기화용). 실제 값은 감사로그에 남기지 않는다.
+        $newPassword = (string) ($body['new_password'] ?? '');
+        if (strlen($newPassword) < 4) $err('비밀번호는 4자 이상이어야 합니다.');
+        if (strlen($newPassword) > 60) $err('비밀번호가 너무 깁니다.');
+
+        $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+        db_execute('UPDATE riders SET password_hash = ?, updated_at = NOW() WHERE id = ?', [$hash, $id]);
+        AuditLog::record('rider.reset_password', (string) ($rider['rider_code'] ?? $id), '비밀번호 초기화(관리자 지정)');
+        echo json_encode(['ok' => true, 'message' => '비밀번호가 초기화되었습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $err('알 수 없는 액션입니다.');
 }
 
