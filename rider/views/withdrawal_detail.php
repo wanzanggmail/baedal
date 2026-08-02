@@ -127,12 +127,13 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 
 			<div class="text-gray-500 fw-semibold mb-2 mt-4">출금 신청 시 공제</div>
 			<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
-				<span>보증금 (출금 후 유지)</span>
-				<span class="text-danger">−<?= $fmtWon($reserve) ?></span>
-			</div>
-			<div class="d-flex justify-content-between py-2">
 				<span>정산수수료</span>
 				<span class="text-danger">−<?= $fmtWon($fee) ?></span>
+			</div>
+			<?php // 보증금은 이번 출금에서 빠진 돈이 아니라 지갑에 남겨둔 최소 잔액 — 차감으로 표기하지 않는다. ?>
+			<div class="d-flex justify-content-between py-2 text-gray-600 fs-8">
+				<span>보증금(지갑에 유지)</span>
+				<span><?= $fmtWon($reserve) ?></span>
 			</div>
 		</div>
 	</div>

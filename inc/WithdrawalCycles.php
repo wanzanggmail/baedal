@@ -100,7 +100,7 @@ final class WithdrawalCycles
      * @param int $withdrawable 이번에 소진할 금액(원). 잔액 − 보증금.
      * @return array{picked:list<array{cycle_id:int, settlement_date:string, amount:int, order_count:int, partial:bool}>, taken:int, blocked_by_policy:bool}
      */
-    public static function select(int $riderId, int $withdrawable, ?string $policy = null): array
+    public static function select(int $riderId, int $withdrawable, ?string $policy = null, ?string $toDate = null): array
     {
         $policy = $policy ?? self::BOUNDARY_POLICY;
         $picked = [];
@@ -112,6 +112,16 @@ final class WithdrawalCycles
 
         $cycles          = self::unwithdrawn($riderId);
         $blockedByPolicy = false;
+
+        // 기간 지정 출금(§7 #18-b) — 라이더가 달력에서 고른 날짜까지만 소진한다.
+        // 사이클 소비는 항상 "가장 오래된 미출금분부터"여야 age-bucket 요율과 잔액 정합성이
+        // 유지되므로, 임의 날짜 다중선택이 아니라 "선택일까지 누적"으로 자른다.
+        if ($toDate !== null && $toDate !== '') {
+            $cycles = array_values(array_filter(
+                $cycles,
+                static fn (array $c): bool => $c['settlement_date'] <= $toDate
+            ));
+        }
 
         foreach ($cycles as $c) {
             $left = $withdrawable - $taken;

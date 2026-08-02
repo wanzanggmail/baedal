@@ -457,10 +457,13 @@ final class Withdrawal
      *
      * @return array<string, mixed>
      */
-    public static function applyForRider(int $riderId): array
+    public static function applyForRider(int $riderId, ?string $toDate = null): array
     {
         if ($riderId < 1) {
             throw new InvalidArgumentException('라이더 정보가 없습니다.');
+        }
+        if ($toDate !== null && $toDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $toDate)) {
+            throw new InvalidArgumentException('출금 기간이 올바르지 않습니다.');
         }
 
         if (!db_table_exists('withdrawal_requests')) {
@@ -491,9 +494,13 @@ final class Withdrawal
             throw new InvalidArgumentException('처리 중인 출금 신청이 있습니다. 완료 후 다시 신청해 주세요.');
         }
 
-        $preview = RiderWallet::previewWithdrawal($riderId);
+        $preview = RiderWallet::previewWithdrawal($riderId, $toDate);
         if (!(bool) ($preview['can_apply'] ?? false)) {
-            throw new InvalidArgumentException('출금 가능 금액이 없습니다. (보증금·수수료 차감 후 0원)');
+            throw new InvalidArgumentException(
+                $toDate !== null && $toDate !== ''
+                    ? '선택한 기간에 출금 가능한 정산 내역이 없습니다. (보증금·수수료 차감 후 0원)'
+                    : '출금 가능 금액이 없습니다. (보증금·수수료 차감 후 0원)'
+            );
         }
 
         $balance  = (int) $preview['balance'];
@@ -504,10 +511,19 @@ final class Withdrawal
         $picked   = (array) ($preview['picked_cycles'] ?? []);
 
         $hasAccruedCol = self::hasAccruedDaysColumn();
+        // 기간 지정 출금이면 실제로 소진한 정산일 범위를 메모 앞에 남긴다.
+        $periodNote = '';
+        if ($picked !== []) {
+            $pickedDates = array_column($picked, 'settlement_date');
+            $periodNote  = sprintf('[%s~%s] ', min($pickedDates), max($pickedDates));
+        }
         // §7 #18 — 사이클 기반이면 수수료 구간 내역을 메모에 남긴다(80원/40원 구간 분리 표기).
+        $kindLabel = ($toDate !== null && $toDate !== '') ? '라이더 기간 출금' : '라이더 전액 출금';
         $note = (bool) ($preview['fee_cycle_based'] ?? false)
             ? sprintf(
-                '라이더 전액 출금 · 보증금 %s원 · 정산수수료 %s원(%d건×%d원 + %d건×%d원)',
+                '%s%s · 보증금 %s원 · 정산수수료 %s원(%d건×%d원 + %d건×%d원)',
+                $periodNote,
+                $kindLabel,
                 number_format($reserve),
                 number_format($fee),
                 (int) $preview['fee_short_orders'],
@@ -516,7 +532,9 @@ final class Withdrawal
                 (int) $preview['fee_rate_long']
             )
             : sprintf(
-                '라이더 전액 출금 · 적립 %d일 · 보증금 %s원 · 수수료 %s원(건당)',
+                '%s%s · 적립 %d일 · 보증금 %s원 · 수수료 %s원(건당)',
+                $periodNote,
+                $kindLabel,
                 $accrued,
                 number_format($reserve),
                 number_format($fee)

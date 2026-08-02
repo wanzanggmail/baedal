@@ -112,3 +112,4 @@ if ($riderId > 0 && SettlementLedger::tableExists()) {
 <script>
 window.RIDER_SETTLEMENT_CALENDAR_DATA = <?= json_encode($calendarData, JSON_UNESCAPED_UNICODE) ?>;
 </script>
+<script src="<?= htmlspecialchars(web_asset('js/rider-settlement-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>

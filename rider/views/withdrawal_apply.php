@@ -4,11 +4,24 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/RiderWallet.php';
 require_once INC_PATH . '/Withdrawal.php';
+require_once INC_PATH . '/WithdrawalCycles.php';
 
 $riderUser = rider_current_user();
 $riderId   = $riderUser ? (int) $riderUser['id'] : 0;
 $preview   = $riderId > 0 ? RiderWallet::previewWithdrawal($riderId) : [];
-$canApply  = $riderId > 0 && (bool) ($preview['can_apply'] ?? false) && !Withdrawal::hasOpenRiderRequest($riderId);
+$hasOpen   = $riderId > 0 && Withdrawal::hasOpenRiderRequest($riderId);
+$canApply  = $riderId > 0 && (bool) ($preview['can_apply'] ?? false) && !$hasOpen;
+
+// 출금 가능한 미출금 정산일 — 달력에 표시하고, 라이더가 "어디까지" 출금할지 고른다.
+$unwithdrawn = $riderId > 0 ? WithdrawalCycles::unwithdrawn($riderId) : [];
+$calendarData = [];
+foreach ($unwithdrawn as $c) {
+    $calendarData[$c['settlement_date']] = [
+        'amount'      => $c['remaining'],
+        'order_count' => $c['order_count'],
+    ];
+}
+$lastDate = $unwithdrawn !== [] ? (string) $unwithdrawn[count($unwithdrawn) - 1]['settlement_date'] : '';
 
 $bankLabel = '—';
 $bankAcct  = '—';
@@ -40,10 +53,12 @@ if (empty($_SESSION['rider_wd_csrf'])) {
 }
 $csrfToken = $_SESSION['rider_wd_csrf'];
 ?>
-<div class="card card-flush shadow-sm">
+<link rel="stylesheet" href="<?= htmlspecialchars(web_asset('css/rider-settlement-calendar.css'), ENT_QUOTES, 'UTF-8') ?>" />
+
+<div class="card card-flush shadow-sm mb-4">
 	<div class="card-header border-0 pt-5">
 		<h2 class="card-title fw-bold fs-4">출금 신청</h2>
-		<span class="text-gray-500 fs-7">모인 금액 전액 출금 (보증금·수수료 자동 차감)</span>
+		<span class="text-gray-500 fs-7">달력에서 출금할 기간을 선택하세요</span>
 	</div>
 	<div class="card-body pt-0">
 		<?php if ($flashOk !== '') : ?>
@@ -53,48 +68,70 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 		<div class="alert alert-danger fs-7 mb-4"><?= htmlspecialchars($flashErr, ENT_QUOTES, 'UTF-8') ?></div>
 		<?php endif; ?>
 
-		<div class="mb-5 p-4 bg-light rounded">
+		<?php if ($unwithdrawn === []) : ?>
+		<div class="alert bg-light-warning fs-7 mb-0">출금 가능한 정산 내역이 없습니다.</div>
+		<?php else : ?>
+		<div class="alert bg-light-primary fs-8 p-3 mb-4">
+			출금은 <strong>오래된 정산분부터 순서대로</strong> 나갑니다. 달력에서 날짜를 누르면 <strong>그 날짜까지</strong> 출금 신청됩니다.
+		</div>
+		<?php endif; ?>
+	</div>
+</div>
+
+<?php if ($unwithdrawn !== []) : ?>
+<div class="card card-flush shadow-sm mb-4 rider-cal-page-card">
+	<div class="card-body p-0">
+		<div class="rider-cal-wrap">
+			<div class="rider-cal-container">
+				<div class="rider-cal-header">
+					<div class="rider-cal-nav">
+						<button type="button" class="rider-cal-nav-btn" id="riderPrevBtn" aria-label="이전 달">‹</button>
+						<div class="rider-cal-month-year" id="riderMonthYear"></div>
+						<button type="button" class="rider-cal-nav-btn" id="riderNextBtn" aria-label="다음 달">›</button>
+					</div>
+				</div>
+				<div class="rider-cal-grid">
+					<div class="rider-cal-days-header">
+						<div class="rider-cal-day-header rider-cal-weekend">일</div>
+						<div class="rider-cal-day-header">월</div>
+						<div class="rider-cal-day-header">화</div>
+						<div class="rider-cal-day-header">수</div>
+						<div class="rider-cal-day-header">목</div>
+						<div class="rider-cal-day-header">금</div>
+						<div class="rider-cal-day-header rider-cal-saturday">토</div>
+					</div>
+					<div class="rider-cal-days-grid" id="riderDaysGrid"></div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="card card-flush shadow-sm">
+	<div class="card-body">
+		<div class="d-flex justify-content-between align-items-center mb-3">
+			<span class="fw-bold text-gray-800">출금 기간</span>
+			<span class="fw-bold text-primary" id="wdPeriodLabel">전체</span>
+		</div>
+
+		<div class="mb-5 p-4 bg-light rounded" id="wdBreakdown">
 			<div class="d-flex justify-content-between mb-2">
-				<span class="text-gray-600 fs-7">지갑 잔액</span>
-				<span class="fw-bold">₩ <?= number_format((int) ($preview['balance'] ?? 0)) ?></span>
+				<span class="text-gray-600 fs-7">선택 정산액</span>
+				<span class="fw-bold" id="wdConsume">₩ <?= number_format((int) ($preview['consume_amount'] ?? 0)) ?></span>
 			</div>
-			<?php if (empty($preview['fee_cycle_based'])) : ?>
 			<div class="d-flex justify-content-between mb-2">
-				<span class="text-gray-600 fs-7">적립 일수</span>
-				<span><?= (int) ($preview['accrued_days'] ?? 0) ?>일</span>
+				<span class="text-gray-600 fs-7 fw-semibold">정산수수료</span>
+				<span class="text-danger fw-semibold" id="wdFee">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
 			</div>
-			<?php endif; ?>
-			<div class="d-flex justify-content-between mb-2">
-				<span class="text-gray-600 fs-7">보증금 (출금 후 유지)</span>
-				<span class="text-danger">− ₩ <?= number_format((int) ($preview['reserve_amount'] ?? 0)) ?></span>
-			</div>
-			<?php if (!empty($preview['fee_cycle_based'])) : ?>
-			<?php // §7 #18 — 정산수수료는 주문 건별로 매겨진다. 최근 주문일수록 비싸므로 구간을 나눠 보여준다. ?>
-			<?php if ((int) ($preview['fee_short_orders'] ?? 0) > 0) : ?>
-			<div class="d-flex justify-content-between mb-1">
-				<span class="text-gray-600 fs-8">└ 최근 <?= (int) ($preview['fee_day_threshold'] ?? 7) ?>일 이내 <?= number_format((int) $preview['fee_short_orders']) ?>건 × <?= number_format((int) $preview['fee_rate_short']) ?>원</span>
-				<span class="text-danger fs-8">− ₩ <?= number_format((int) $preview['fee_short_amount']) ?></span>
-			</div>
-			<?php endif; ?>
-			<?php if ((int) ($preview['fee_long_orders'] ?? 0) > 0) : ?>
-			<div class="d-flex justify-content-between mb-1">
-				<span class="text-gray-600 fs-8">└ <?= (int) ($preview['fee_day_threshold'] ?? 7) ?>일 지난 <?= number_format((int) $preview['fee_long_orders']) ?>건 × <?= number_format((int) $preview['fee_rate_long']) ?>원</span>
-				<span class="text-danger fs-8">− ₩ <?= number_format((int) $preview['fee_long_amount']) ?></span>
-			</div>
-			<?php endif; ?>
-			<div class="d-flex justify-content-between mb-2">
-				<span class="text-gray-600 fs-7 fw-semibold">정산수수료 합계</span>
-				<span class="text-danger fw-semibold">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
-			</div>
-			<?php else : ?>
-			<div class="d-flex justify-content-between mb-2">
-				<span class="text-gray-600 fs-7">출금 수수료 (건당)</span>
-				<span class="text-danger">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
-			</div>
-			<?php endif; ?>
+			<div class="fs-8 text-gray-600" id="wdFeeDetail"></div>
 			<div class="border-top pt-3 mt-2 d-flex justify-content-between align-items-center">
 				<span class="fw-bold text-gray-800">실지급 예정액</span>
-				<span class="fs-3 fw-bold text-primary">₩ <?= number_format((int) ($preview['payout_amount'] ?? 0)) ?></span>
+				<span class="fs-3 fw-bold text-primary" id="wdPayout">₩ <?= number_format((int) ($preview['payout_amount'] ?? 0)) ?></span>
+			</div>
+			<?php // 보증금은 이번 출금에서 빠지는 돈이 아니라 "지갑에 남겨두는 최소 잔액"이다.
+			      // 선택 가능 상한(잔액−보증금)에 이미 반영돼 있으므로 차감 항목으로 표기하지 않는다. ?>
+			<div class="border-top pt-3 mt-3 fs-8 text-gray-600 d-flex justify-content-between">
+				<span>지갑 잔액 ₩ <?= number_format((int) ($preview['balance'] ?? 0)) ?> · 보증금 ₩ <?= number_format((int) ($preview['reserve_amount'] ?? 0)) ?>은 지갑에 남습니다</span>
 			</div>
 		</div>
 
@@ -110,18 +147,26 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 
 		<form method="post" action="<?= htmlspecialchars(rider_url('withdrawal/apply'), ENT_QUOTES, 'UTF-8') ?>">
 			<input type="hidden" name="_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>" />
-			<button type="submit" class="btn btn-primary w-100"<?= $canApply ? '' : ' disabled' ?>>
-				전액 출금 신청
+			<input type="hidden" name="to_date" id="wdToDate" value="" />
+			<button type="submit" class="btn btn-primary w-100" id="wdSubmitBtn"<?= $canApply ? '' : ' disabled' ?>>
+				출금 신청
 			</button>
 		</form>
-		<?php if (!$canApply && $flashOk === '') : ?>
+		<?php if ($hasOpen) : ?>
 		<p class="text-muted fs-8 mt-3 mb-0">
-			<?php if (Withdrawal::hasOpenRiderRequest($riderId)) : ?>
 			처리 중인 출금 신청이 있습니다. <a href="<?= htmlspecialchars(rider_url('withdrawal/history'), ENT_QUOTES, 'UTF-8') ?>">내역 확인</a>
-			<?php else : ?>
-			출금 가능 금액이 없거나 계좌·상태를 확인해 주세요.
-			<?php endif; ?>
 		</p>
+		<?php elseif (!$canApply && $flashOk === '') : ?>
+		<p class="text-muted fs-8 mt-3 mb-0">출금 가능 금액이 없거나 계좌·상태를 확인해 주세요.</p>
 		<?php endif; ?>
 	</div>
 </div>
+
+<script>
+window.RIDER_WD_CYCLES = <?= json_encode($calendarData, JSON_UNESCAPED_UNICODE) ?>;
+window.RIDER_WD_LAST_DATE = <?= json_encode($lastDate, JSON_UNESCAPED_UNICODE) ?>;
+window.RIDER_WD_PREVIEW_URL = <?= json_encode(rtrim(RIDER_BASE, '/') . '/p/withdrawal_preview.php', JSON_UNESCAPED_UNICODE) ?>;
+window.RIDER_WD_HAS_OPEN = <?= $hasOpen ? 'true' : 'false' ?>;
+</script>
+<script src="<?= htmlspecialchars(web_asset('js/rider-withdrawal-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<?php endif; ?>

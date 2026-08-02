@@ -144,6 +144,20 @@ button.rider-cal-day.rider-cal-day-btn:hover {
 	background: var(--bs-gray-200);
 	border-color: var(--bs-gray-300);
 }
+/* 출금 신청 달력 — 선택된 출금 범위(가장 오래된 미출금분 ~ 선택일) */
+.rider-cal-day.rider-cal-selected {
+	background: var(--bs-primary);
+	border-color: var(--bs-primary);
+}
+.rider-cal-day.rider-cal-selected .rider-cal-day-num,
+.rider-cal-day.rider-cal-selected .rider-cal-day-meta {
+	color: #fff !important;
+}
+button.rider-cal-day.rider-cal-selected:hover {
+	background: var(--bs-primary);
+	border-color: var(--bs-primary);
+}
+
 .rider-cal-day.rider-cal-today {
 	border-color: var(--bs-primary);
 	box-shadow: 0 0 0 1px var(--bs-primary);

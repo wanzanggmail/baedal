@@ -8,11 +8,27 @@ require_once INC_PATH . '/RiderWallet.php';
 
 $riderUser = rider_current_user();
 $riderHomeWithdrawableAmount = 0;
+$riderHomeMonthTotal = 0;
+$riderHomeMonthDays  = 0;
 if ($riderUser) {
     try {
         $riderHomeWithdrawableAmount = (int) (RiderWallet::previewWithdrawal((int) $riderUser['id'])['payout_amount'] ?? 0);
     } catch (Throwable) {
         $riderHomeWithdrawableAmount = 0;
+    }
+    // 이번 달 정산 합계 — 정산 반영이 끝난 사이클(지갑 적립분) 기준.
+    try {
+        $m = db_row(
+            'SELECT COALESCE(SUM(net_amount), 0) AS total, COUNT(*) AS days
+               FROM settlement_rider_cycles
+              WHERE rider_id = ? AND settlement_date >= ? AND settlement_date <= ?',
+            [(int) $riderUser['id'], date('Y-m-01'), date('Y-m-t')]
+        ) ?: [];
+        $riderHomeMonthTotal = (int) ($m['total'] ?? 0);
+        $riderHomeMonthDays  = (int) ($m['days'] ?? 0);
+    } catch (Throwable) {
+        $riderHomeMonthTotal = 0;
+        $riderHomeMonthDays  = 0;
     }
 }
 
@@ -65,10 +81,14 @@ $carouselBg = ['primary', 'success', 'warning', 'info'];
 	<div class="card card-flush shadow-sm rider-home-settlement mb-6">
 		<div class="card-body">
 			<div class="rider-home-settlement-top border-bottom border-gray-200">
-				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0">이번 달 정산 합계 (샘플)</span>
+				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0">이번 달 정산 합계 (<?= htmlspecialchars(date('n'), ENT_QUOTES, 'UTF-8') ?>월)</span>
 				<div class="d-flex flex-wrap align-items-center gap-2 mt-1">
-					<span class="fs-2 fw-bold text-gray-900">₩ 3,842,500</span>
-					<span class="badge badge-light-success fs-9">반영 완료</span>
+					<span class="fs-2 fw-bold text-gray-900">₩ <?= htmlspecialchars(number_format($riderHomeMonthTotal), ENT_QUOTES, 'UTF-8') ?></span>
+					<?php if ($riderHomeMonthDays > 0) : ?>
+					<span class="badge badge-light-success fs-9">반영 완료 <?= (int) $riderHomeMonthDays ?>일</span>
+					<?php else : ?>
+					<span class="badge badge-light fs-9">반영 내역 없음</span>
+					<?php endif; ?>
 				</div>
 			</div>
 			<div class="rider-home-settlement-withdraw">

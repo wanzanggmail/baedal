@@ -46,7 +46,7 @@ final class RiderWallet
      *
      * @return array<string, int|bool|string>
      */
-    public static function previewWithdrawal(int $riderId): array
+    public static function previewWithdrawal(int $riderId, ?string $toDate = null): array
     {
         $wallet = self::get($riderId);
         // 멀티테넌시: 라이더 소속 대리점의 출금 정책 사용 (없으면 전역 기본)
@@ -69,7 +69,7 @@ final class RiderWallet
         $cycleBased  = false;
 
         if ($afterReserve > 0 && WithdrawalCycles::tableReady()) {
-            $sel     = WithdrawalCycles::select($riderId, $afterReserve);
+            $sel     = WithdrawalCycles::select($riderId, $afterReserve, null, $toDate);
             $picked  = $sel['picked'];
             $taken   = (int) $sel['taken'];
             $blocked = (bool) $sel['blocked_by_policy'];
@@ -92,7 +92,9 @@ final class RiderWallet
                 'threshold'  => (int) $cfg['fee_day_threshold'],
             ];
             $fee     = (int) $feeCalc['total'];
-            $consume = $afterReserve;
+            // 기간 지정 출금인데 해당 기간에 소진할 사이클이 없으면 0. (구 폴백 모델은 전액
+            // 출금 전제라 기간 개념이 없으므로 그대로 쓰면 안 고른 금액까지 나가버린다.)
+            $consume = ($toDate !== null && $toDate !== '') ? 0 : $afterReserve;
         }
 
         $payout = max(0, $consume - $fee);

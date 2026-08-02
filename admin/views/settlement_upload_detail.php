@@ -157,9 +157,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2">
-			<?php if (($upload['status'] ?? '') === 'parsed' && SettlementLedger::tableExists()) : ?>
+			<?php if (in_array(($upload['status'] ?? ''), ['parsed', 'applied'], true) && SettlementLedger::tableExists()) : ?>
 			<button type="button" class="btn btn-sm btn-success fw-bold" id="btn_settlement_apply" data-upload-id="<?= (int) $uploadId ?>">
-				정산 반영 · 수수료·지갑
+				<?= ($upload['status'] ?? '') === 'applied' ? '정산 재반영 (신규 매칭분)' : '정산 반영 · 수수료·지갑' ?>
 			</button>
 			<?php endif; ?>
 			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">수수료 내역</a>
@@ -310,8 +310,21 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<td>
 								<?php if ($matched) : ?>
 									<span class="badge badge-light-success">매칭</span>
+									<button type="button" class="btn btn-sm btn-light py-1 px-2 fs-8 ms-1 btn-reg"
+										data-row="<?= (int) $row['id'] ?>"
+										data-license="<?= htmlspecialchars((string) $row['license_id'], ENT_QUOTES, 'UTF-8') ?>"
+										data-name="<?= htmlspecialchars((string) $row['rider_name_raw'], ENT_QUOTES, 'UTF-8') ?>"
+										data-platform="<?= htmlspecialchars((string) ($row['platform'] ?? $upload['platform']), ENT_QUOTES, 'UTF-8') ?>"
+										data-matched="1"
+										data-current-name="<?= htmlspecialchars((string) ($row['rider_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">재연결</button>
 								<?php else : ?>
 									<span class="badge badge-light-warning">미매칭</span>
+									<button type="button" class="btn btn-sm btn-light-danger py-1 px-2 fs-8 ms-1 btn-reg"
+										data-row="<?= (int) $row['id'] ?>"
+										data-license="<?= htmlspecialchars((string) $row['license_id'], ENT_QUOTES, 'UTF-8') ?>"
+										data-name="<?= htmlspecialchars((string) $row['rider_name_raw'], ENT_QUOTES, 'UTF-8') ?>"
+										data-platform="<?= htmlspecialchars((string) ($row['platform'] ?? $upload['platform']), ENT_QUOTES, 'UTF-8') ?>"
+										data-matched="0">연결/등록</button>
 								<?php endif; ?>
 							</td>
 							<td>
@@ -409,6 +422,230 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		</div>
 	</div>
 	<!--end::원본 데이터 상세 모달-->
+
+	<!--begin::미매칭 라이더 연결/등록 모달-->
+	<div class="modal fade" id="kt_quick_rider_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-500px">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 class="fw-bold fs-4">라이더 연결/등록</h2>
+					<div class="btn btn-icon btn-sm btn-active-icon-primary" data-bs-dismiss="modal">
+						<i class="ki-duotone ki-cross fs-2"><span class="path1"></span><span class="path2"></span></i>
+					</div>
+				</div>
+				<div class="modal-body py-lg-6 px-lg-8">
+					<div id="qrRematchWarn" class="alert alert-warning d-none mb-4"></div>
+					<div id="quickRiderAlert" class="d-none mb-4"></div>
+					<input type="hidden" id="qrRowId" />
+					<input type="hidden" id="qrLicense" />
+					<input type="hidden" id="qrPlatform" />
+					<input type="hidden" id="qrForce" value="0" />
+
+					<ul class="nav nav-tabs nav-line-tabs fs-7 mb-5" id="qrModeTabs">
+						<li class="nav-item"><a class="nav-link active" data-mode="create" href="#">신규 라이더 등록</a></li>
+						<li class="nav-item"><a class="nav-link" data-mode="link" href="#">기존 라이더에 연결</a></li>
+					</ul>
+
+					<div id="qrCreatePane">
+						<div class="mb-4">
+							<label class="form-label required">이름</label>
+							<input type="text" class="form-control form-control-solid" id="qrName" maxlength="50" />
+						</div>
+						<div class="mb-4">
+							<label class="form-label">휴대전화</label>
+							<input type="text" class="form-control form-control-solid" id="qrPhone" maxlength="20" placeholder="01012345678" />
+						</div>
+						<div class="row">
+							<div class="col-md-6 mb-4">
+								<label class="form-label">로그인 ID</label>
+								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
+							</div>
+							<div class="col-md-6 mb-4">
+								<label class="form-label required">비밀번호</label>
+								<input type="text" class="form-control form-control-solid" id="qrPassword" maxlength="60" autocomplete="off" />
+							</div>
+						</div>
+						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
+					</div>
+
+					<div id="qrLinkPane" class="d-none">
+						<div class="alert bg-light-info fs-8 p-3 mb-4">기존 라이더에 <strong id="qrLinkPlatformLabel">이 플랫폼</strong> ID(<code id="qrLinkLicenseLabel">-</code>)를 연결합니다.</div>
+						<div class="input-group mb-3">
+							<input type="text" class="form-control form-control-solid" id="qrSearchInput" placeholder="이름·코드로 검색" />
+							<button type="button" class="btn btn-light-primary" id="qrSearchBtn">검색</button>
+						</div>
+						<div id="qrSearchResults" class="d-flex flex-column gap-2" style="max-height:240px;overflow-y:auto"></div>
+					</div>
+
+					<div class="alert bg-light-primary fs-8 p-3 mt-4 mb-0">연결/등록 후 이 업로드의 같은 엑셀 이름으로 된 다른 원본 데이터(오더상세·시간제보험·지원금·차감내역)도 함께 매칭되고, 상단 「정산 반영」을 다시 누르면 새로 매칭된 건만 추가로 반영됩니다.</div>
+				</div>
+				<div class="modal-footer flex-center">
+					<button type="button" class="btn btn-light me-3" data-bs-dismiss="modal">취소</button>
+					<button type="button" class="btn btn-primary" id="qrSubmitBtn">등록 및 매칭</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::미매칭 라이더 연결/등록 모달-->
+
+	<script>
+	(function () {
+		'use strict';
+		var platformLabels = { baemin: '배달의민족', coupang: '쿠팡이츠', other: '기타' };
+		var registerApiUrl = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/settlement_register_rider.php', JSON_UNESCAPED_UNICODE) ?>;
+		var uploadId = <?= (int) $uploadId ?>;
+		var quickModalEl = document.getElementById('kt_quick_rider_modal');
+		var activeBtn = null;
+
+		function escHtml(s) {
+			return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+			});
+		}
+		function randomPw() { return Math.random().toString(36).slice(2, 8); }
+
+		function setQrMode(mode) {
+			document.getElementById('qrCreatePane').classList.toggle('d-none', mode !== 'create');
+			document.getElementById('qrLinkPane').classList.toggle('d-none', mode !== 'link');
+			document.getElementById('qrSubmitBtn').classList.toggle('d-none', mode !== 'create');
+			document.querySelectorAll('#qrModeTabs .nav-link').forEach(function (a) {
+				a.classList.toggle('active', a.getAttribute('data-mode') === mode);
+			});
+		}
+		document.querySelectorAll('#qrModeTabs .nav-link').forEach(function (a) {
+			a.addEventListener('click', function (ev) { ev.preventDefault(); setQrMode(a.getAttribute('data-mode')); });
+		});
+
+		function onRegBtnClick() {
+			var b = this;
+			activeBtn = b;
+			var license = b.getAttribute('data-license') || '';
+			var name = b.getAttribute('data-name') || '';
+			var platform = b.getAttribute('data-platform') || '';
+			var matched = b.getAttribute('data-matched') === '1';
+			var currentName = b.getAttribute('data-current-name') || '';
+			document.getElementById('qrRowId').value = b.getAttribute('data-row');
+			document.getElementById('qrLicense').value = license;
+			document.getElementById('qrPlatform').value = platform;
+			document.getElementById('qrForce').value = matched ? '1' : '0';
+			document.getElementById('qrLicenseLabel').textContent = license || '(없음)';
+			document.getElementById('qrName').value = name;
+			document.getElementById('qrPhone').value = '';
+			document.getElementById('qrLoginId').value = '';
+			document.getElementById('qrPassword').value = randomPw();
+			var al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
+			var warn = document.getElementById('qrRematchWarn');
+			if (matched) {
+				warn.className = 'alert alert-warning mb-4';
+				warn.textContent = '현재 "' + currentName + '" 라이더로 매칭돼 있습니다. 다른 라이더로 재연결하면 엑셀 이름이 같은 다른 원본 데이터도 함께 옮겨집니다. 이미 정산 반영된 건은 재연결이 막힙니다.';
+			} else {
+				warn.className = 'd-none mb-4';
+				warn.textContent = '';
+			}
+			document.getElementById('qrLinkPlatformLabel').textContent = platformLabels[platform] || platform;
+			document.getElementById('qrLinkLicenseLabel').textContent = license || '(없음)';
+			document.getElementById('qrSearchInput').value = name || '';
+			document.getElementById('qrSearchResults').innerHTML = '';
+			setQrMode(matched ? 'link' : 'create');
+			bootstrap.Modal.getOrCreateInstance(quickModalEl).show();
+		}
+		function rebindRegBtn(b) {
+			if (b) b.addEventListener('click', onRegBtnClick);
+		}
+		document.querySelectorAll('.btn-reg').forEach(rebindRegBtn);
+
+		function markRowMatched(riderName, riderCode) {
+			if (!activeBtn) return;
+			var td = activeBtn.closest('td');
+			var row = activeBtn.getAttribute('data-row');
+			var license = activeBtn.getAttribute('data-license') || '';
+			var name = activeBtn.getAttribute('data-name') || '';
+			var platform = activeBtn.getAttribute('data-platform') || '';
+			td.innerHTML = '<span class="badge badge-light-success">매칭</span>' +
+				'<button type="button" class="btn btn-sm btn-light py-1 px-2 fs-8 ms-1 btn-reg" data-row="' + escHtml(row) +
+				'" data-license="' + escHtml(license) + '" data-name="' + escHtml(name) + '" data-platform="' + escHtml(platform) +
+				'" data-matched="1" data-current-name="' + escHtml(riderName) + '">재연결</button>';
+			rebindRegBtn(td.querySelector('.btn-reg'));
+			var nameTd = activeBtn.closest('tr').querySelector('td:nth-child(3)');
+			if (nameTd) {
+				nameTd.innerHTML = '<span class="fw-bold">' + escHtml(riderName) + '</span><div class="text-muted fs-8">' + escHtml(riderCode) + '</div>';
+			}
+		}
+
+		async function qrSearch() {
+			var q = document.getElementById('qrSearchInput').value.trim();
+			var platform = document.getElementById('qrPlatform').value;
+			var box = document.getElementById('qrSearchResults');
+			box.innerHTML = '<div class="text-muted fs-8">검색 중…</div>';
+			try {
+				var resp = await fetch(registerApiUrl + '?q=' + encodeURIComponent(q) + '&platform=' + encodeURIComponent(platform), { credentials: 'same-origin' });
+				var data = await resp.json();
+				if (!data.ok) throw new Error(data.message || '검색 실패');
+				if (!data.riders.length) { box.innerHTML = '<div class="text-muted fs-8">결과가 없습니다.</div>'; return; }
+				box.innerHTML = data.riders.map(function (r) {
+					var has = r.platform_ext ? '<span class="badge badge-light-warning fs-8 ms-1">기존:' + escHtml(r.platform_ext) + '</span>' : '';
+					return '<div class="d-flex align-items-center justify-content-between border border-gray-300 rounded p-2">' +
+						'<div><span class="fw-bold">' + escHtml(r.name) + '</span> <span class="text-muted fs-8 font-monospace">' + escHtml(r.rider_code) + '</span>' + has + '</div>' +
+						'<button type="button" class="btn btn-sm btn-light-primary qr-link-btn" data-id="' + r.id + '">연결</button></div>';
+				}).join('');
+			} catch (e) { box.innerHTML = '<div class="text-danger fs-8">' + escHtml(e.message) + '</div>'; }
+		}
+		document.getElementById('qrSearchBtn').addEventListener('click', qrSearch);
+		document.getElementById('qrSearchInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); qrSearch(); } });
+		document.getElementById('qrSearchResults').addEventListener('click', async function (ev) {
+			var b = ev.target.closest('.qr-link-btn'); if (!b) return;
+			var al = document.getElementById('quickRiderAlert');
+			var force = document.getElementById('qrForce').value === '1';
+			if (force && !confirm('현재 매칭을 이 라이더로 교정할까요?')) return;
+			b.disabled = true;
+			try {
+				var resp = await fetch(registerApiUrl, {
+					method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+					body: JSON.stringify({
+						action: 'link', rider_id: Number(b.getAttribute('data-id')),
+						platform: document.getElementById('qrPlatform').value, license_id: document.getElementById('qrLicense').value,
+						upload_id: uploadId, row_id: Number(document.getElementById('qrRowId').value), force: force,
+					})
+				});
+				var data = await resp.json();
+				if (!data.ok) throw new Error(data.message || '연결 실패');
+				markRowMatched(data.rider.name, data.rider.rider_code);
+				bootstrap.Modal.getInstance(quickModalEl).hide();
+			} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '연결 실패'; b.disabled = false; }
+		});
+
+		document.getElementById('qrSubmitBtn').addEventListener('click', async function () {
+			var al = document.getElementById('quickRiderAlert');
+			var payload = {
+				action: 'create',
+				platform: document.getElementById('qrPlatform').value,
+				license_id: document.getElementById('qrLicense').value,
+				name: document.getElementById('qrName').value.trim(),
+				phone: document.getElementById('qrPhone').value.trim(),
+				login_id: document.getElementById('qrLoginId').value.trim(),
+				password: document.getElementById('qrPassword').value,
+				upload_id: uploadId,
+				row_id: Number(document.getElementById('qrRowId').value),
+				force: document.getElementById('qrForce').value === '1',
+			};
+			if (!payload.name) { al.className = 'alert alert-danger mb-4'; al.textContent = '이름을 입력하세요.'; return; }
+			if (payload.force && !confirm('현재 매칭을 새로 등록하는 라이더로 교정할까요?')) return;
+			var submitBtn = this;
+			submitBtn.disabled = true;
+			try {
+				var resp = await fetch(registerApiUrl, {
+					method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+					body: JSON.stringify(payload)
+				});
+				var data = await resp.json();
+				if (!data.ok) throw new Error(data.message || '등록 실패');
+				markRowMatched(data.rider.name, data.rider.rider_code);
+				bootstrap.Modal.getInstance(quickModalEl).hide();
+			} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '등록 실패'; }
+			submitBtn.disabled = false;
+		});
+	})();
+	</script>
 
 	<script>
 	(function () {
@@ -548,7 +785,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 	})();
 	</script>
 
-	<?php if (($upload['status'] ?? '') === 'parsed' && SettlementLedger::tableExists()) : ?>
+	<?php if (in_array(($upload['status'] ?? ''), ['parsed', 'applied'], true) && SettlementLedger::tableExists()) : ?>
 	<script>
 	(function () {
 		var btn = document.getElementById('btn_settlement_apply');

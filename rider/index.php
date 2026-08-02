@@ -150,7 +150,8 @@ if ($riderRoute === 'withdrawal/apply' && $_SERVER['REQUEST_METHOD'] === 'POST')
     }
 
     try {
-        $row = Withdrawal::applyForRider((int) $ru['id']);
+        $toDate = trim((string) ($_POST['to_date'] ?? ''));
+        $row = Withdrawal::applyForRider((int) $ru['id'], $toDate !== '' ? $toDate : null);
         $_SESSION['rider_flash_ok'] = '출금 신청이 접수되었습니다. (실지급 ₩' . number_format((int) $row['amount']) . ')';
     } catch (InvalidArgumentException $e) {
         $_SESSION['rider_flash_error'] = $e->getMessage();

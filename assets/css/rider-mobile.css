@@ -1,0 +1,48 @@
+/* 라이더 앱 모바일 전용 보정 */
+
+/* 홈 — 정산/출금 요약 카드 */
+.rider-home-settlement-top {
+	padding-bottom: 0.85rem;
+	margin-bottom: 0.85rem;
+}
+.rider-home-settlement-withdraw {
+	padding-top: 0.1rem;
+}
+
+/* 홈 — 큰 액션 버튼(달력 보기 / 출금 신청). 손가락으로 누르기 좋게 세로로 키운다.
+   ⚠️ Metronic 루트 font-size가 12px이라 rem은 의도보다 25% 작게 나온다 → px로 고정. */
+.rider-home-actions-row .rider-home-big-action {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	min-height: 130px;
+	padding: 20px 12px;
+	border-radius: 12px;
+}
+.rider-home-actions-row .rider-home-big-action i {
+	font-size: 40px;
+	line-height: 1;
+}
+.rider-home-actions-row .rider-home-big-action .rider-home-big-action-label {
+	font-size: 17px;
+	font-weight: 700;
+	line-height: 1.2;
+}
+.rider-home-actions-row .rider-home-big-action:active {
+	transform: scale(0.98);
+}
+@media (min-width: 400px) {
+	.rider-home-actions-row .rider-home-big-action {
+		min-height: 145px;
+	}
+	.rider-home-actions-row .rider-home-big-action i {
+		font-size: 44px;
+	}
+}
+
+/* 홈 — 공지 목록 */
+.rider-home-notice-list li + li {
+	margin-top: 0.5rem;
+}
