@@ -17,10 +17,20 @@
 
 	var DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 
-	var state = {
-		y: new Date().getFullYear(),
-		m: new Date().getMonth(),
-	};
+	// 시작 월 — 데이터가 있는 가장 최근 달로 연다. 정산 반영은 보통 며칠 늦게 들어오고
+	// 과거 정산분을 조회하는 경우가 많아, 현재 달로 열면 빈 달력만 보이는 일이 잦다.
+	function initialMonth() {
+		var now = new Date();
+		var raw = typeof window !== 'undefined' ? window.RIDER_SETTLEMENT_CALENDAR_DATA : null;
+		var keys = raw && typeof raw === 'object' ? Object.keys(raw).sort() : [];
+		if (!keys.length) {
+			return { y: now.getFullYear(), m: now.getMonth() };
+		}
+		var latest = keys[keys.length - 1].split('-');
+		return { y: parseInt(latest[0], 10), m: parseInt(latest[1], 10) - 1 };
+	}
+
+	var state = initialMonth();
 
 	function getData() {
 		var raw = typeof window !== 'undefined' ? window.RIDER_SETTLEMENT_CALENDAR_DATA : null;

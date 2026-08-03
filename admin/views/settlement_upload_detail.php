@@ -494,6 +494,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		var platformLabels = { baemin: '배달의민족', coupang: '쿠팡이츠', other: '기타' };
 		var registerApiUrl = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/settlement_register_rider.php', JSON_UNESCAPED_UNICODE) ?>;
 		var uploadId = <?= (int) $uploadId ?>;
+		var agencyId = <?= (int) $upload['agency_id'] ?>;
 		var quickModalEl = document.getElementById('kt_quick_rider_modal');
 		var activeBtn = null;
 
@@ -557,6 +558,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		function markRowMatched(riderName, riderCode) {
 			if (!activeBtn) return;
 			var td = activeBtn.closest('td');
+			var tr = activeBtn.closest('tr'); // td.innerHTML을 바꾸면 activeBtn이 DOM에서 떨어져 나가 이후 closest()가 null이 되므로 미리 잡아둔다.
 			var row = activeBtn.getAttribute('data-row');
 			var license = activeBtn.getAttribute('data-license') || '';
 			var name = activeBtn.getAttribute('data-name') || '';
@@ -566,7 +568,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				'" data-license="' + escHtml(license) + '" data-name="' + escHtml(name) + '" data-platform="' + escHtml(platform) +
 				'" data-matched="1" data-current-name="' + escHtml(riderName) + '">재연결</button>';
 			rebindRegBtn(td.querySelector('.btn-reg'));
-			var nameTd = activeBtn.closest('tr').querySelector('td:nth-child(3)');
+			var nameTd = tr ? tr.querySelector('td:nth-child(3)') : null;
 			if (nameTd) {
 				nameTd.innerHTML = '<span class="fw-bold">' + escHtml(riderName) + '</span><div class="text-muted fs-8">' + escHtml(riderCode) + '</div>';
 			}
@@ -602,7 +604,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				var resp = await fetch(registerApiUrl, {
 					method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
 					body: JSON.stringify({
-						action: 'link', rider_id: Number(b.getAttribute('data-id')),
+						action: 'link', rider_id: Number(b.getAttribute('data-id')), agency_id: agencyId,
 						platform: document.getElementById('qrPlatform').value, license_id: document.getElementById('qrLicense').value,
 						upload_id: uploadId, row_id: Number(document.getElementById('qrRowId').value), force: force,
 					})
@@ -618,6 +620,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			var al = document.getElementById('quickRiderAlert');
 			var payload = {
 				action: 'create',
+				agency_id: agencyId,
 				platform: document.getElementById('qrPlatform').value,
 				license_id: document.getElementById('qrLicense').value,
 				name: document.getElementById('qrName').value.trim(),
