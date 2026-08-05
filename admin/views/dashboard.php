@@ -391,7 +391,9 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 								    $stInfo = $uploadStatusLabels[$st] ?? ['label' => $st, 'badge' => 'badge-light'];
 								    $plat = (string) ($u['platform'] ?? '');
 								    $err = (int) ($u['error_rows'] ?? 0);
-								    $detailUrl = admin_url('settlement/upload-detail') . '?id=' . (int) ($u['id'] ?? 0);
+								    $detailUrl = admin_url('settlement/upload-detail');
+								    $detailUrl .= str_contains($detailUrl, '?') ? '&' : '?';
+								    $detailUrl .= 'id=' . (int) ($u['id'] ?? 0);
 								    ?>
 								<tr>
 									<td><span class="text-gray-800 fw-bold"><?= htmlspecialchars((string) ($u['settlement_date'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span></td>

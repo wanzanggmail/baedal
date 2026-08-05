@@ -8,11 +8,16 @@ require_once INC_PATH . '/RiderWallet.php';
 
 $riderUser = rider_current_user();
 $riderHomeWithdrawableAmount = 0;
+$riderHomeReserveAmount = 0;   // 출금 후에도 지갑에 남겨두는 보증금
+$riderHomeWalletBalance = 0;
 $riderHomeMonthTotal = 0;
 $riderHomeMonthDays  = 0;
 if ($riderUser) {
     try {
-        $riderHomeWithdrawableAmount = (int) (RiderWallet::previewWithdrawal((int) $riderUser['id'])['payout_amount'] ?? 0);
+        $pv = RiderWallet::previewWithdrawal((int) $riderUser['id']);
+        $riderHomeWithdrawableAmount = (int) ($pv['payout_amount'] ?? 0);
+        $riderHomeReserveAmount      = (int) ($pv['reserve_amount'] ?? 0);
+        $riderHomeWalletBalance      = (int) ($pv['balance'] ?? 0);
     } catch (Throwable) {
         $riderHomeWithdrawableAmount = 0;
     }
@@ -95,7 +100,18 @@ $carouselBg = ['primary', 'success', 'warning', 'info'];
 				<span class="text-gray-500 fs-8 fw-semibold d-block mb-0">출금 가능 금액</span>
 				<span class="fs-2 fw-bold text-primary d-block mt-1">₩ <?= htmlspecialchars(number_format($riderHomeWithdrawableAmount), ENT_QUOTES, 'UTF-8') ?></span>
 				<span class="fs-8 text-gray-600 d-block mt-0">보증금·건당 수수료 차감 후 전액 출금 가능액</span>
-				<a href="<?= htmlspecialchars(rider_url('withdrawal/apply'), ENT_QUOTES, 'UTF-8') ?>" class="fs-8 fw-semibold mt-1 d-inline-block">출금 신청하기</a>
+				<div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top border-gray-200">
+					<span class="text-gray-600 fs-8">
+						<i class="ki-duotone ki-shield-tick fs-6 text-success me-1"><span class="path1"></span><span class="path2"></span></i>
+						보증금 (지갑에 유지)
+					</span>
+					<span class="fw-bold text-gray-800 fs-7">₩ <?= htmlspecialchars(number_format($riderHomeReserveAmount), ENT_QUOTES, 'UTF-8') ?></span>
+				</div>
+				<div class="d-flex justify-content-between align-items-center mt-1">
+					<span class="text-gray-500 fs-9">지갑 잔액</span>
+					<span class="text-gray-600 fs-9">₩ <?= htmlspecialchars(number_format($riderHomeWalletBalance), ENT_QUOTES, 'UTF-8') ?></span>
+				</div>
+				<a href="<?= htmlspecialchars(rider_url('withdrawal/apply'), ENT_QUOTES, 'UTF-8') ?>" class="fs-8 fw-semibold mt-2 d-inline-block">출금 신청하기</a>
 			</div>
 		</div>
 	</div>

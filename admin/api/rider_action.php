@@ -178,20 +178,17 @@ if ($method === 'POST' || $method === 'PATCH') {
     }
 
     if ($action === 'set_platform') {
-        // 쿠팡/배민 등 플랫폼 외부 ID 연동/수정/해제 (정산 매칭 키)
+        // 플랫폼 외부 ID **추가** (정산 매칭 키).
+        // 한 라이더가 팀지역별로 쿠팡ID를 여러 개 가질 수 있으므로 덮어쓰지 않고 행을 더한다.
         $pf  = trim((string) ($body['platform'] ?? ''));
         $ext = trim((string) ($body['external_id'] ?? ''));
         if (!in_array($pf, ['coupang', 'baemin', 'other'], true)) {
             $err('플랫폼이 올바르지 않습니다.');
         }
-        $agencyId = (int) ($rider['agency_id'] ?? 0);
-
         if ($ext === '') {
-            db_execute('DELETE FROM rider_platforms WHERE rider_id = ? AND platform = ?', [$id, $pf]);
-            AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$pf} 연동 해제");
-            echo json_encode(['ok' => true, 'message' => '연동을 해제했습니다.'], JSON_UNESCAPED_UNICODE);
-            exit;
+            $err('연동할 ID를 입력하세요.');
         }
+        $agencyId = (int) ($rider['agency_id'] ?? 0);
 
         // 같은 대리점 내 다른 라이더가 이미 이 플랫폼 ID를 쓰고 있으면 거부
         $dup = db_row(
@@ -204,14 +201,29 @@ if ($method === 'POST' || $method === 'PATCH') {
             $err('이 ' . ($pf === 'coupang' ? '쿠팡' : ($pf === 'baemin' ? '배민' : '')) . ' ID는 이미 다른 라이더(#' . (int) $dup['rider_id'] . ')에 연결돼 있습니다.');
         }
 
-        $existing = db_row('SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? ORDER BY id ASC LIMIT 1', [$id, $pf]);
-        if ($existing !== null) {
-            db_execute('UPDATE rider_platforms SET external_id = ?, is_connected = 1 WHERE id = ?', [$ext, (int) $existing['id']]);
-        } else {
-            db_insert('INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id) VALUES (?, ?, 1, ?)', [$id, $pf, $ext]);
+        if (db_row('SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? AND external_id = ? LIMIT 1', [$id, $pf, $ext]) !== null) {
+            $err('이미 등록된 ID입니다.');
         }
-        AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$pf} ID 연동 · {$ext}");
-        echo json_encode(['ok' => true, 'message' => '플랫폼 ID가 저장되었습니다.'], JSON_UNESCAPED_UNICODE);
+
+        db_insert('INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id) VALUES (?, ?, 1, ?)', [$id, $pf, $ext]);
+        AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$pf} ID 추가 · {$ext}");
+        echo json_encode(['ok' => true, 'message' => 'ID가 추가되었습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($action === 'remove_platform') {
+        // 플랫폼 ID 1건 삭제 (여러 개 중 특정 행만)
+        $rpId = (int) ($body['rp_id'] ?? 0);
+        if ($rpId < 1) {
+            $err('삭제할 항목이 지정되지 않았습니다.');
+        }
+        $row = db_row('SELECT id, platform, external_id FROM rider_platforms WHERE id = ? AND rider_id = ? LIMIT 1', [$rpId, $id]);
+        if ($row === null) {
+            $err('해당 연동을 찾을 수 없습니다.', 404);
+        }
+        db_execute('DELETE FROM rider_platforms WHERE id = ?', [$rpId]);
+        AuditLog::record('rider.platform', (string) ($rider['rider_code'] ?? $id), "{$row['platform']} ID 연동 해제 · {$row['external_id']}");
+        echo json_encode(['ok' => true, 'message' => '연동을 해제했습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -305,15 +317,15 @@ if ($method === 'POST' || $method === 'PATCH') {
     }
 
     if ($action === 'reset_password') {
-        // 관리자가 직접 새 비밀번호를 지정(라이더가 접속 불가 상태일 때 초기화용). 실제 값은 감사로그에 남기지 않는다.
-        $newPassword = (string) ($body['new_password'] ?? '');
-        if (strlen($newPassword) < 4) $err('비밀번호는 4자 이상이어야 합니다.');
-        if (strlen($newPassword) > 60) $err('비밀번호가 너무 깁니다.');
-
-        $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
-        db_execute('UPDATE riders SET password_hash = ?, updated_at = NOW() WHERE id = ?', [$hash, $id]);
-        AuditLog::record('rider.reset_password', (string) ($rider['rider_code'] ?? $id), '비밀번호 초기화(관리자 지정)');
-        echo json_encode(['ok' => true, 'message' => '비밀번호가 초기화되었습니다.'], JSON_UNESCAPED_UNICODE);
+        // 초기화는 항상 초기 비밀번호(0000)로 통일하고 강제 변경 플래그를 세운다 —
+        // 라이더가 최초 로그인 시 본인이 직접 새 비밀번호를 정하게 하는 게 안전.
+        require_once INC_PATH . '/RiderAuth.php';
+        RiderAuth::applyInitialPassword($id);
+        AuditLog::record('rider.reset_password', (string) ($rider['rider_code'] ?? $id), '비밀번호 초기화(0000, 최초 로그인 시 변경 강제)');
+        echo json_encode([
+            'ok'      => true,
+            'message' => '비밀번호가 ' . RiderAuth::INITIAL_PASSWORD . ' 로 초기화되었습니다. 라이더가 최초 로그인 시 직접 변경합니다.',
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

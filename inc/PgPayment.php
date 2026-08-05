@@ -12,7 +12,7 @@ require_once __DIR__ . '/PgFeeConfig.php';
  *
  * 정산 반영 후, 대리점이 라이더에게 지급할 자금을 카드로 조달(FUND)한다.
  * - 결제 단위: 라이더별 건건히(총액 일괄 아님).
- * - 카드 청구액 = 라이더 net + 영업대행수수료(PgFeeConfig).
+ * - 카드 청구액 = 라이더 net + 플랫폼 수수료(PgFeeConfig).
  * - 우선순위 1번 카드부터 시도 → 한도초과 등 실패 시 다음 카드로 자동 재시도.
  * - 성공: agency_wallets.balance 에 net 충전 + pg_payments(success) 기록.
  * - 전 카드 실패: pg_payments(failed) 기록(알림/재시도는 상위에서).

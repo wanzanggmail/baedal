@@ -35,12 +35,14 @@ if ($method === 'POST') {
         exit;
     };
 
+    require_once INC_PATH . '/RiderAuth.php';
+
     $loginId  = trim((string) ($body['login_id']  ?? ''));
-    $password = (string) ($body['password'] ?? '');
+    // 신규 라이더 비밀번호는 초기값(0000)으로 통일 — 최초 로그인 시 변경이 강제된다.
+    $password = RiderAuth::INITIAL_PASSWORD;
     $name     = trim((string) ($body['name']    ?? ''));
     $phone    = trim((string) ($body['phone']   ?? ''));
 
-    if (strlen($password) < 4) $err('비밀번호는 4자 이상이어야 합니다.');
     if ($name === '')       $err('이름을 입력하세요.');
     if ($phone === '')      $err('휴대전화를 입력하세요.');
 
@@ -126,10 +128,10 @@ if ($method === 'POST') {
     ): int {
         $id = db_insert(
             'INSERT INTO riders
-                (rider_code, login_id, password_hash, name, phone, email, birth_date,
+                (rider_code, login_id, password_hash, must_change_password, name, phone, email, birth_date,
                  status, team_code, vehicle_type, address,
                  bank_code, bank_account, account_holder, agency_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, 1, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderCode, $loginId, $passwordHash, $name, $phone, $email,
                 $birth !== '' ? $birth : null,

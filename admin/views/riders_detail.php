@@ -40,7 +40,7 @@ if (!Org::canAccessAgency((int) ($rider['agency_id'] ?? 0))) {
 }
 
 $platforms = db_rows(
-    'SELECT platform, external_id FROM rider_platforms WHERE rider_id = ? AND is_connected = 1 ORDER BY id',
+    'SELECT id, platform, external_id FROM rider_platforms WHERE rider_id = ? AND is_connected = 1 ORDER BY platform, id',
     [$riderId]
 );
 
@@ -82,7 +82,7 @@ $bankDisplay = $rider['bank_label'] ?? $rider['bank_name'] ?? '—';
 // 편집 모달용: 은행 목록
 $banks = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order, label");
 
-// 부채 원장(대여금/리스/선지급)
+// 미수금 원장(대여금/리스/선지급)
 require_once INC_PATH . '/RiderDebt.php';
 $debtReady = RiderDebt::tableReady();
 $debts = $debtReady ? RiderDebt::forRider($riderId) : [];
@@ -280,29 +280,38 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			<div class="card card-flush h-100">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">플랫폼 아이디 연동 <span class="text-muted fs-8">(정산 매칭 키)</span></h3></div>
 				<div class="card-body pt-0">
-					<?php
-					$pfExt = ['coupang' => '', 'baemin' => ''];
-					foreach ($platforms as $p) {
-					    if (isset($pfExt[$p['platform']]) && $pfExt[$p['platform']] === '') {
-					        $pfExt[$p['platform']] = (string) $p['external_id'];
-					    }
-					}
-					?>
-					<div class="alert bg-light-info fs-8 p-3 mb-4">쿠팡 정산서는 <strong>성함</strong>(정산서 표기 그대로, 예: 박성준1682), 배민 정산서는 <strong>UserID</strong>(예: adammins)를 넣으면 업로드 시 자동 매칭됩니다. <span class="text-muted">같은 대리점 안에서만 유일하면 됩니다.</span></div>
-					<div class="mb-4">
-						<label class="form-label fs-7 fw-semibold">쿠팡이츠 성함</label>
-						<div class="input-group">
-							<input type="text" class="form-control form-control-sm form-control-solid" id="pf_coupang" value="<?= htmlspecialchars($pfExt['coupang'], ENT_QUOTES, 'UTF-8') ?>" placeholder="예: 박성준1682" />
-							<button type="button" class="btn btn-sm btn-light-primary pf-save-btn" data-pf="coupang" data-input="pf_coupang">저장</button>
-						</div>
+					<div class="alert bg-light-info fs-8 p-3 mb-4">
+						쿠팡 정산서는 <strong>성함</strong>(정산서 표기 그대로, 예: 박성준1682), 배민 정산서는 <strong>UserID</strong>(예: adammins)를 넣으면 업로드 시 자동 매칭됩니다.
+						<span class="d-block mt-1 text-gray-700">한 라이더가 <strong>팀지역별로 여러 개</strong>를 가질 수 있어 여러 건 등록이 가능합니다. <span class="text-muted">같은 대리점 안에서만 유일하면 됩니다.</span></span>
 					</div>
-					<div class="mb-2">
-						<label class="form-label fs-7 fw-semibold">배달의민족 UserID</label>
-						<div class="input-group">
-							<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="pf_baemin" value="<?= htmlspecialchars($pfExt['baemin'], ENT_QUOTES, 'UTF-8') ?>" placeholder="예: adammins" />
-							<button type="button" class="btn btn-sm btn-light-primary pf-save-btn" data-pf="baemin" data-input="pf_baemin">저장</button>
+
+					<?php $pfIdLabel = ['coupang' => '쿠팡이츠', 'baemin' => '배달의민족', 'other' => '기타']; ?>
+					<?php if ($platforms === []) : ?>
+					<div class="text-gray-500 fs-7 py-4 text-center border border-gray-200 border-dashed rounded mb-4">등록된 플랫폼 ID가 없습니다.</div>
+					<?php else : ?>
+					<div class="d-flex flex-column gap-2 mb-4">
+						<?php foreach ($platforms as $p) : ?>
+						<div class="d-flex align-items-center justify-content-between border border-gray-200 rounded px-3 py-2">
+							<div>
+								<span class="badge badge-light-<?= $p['platform'] === 'coupang' ? 'success' : ($p['platform'] === 'baemin' ? 'primary' : 'secondary') ?> fs-9 me-2"><?= htmlspecialchars($pfIdLabel[$p['platform']] ?? $p['platform'], ENT_QUOTES, 'UTF-8') ?></span>
+								<span class="fw-semibold text-gray-800"><?= htmlspecialchars((string) $p['external_id'], ENT_QUOTES, 'UTF-8') ?></span>
+							</div>
+							<button type="button" class="btn btn-sm btn-icon btn-light-danger pf-del-btn" data-rp="<?= (int) $p['id'] ?>" title="연동 해제">
+								<i class="ki-duotone ki-trash fs-6"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span><span class="path5"></span></i>
+							</button>
 						</div>
-						<div class="form-text fs-8">비우고 저장하면 연동이 해제됩니다.</div>
+						<?php endforeach; ?>
+					</div>
+					<?php endif; ?>
+
+					<label class="form-label fs-7 fw-semibold">ID 추가</label>
+					<div class="input-group">
+						<select class="form-select form-select-sm form-select-solid w-auto flex-grow-0" id="pf_add_platform">
+							<option value="coupang">쿠팡이츠</option>
+							<option value="baemin">배달의민족</option>
+						</select>
+						<input type="text" class="form-control form-control-sm form-control-solid" id="pf_add_ext" placeholder="쿠팡=성함 / 배민=UserID" />
+						<button type="button" class="btn btn-sm btn-light-primary" id="pf_add_btn">추가</button>
 					</div>
 				</div>
 			</div>
@@ -333,18 +342,18 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	<!--begin::Debt row (대여금/리스/선지급)-->
 	<div class="card card-flush mb-8">
 		<div class="card-header pt-5 align-items-center">
-			<h3 class="card-title fw-bold m-0">부채 · 대여금 / 리스 / 선지급
+			<h3 class="card-title fw-bold m-0">미수금 · 대여금 / 리스 / 선지급
 				<span class="text-muted fs-8 fw-normal ms-2">잔액이 이월되고 정산 반영 시 차감됩니다</span>
 			</h3>
 			<div class="card-toolbar">
 				<button type="button" class="btn btn-sm btn-light-primary" id="btn_debt_new">
-					<i class="ki-duotone ki-plus fs-4"></i>부채 등록
+					<i class="ki-duotone ki-plus fs-4"></i>미수금 등록
 				</button>
 			</div>
 		</div>
 		<div class="card-body pt-2">
 			<?php if (empty($debts)): ?>
-			<div class="text-gray-500 text-center py-8">등록된 대여금·리스·선지급이 없습니다.</div>
+			<div class="text-gray-500 text-center py-8">등록된 미수금(대여금·리스·선지급)이 없습니다.</div>
 			<?php else: ?>
 			<div class="table-responsive">
 				<table class="table table-row-bordered align-middle gy-3 mb-0">
@@ -550,12 +559,14 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 				<div class="modal-body py-lg-8 px-lg-10">
 					<div id="pw_alert" class="d-none mb-5"></div>
 					<div class="alert bg-light-warning fs-8 p-3 mb-4">라이더 <?= htmlspecialchars($nm, ENT_QUOTES, 'UTF-8') ?>(<?= htmlspecialchars((string) $rider['login_id'], ENT_QUOTES, 'UTF-8') ?>)의 새 비밀번호를 지정합니다. 저장 즉시 적용되며, 이 값을 라이더에게 직접 전달해야 합니다.</div>
-					<label class="form-label fs-7 fw-semibold required">새 비밀번호</label>
-					<div class="input-group">
-						<input type="text" class="form-control form-control-sm form-control-solid" id="pw_new" maxlength="60" placeholder="4자 이상" autocomplete="off" />
-						<button type="button" class="btn btn-sm btn-light-primary" id="pw_random_btn" title="랜덤 비밀번호 생성">랜덤 생성</button>
+					<div class="alert bg-light-primary fs-7 p-4 mb-0">
+						비밀번호를 초기값 <strong class="fs-3 text-danger">0000</strong> 으로 되돌립니다.
+						<div class="mt-2 text-gray-700 fs-8">
+							라이더가 <strong>0000</strong> 으로 로그인하면 <strong>비밀번호 변경 화면이 강제로 표시</strong>되고,
+							직접 새 비밀번호를 정하기 전까지 다른 화면을 이용할 수 없습니다.
+						</div>
 					</div>
-					<div class="form-text fs-8">화면에 그대로 표시됩니다 — 저장 후 이 값을 복사해 라이더에게 전달하세요.</div>
+					<input type="hidden" id="pw_new" value="" />
 				</div>
 				<div class="modal-footer">
 					<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
@@ -571,7 +582,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	<div class="modal fade" id="kt_debt_new_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered mw-600px">
 			<div class="modal-content">
-				<div class="modal-header"><h2 class="fw-bold">부채 등록</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+				<div class="modal-header"><h2 class="fw-bold">미수금 등록</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
 				<div class="modal-body py-lg-8 px-lg-10">
 					<div id="debt_new_alert" class="d-none mb-4"></div>
 					<div class="row g-4">
@@ -656,7 +667,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	<div class="modal fade" id="kt_debt_edit_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered mw-500px">
 			<div class="modal-content">
-				<div class="modal-header"><h2 class="fw-bold">부채 수정</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+				<div class="modal-header"><h2 class="fw-bold">미수금 수정</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
 				<div class="modal-body py-lg-8 px-lg-10">
 					<div id="debt_edit_alert" class="d-none mb-4"></div>
 					<input type="hidden" id="de_debt_id" />
@@ -755,11 +766,33 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 		apiPatch({ action: 'withdrawal_hold', hold: hold }, hold ? '출금 보류로 설정했습니다.' : '출금 보류를 해제했습니다.');
 	});
 
-	document.querySelectorAll('.pf-save-btn').forEach(function (btn) {
+	// 플랫폼 ID 추가/삭제 (한 라이더가 팀지역별로 여러 개 보유 가능)
+	// 목록은 서버에서 렌더되므로 성공 시 새로고침해야 결과가 보인다.
+	function pfReload(payload, msg, btn) {
+		btn.disabled = true;
+		apiPatch(payload, msg).then(function () {
+			var alertBox = document.getElementById('action_alert');
+			if (alertBox && alertBox.className.indexOf('alert-success') !== -1) {
+				setTimeout(function () { location.reload(); }, 500);
+			} else {
+				btn.disabled = false;
+			}
+		});
+	}
+
+	var pfAddBtn = document.getElementById('pf_add_btn');
+	if (pfAddBtn) {
+		pfAddBtn.addEventListener('click', function () {
+			var pf = document.getElementById('pf_add_platform').value;
+			var ext = (document.getElementById('pf_add_ext').value || '').trim();
+			if (!ext) { alert('연동할 ID를 입력하세요.'); return; }
+			pfReload({ action: 'set_platform', platform: pf, external_id: ext }, 'ID가 추가되었습니다.', this);
+		});
+	}
+	document.querySelectorAll('.pf-del-btn').forEach(function (btn) {
 		btn.addEventListener('click', function () {
-			var pf = btn.getAttribute('data-pf');
-			var ext = (document.getElementById(btn.getAttribute('data-input')).value || '').trim();
-			apiPatch({ action: 'set_platform', platform: pf, external_id: ext }, ext ? '플랫폼 ID가 저장되었습니다.' : '연동을 해제했습니다.');
+			if (!confirm('이 플랫폼 ID 연동을 해제할까요?')) return;
+			pfReload({ action: 'remove_platform', rp_id: Number(btn.getAttribute('data-rp')) }, '연동을 해제했습니다.', this);
 		});
 	});
 
@@ -780,36 +813,24 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	// 비밀번호 초기화
 	var pwModalEl = document.getElementById('kt_rider_password_modal');
 	pwModalEl.addEventListener('hidden.bs.modal', function () {
-		document.getElementById('pw_new').value = '';
+
 		document.getElementById('pw_alert').className = 'd-none mb-5';
 		document.getElementById('pw_save_btn').disabled = false;
 	});
-	document.getElementById('pw_random_btn').addEventListener('click', function () {
-		var chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-		var pw = '';
-		for (var i = 0; i < 10; i++) { pw += chars.charAt(Math.floor(Math.random() * chars.length)); }
-		document.getElementById('pw_new').value = pw;
-	});
 	document.getElementById('pw_save_btn').addEventListener('click', function () {
 		var pwAlert = document.getElementById('pw_alert');
-		var pw = document.getElementById('pw_new').value;
-		if (pw.length < 4) {
-			pwAlert.className = 'alert alert-danger mb-5';
-			pwAlert.textContent = '비밀번호는 4자 이상이어야 합니다.';
-			return;
-		}
 		var btn = this;
 		btn.disabled = true;
 		fetch(API, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ action: 'reset_password', new_password: pw })
+			body: JSON.stringify({ action: 'reset_password' })
 		})
 		.then(function (r) { return r.json(); })
 		.then(function (data) {
 			if (data.ok) {
 				pwAlert.className = 'alert alert-success mb-5';
-				pwAlert.textContent = '저장되었습니다. 이 화면을 닫기 전에 비밀번호를 라이더에게 전달하세요.';
+				pwAlert.textContent = data.message || '0000으로 초기화되었습니다.';
 			} else {
 				pwAlert.className = 'alert alert-danger mb-5';
 				pwAlert.textContent = data.message || '오류가 발생했습니다.';

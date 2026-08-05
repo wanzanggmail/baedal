@@ -10,9 +10,10 @@ return [
     'settlement/fees' => ['title' => '정산 수수료 내역', 'view' => 'settlement_fees'],
     'settlement/fee-detail' => ['title' => '정산 수수료 상세', 'view' => 'settlement_fee_detail'],
     'settlement/withholding' => ['title' => '원천세 대상자 명세', 'view' => 'withholding_report'],
+    'settlement/fee-report' => ['title' => '수수료·차감 통합 조회', 'view' => 'fee_report'],
     'deduction/agency-fee' => ['title' => '선공제(대행 수수료) 설정', 'view' => 'deduction_agency_fee'],
     'deduction/advance' => ['title' => '선지급(대여금) 입력', 'view' => 'advance_input'],
-    'deduction/debts' => ['title' => '대여금·리스 원장', 'view' => 'debt_list'],
+    'deduction/debts' => ['title' => '미수금 원장', 'view' => 'debt_list'],
     'withdrawal/list' => ['title' => '출금 신청 목록', 'view' => 'withdrawal_list'],
     'withdrawal/settings' => ['title' => '출금 정책 설정', 'view' => 'withdrawal_settings'],
     'withdrawal/download' => ['title' => '출금 다운로드', 'view' => 'withdrawal_download'],
@@ -31,5 +32,5 @@ return [
     'system/settlement-excel' => ['title' => '정산 엑셀 열기 암호', 'view' => 'system_settlement_excel'],
     'system/audit' => ['title' => '감사 로그', 'view' => 'system_audit'],
     'system/manual-adjust' => ['title' => '정산/잔액 수동 조정', 'view' => 'system_manual_adjust'],
-    'system/pg-fee' => ['title' => '영업대행수수료 분배', 'view' => 'pg_fee_config'],
+    'system/pg-fee' => ['title' => '수수료 설정', 'view' => 'pg_fee_config'],
 ];

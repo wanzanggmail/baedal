@@ -99,7 +99,7 @@ try {
                 $err('PG 결제 실패(전 카드): ' . $r['fail_reason']);
             }
             AuditLog::record('org.pg_charge', (string) $agencyId, sprintf('PG 충전 %s원(수수료 %s, %d회 시도)', number_format($r['net']), number_format($r['fee']), $r['attempts']));
-            $msg = sprintf('%s원 충전 완료 (영업대행수수료 %s원 포함 %s원 결제, %d번째 카드 승인)', number_format($r['net']), number_format($r['fee']), number_format($r['total']), $r['attempts']);
+            $msg = sprintf('%s원 충전 완료 (플랫폼 수수료 %s원 포함 %s원 결제, %d번째 카드 승인)', number_format($r['net']), number_format($r['fee']), number_format($r['total']), $r['attempts']);
             break;
         default:
             $err('알 수 없는 action 입니다.', 400);

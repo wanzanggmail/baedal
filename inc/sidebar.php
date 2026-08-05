@@ -63,6 +63,14 @@ $route = $route ?? '';
 													</a>
 												</div>
 												<div class="menu-item">
+													<a class="menu-link<?= nav_active('settlement/fee-report') ?>" href="<?= htmlspecialchars(admin_url('settlement/fee-report'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">수수료·차감 통합</span>
+													</a>
+												</div>
+												<div class="menu-item">
 													<a class="menu-link<?= nav_active('settlement/withholding') ?>" href="<?= htmlspecialchars(admin_url('settlement/withholding'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
 															<span class="bullet bullet-dot"></span>
@@ -101,7 +109,7 @@ $route = $route ?? '';
 														<span class="path6"></span>
 													</i>
 												</span>
-												<span class="menu-title">대여금·리스 원장</span>
+												<span class="menu-title">미수금 원장</span>
 											</a>
 										</div>
 										<!--end:Menu item-->
@@ -305,7 +313,7 @@ $route = $route ?? '';
 														<span class="menu-bullet">
 															<span class="bullet bullet-dot"></span>
 														</span>
-														<span class="menu-title">영업대행수수료 분배</span>
+														<span class="menu-title">수수료 설정</span>
 													</a>
 												</div>
 												<div class="menu-item">

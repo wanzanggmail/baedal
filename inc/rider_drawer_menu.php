@@ -107,7 +107,7 @@ $riderRoute = $riderRoute ?? '';
 			<div class="menu-item">
 				<a class="menu-link<?= rider_nav_active('profile/debt') ?>" href="<?= htmlspecialchars(rider_url('profile/debt'), ENT_QUOTES, 'UTF-8') ?>">
 					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-					<span class="menu-title">대여금·리스</span>
+					<span class="menu-title">미수금</span>
 				</a>
 			</div>
 			<div class="menu-item">

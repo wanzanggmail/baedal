@@ -1,13 +1,13 @@
 <?php
 
 /**
- * 라이더 부채(대여금/리스/선지급) 관리 API
- *  GET  ?rider_id=N            — 부채 목록 + 각 부채 이력
- *  POST action=create          — 부채 등록
- *  POST action=update          — 부채 수정(제목·일납·채권자·상태·잔액보정 등)
+ * 라이더 미수금(대여금/리스/선지급) 관리 API
+ *  GET  ?rider_id=N            — 미수금 목록 + 각 미수금 이력
+ *  POST action=create          — 미수금 등록
+ *  POST action=update          — 미수금 수정(제목·일납·채권자·상태·잔액보정 등)
  *  POST action=repay           — 차감 실행(일납×일수 또는 금액) → deduction_entries 생성
  *  POST action=reverse         — 차감 이력 취소
- *  POST action=delete          — 부채 삭제(이력 없을 때만)
+ *  POST action=delete          — 미수금 삭제(이력 없을 때만)
  */
 
 declare(strict_types=1);
@@ -32,7 +32,7 @@ $err = static function (string $msg, int $code = 422): never {
 };
 
 if (!RiderDebt::tableReady()) {
-    $err('부채 원장 테이블이 없습니다. php migrate.php 를 실행하세요.', 500);
+    $err('미수금 원장 테이블이 없습니다. php migrate.php 를 실행하세요.', 500);
 }
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -95,7 +95,7 @@ try {
             'note'             => (string) ($body['note'] ?? ''),
         ]);
         AuditLog::record('rider.debt.create', (string) $rider['rider_code'], RiderDebt::kindLabel((string) $body['kind']) . ' 등록 #' . $id);
-        echo json_encode(['ok' => true, 'id' => $id, 'message' => '부채가 등록되었습니다.'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['ok' => true, 'id' => $id, 'message' => '미수금이 등록되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -103,7 +103,7 @@ try {
     $debtId = (int) ($body['debt_id'] ?? 0);
     $debt   = RiderDebt::find($debtId);
     if ($debt === null) {
-        $err('부채를 찾을 수 없습니다.', 404);
+        $err('미수금을 찾을 수 없습니다.', 404);
     }
     $rider = $loadRider((int) $debt['rider_id']);
 
@@ -112,7 +112,7 @@ try {
             'title', 'daily_amount', 'creditor', 'note', 'opened_on', 'status', 'balance_amount', 'principal_amount',
         ]));
         RiderDebt::update($debtId, $fields);
-        AuditLog::record('rider.debt.update', (string) $rider['rider_code'], '부채 #' . $debtId . ' 수정');
+        AuditLog::record('rider.debt.update', (string) $rider['rider_code'], '미수금 #' . $debtId . ' 수정');
         echo json_encode(['ok' => true, 'message' => '수정되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -125,7 +125,7 @@ try {
             : null;
         $memo = (string) ($body['memo'] ?? '');
         $r = RiderDebt::applyRepayment($debtId, $appliedDate, $days, $amount, $memo);
-        AuditLog::record('rider.debt.repay', (string) $rider['rider_code'], sprintf('부채 #%d 차감 %s원(잔액 %s)', $debtId, number_format($r['amount']), number_format($r['balance_after'])));
+        AuditLog::record('rider.debt.repay', (string) $rider['rider_code'], sprintf('미수금 #%d 차감 %s원(잔액 %s)', $debtId, number_format($r['amount']), number_format($r['balance_after'])));
         echo json_encode([
             'ok'      => true,
             'message' => sprintf('%s원 차감했습니다. (차감후 잔액 %s원)', number_format($r['amount']), number_format($r['balance_after'])),
@@ -136,13 +136,13 @@ try {
 
     if ($action === 'reverse') {
         $entryId = (int) ($body['entry_id'] ?? 0);
-        // 이력이 이 부채 소속인지 확인
+        // 이력이 이 미수금 소속인지 확인
         $entry = db_row('SELECT id, debt_id FROM rider_debt_entries WHERE id = ?', [$entryId]);
         if ($entry === null || (int) $entry['debt_id'] !== $debtId) {
             $err('차감 이력을 찾을 수 없습니다.', 404);
         }
         RiderDebt::reverseEntry($entryId);
-        AuditLog::record('rider.debt.reverse', (string) $rider['rider_code'], '부채 #' . $debtId . ' 차감 취소 #' . $entryId);
+        AuditLog::record('rider.debt.reverse', (string) $rider['rider_code'], '미수금 #' . $debtId . ' 차감 취소 #' . $entryId);
         echo json_encode(['ok' => true, 'message' => '차감을 취소했습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -150,10 +150,10 @@ try {
     if ($action === 'delete') {
         $cnt = (int) (db_row('SELECT COUNT(*) AS c FROM rider_debt_entries WHERE debt_id = ?', [$debtId])['c'] ?? 0);
         if ($cnt > 0) {
-            $err('차감 이력이 있는 부채는 삭제할 수 없습니다. 먼저 이력을 취소하거나 상태를 종료로 변경하세요.');
+            $err('차감 이력이 있는 미수금는 삭제할 수 없습니다. 먼저 이력을 취소하거나 상태를 종료로 변경하세요.');
         }
         db_execute('DELETE FROM rider_debts WHERE id = ?', [$debtId]);
-        AuditLog::record('rider.debt.delete', (string) $rider['rider_code'], '부채 #' . $debtId . ' 삭제');
+        AuditLog::record('rider.debt.delete', (string) $rider['rider_code'], '미수금 #' . $debtId . ' 삭제');
         echo json_encode(['ok' => true, 'message' => '삭제되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;
     }

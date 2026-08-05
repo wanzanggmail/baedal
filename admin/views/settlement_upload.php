@@ -153,6 +153,22 @@ $platformLabels = [
 									<input type="date" class="form-control form-control-solid" name="settlement_date" id="settlementDateInput" />
 									<div class="form-text">파일명에 날짜가 없는 경우에만 수동 입력하세요.</div>
 								</div>
+								<div class="row g-4 mb-6">
+									<div class="col-md-6">
+										<label class="form-label">팀명 <span class="text-muted fs-7">(파일명에서 자동)</span></label>
+										<input type="text" class="form-control form-control-solid" name="team_name" id="teamNameInput" maxlength="60" placeholder="예: 팀도깨비" />
+									</div>
+									<div class="col-md-6">
+										<label class="form-label">지역명 <span class="text-muted fs-7">(파일명에서 자동)</span></label>
+										<input type="text" class="form-control form-control-solid" name="region_name" id="regionNameInput" maxlength="60" placeholder="예: 서울_강서남부" />
+									</div>
+									<div class="col-12">
+										<div class="form-text">
+											같은 대리점이라도 <strong>팀지역이 다르면 같은 날짜에 여러 건</strong>을 올릴 수 있습니다.
+											파일명이 <code>팀_지역_날짜.xlsx</code> 형식이면 자동으로 채워지며, 다르면 직접 입력하세요.
+										</div>
+									</div>
+								</div>
 								<div class="mb-6">
 									<label class="form-label">파일 열기 암호 <span class="text-muted fs-7">(선택 — 이번 업로드만 사용)</span></label>
 									<input type="password" class="form-control form-control-solid" name="excel_password" id="excelPasswordInput" autocomplete="off" placeholder="암호가 걸린 파일이면 직접 입력" />
@@ -390,8 +406,9 @@ $platformLabels = [
 								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
 							</div>
 							<div class="col-md-6 mb-4">
-								<label class="form-label required">비밀번호</label>
-								<input type="text" class="form-control form-control-solid" id="qrPassword" maxlength="60" autocomplete="off" />
+								<label class="form-label">초기 비밀번호</label>
+								<input type="text" class="form-control form-control-solid" id="qrPassword" value="0000" readonly />
+								<div class="form-text fs-9">최초 로그인 시 라이더가 직접 변경합니다.</div>
 							</div>
 						</div>
 						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
@@ -561,6 +578,20 @@ $platformLabels = [
 			if (m) {
 				dateInput.value = `${m[1]}-${m[2]}-${m[3]}`;
 			}
+			// 팀/지역 자동 채움 — 서버(settlement_upload.php)와 동일 규칙: 팀_지역..._날짜
+			const teamEl = document.getElementById('teamNameInput');
+			const regionEl = document.getElementById('regionNameInput');
+			if (teamEl && regionEl) {
+				const base = name.replace(/\.[^.]+$/, '');
+				const parts = base.split('_');
+				if (parts.length >= 3) {
+					teamEl.value = parts[0];
+					regionEl.value = parts.slice(1, -1).join('_');
+				} else {
+					teamEl.value = '';
+					regionEl.value = '';
+				}
+			}
 			runPreview();
 		});
 	}
@@ -698,7 +729,7 @@ $platformLabels = [
 		document.getElementById('qrName').value = name;
 		document.getElementById('qrPhone').value = '';
 		document.getElementById('qrLoginId').value = '';
-		document.getElementById('qrPassword').value = randomPw();
+		document.getElementById('qrPassword').value = '0000';
 		const al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
 		const pfLabels = { coupang: '쿠팡이츠', baemin: '배달의민족', other: '기타' };
 		document.getElementById('qrLinkPlatformLabel').textContent = pfLabels[previewState.platform] || previewState.platform;
@@ -776,7 +807,7 @@ $platformLabels = [
 		};
 		if (!payload.name) { al.className = 'alert alert-danger mb-4'; al.textContent = '이름을 입력하세요.'; return; }
 		if (payload.login_id && payload.login_id.length < 3) { al.className = 'alert alert-danger mb-4'; al.textContent = '로그인 ID는 3자 이상이어야 합니다.'; return; }
-		if (payload.password.length < 4) { al.className = 'alert alert-danger mb-4'; al.textContent = '비밀번호는 4자 이상이어야 합니다.'; return; }
+		
 		this.disabled = true;
 		try {
 			const resp = await fetch(registerApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

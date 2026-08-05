@@ -16,7 +16,7 @@ return [
     'notices/detail' => ['title' => '공지 상세', 'view' => 'notice_detail'],
     'profile' => ['title' => '내 정보', 'view' => 'profile'],
     'profile/bank' => ['title' => '계좌 정보', 'view' => 'profile_bank'],
-    'profile/debt' => ['title' => '대여금·리스', 'view' => 'profile_debt'],
+    'profile/debt' => ['title' => '미수금', 'view' => 'profile_debt'],
     'profile/password' => ['title' => '비밀번호 변경', 'view' => 'profile_password'],
     'login' => ['title' => '로그인', 'view' => 'login'],
 ];

@@ -262,7 +262,7 @@ final class Organization
                 [$loginId, $hash, $accName, $role, $orgId]
             );
 
-            // 신규 조직 기본값 시드 — 영업대행수수료 요율 1%(모든 조직), 대리점은 지갑·정산수수료 기본
+            // 신규 조직 기본값 시드 — 플랫폼 수수료 요율 1%(모든 조직), 대리점은 지갑·정산수수료 기본
             // ⚠️ TODO(갑확인): 1.00 은 임시값(LOGIC.md §8-A #2). 확정 시 PgFeeConfig::DEFAULT_PCT 와 함께 갱신.
             if (db_table_exists('org_fee_config')) {
                 db_execute('INSERT IGNORE INTO org_fee_config (org_id, pg_service_fee_pct) VALUES (?, 1.00)', [$orgId]);

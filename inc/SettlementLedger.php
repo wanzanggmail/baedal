@@ -35,7 +35,8 @@ final class SettlementLedger
         }
 
         $upload = db_row(
-            'SELECT id, platform, agency_id, settlement_date, status FROM settlement_uploads WHERE id = ? LIMIT 1',
+            'SELECT id, platform, agency_id, team_name, region_name, settlement_date, status
+               FROM settlement_uploads WHERE id = ? LIMIT 1',
             [$uploadId]
         );
         if ($upload === null) {
@@ -45,6 +46,12 @@ final class SettlementLedger
         // 멀티테넌시: 업로드 소유 대리점 설정으로 수수료 산출
         $agencyId = (int) ($upload['agency_id'] ?? 0);
         $orgId    = $agencyId > 0 ? $agencyId : null;
+
+        // 같은 날 여러 팀지역 정산을 각각 별도 사이클로 쌓기 위한 키(정규화된 값으로 저장)
+        $teamRegion = trim(
+            normalize_hangul_nfc((string) ($upload['team_name'] ?? '')) . ' '
+            . normalize_hangul_nfc((string) ($upload['region_name'] ?? ''))
+        );
 
         $rows = db_rows(
             'SELECT * FROM settlement_daily_riders
@@ -62,7 +69,7 @@ final class SettlementLedger
         $skipped = 0;
         $errors  = [];
 
-        db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, &$applied, &$skipped, &$errors): void {
+        db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, $teamRegion, &$applied, &$skipped, &$errors): void {
             foreach ($rows as $row) {
                 $riderId = (int) $row['rider_id'];
                 if ($riderId < 1) {
@@ -73,10 +80,11 @@ final class SettlementLedger
                 $platform = (string) ($row['platform'] ?? $upload['platform'] ?? 'baemin');
                 $date     = (string) $row['settlement_date'];
 
+                // 중복 판정에 팀지역 포함 — 같은 날이라도 팀지역이 다르면 별개 정산이다.
                 $exists = db_row(
                     'SELECT id FROM settlement_rider_cycles
-                     WHERE rider_id = ? AND settlement_date = ? AND platform = ? LIMIT 1',
-                    [$riderId, $date, $platform]
+                     WHERE rider_id = ? AND settlement_date = ? AND platform = ? AND team_region = ? LIMIT 1',
+                    [$riderId, $date, $platform, $teamRegion]
                 );
                 if ($exists !== null) {
                     $skipped++;
@@ -84,7 +92,7 @@ final class SettlementLedger
                 }
 
                 try {
-                    self::createCycleFromDailyRow($row, $uploadId, $cfg, $adminId, $orgId);
+                    self::createCycleFromDailyRow($row, $uploadId, $cfg, $adminId, $orgId, $teamRegion);
                     $applied++;
                 } catch (Throwable $e) {
                     $errors[] = ($row['rider_name_raw'] ?? $riderId) . ': ' . $e->getMessage();
@@ -143,7 +151,7 @@ final class SettlementLedger
                 try {
                     RiderDebt::applyLeaseForPeriod((int) $debt['id'], (string) $periodStart, (string) $periodEnd);
                 } catch (Throwable) {
-                    // 리스 자동계산 실패가 정산 반영 자체를 막지 않는다(개별 부채 데이터 이상 등).
+                    // 리스 자동계산 실패가 정산 반영 자체를 막지 않는다(개별 미수금 데이터 이상 등).
                     continue;
                 }
             }
@@ -161,7 +169,8 @@ final class SettlementLedger
         }
 
         [$where, $params] = self::buildListWhere($filters, false);
-        $limit = max(10, min(500, (int) ($filters['limit'] ?? 200)));
+        $limit  = max(10, min(500, (int) ($filters['limit'] ?? 200)));
+        $offset = max(0, (int) ($filters['offset'] ?? 0));
 
         $rows = db_rows(
             "SELECT c.*, r.name AS rider_name, r.rider_code,
@@ -171,11 +180,140 @@ final class SettlementLedger
                LEFT JOIN settlement_uploads u ON u.id = c.upload_id
               WHERE {$where}
               ORDER BY c.settlement_date DESC, c.id DESC
-              LIMIT {$limit}",
+              LIMIT {$limit} OFFSET {$offset}",
             $params
         );
 
         return array_map([self::class, 'mapCycleRow'], $rows);
+    }
+
+    /**
+     * listAdmin()과 동일한 필터로 전체 건수만 센다(페이징용).
+     *
+     * @param array<string, mixed> $filters
+     */
+    public static function countAdmin(array $filters = []): int
+    {
+        if (!self::tableExists()) {
+            return 0;
+        }
+
+        [$where, $params] = self::buildListWhere($filters, false);
+
+        $row = db_row(
+            "SELECT COUNT(*) AS cnt
+               FROM settlement_rider_cycles c
+               INNER JOIN riders r ON r.id = c.rider_id
+              WHERE {$where}",
+            $params
+        );
+
+        return (int) ($row['cnt'] ?? 0);
+    }
+
+    /**
+     * listAdmin()과 동일한 필터로 기간 합계를 낸다.
+     *
+     * ⚠️ 화면이 표시 상한(예: 500행)에 걸려 일부만 보여주더라도, 합계는 **필터 조건 전체**를
+     *    대상으로 집계해야 맞다. 그래서 목록과 별도 쿼리로 구한다.
+     *
+     * @param array<string, mixed> $filters
+     * @return array{count:int, orders:int, gross:int, support:int, payout:int, fee:int, net:int}
+     */
+    public static function sumAdmin(array $filters = []): array
+    {
+        $empty = ['count' => 0, 'orders' => 0, 'gross' => 0, 'support' => 0, 'payout' => 0, 'fee' => 0, 'net' => 0];
+        if (!self::tableExists()) {
+            return $empty;
+        }
+
+        [$where, $params] = self::buildListWhere($filters, false);
+
+        $row = db_row(
+            "SELECT COUNT(*) AS cnt,
+                    COALESCE(SUM(c.order_count), 0)      AS orders,
+                    COALESCE(SUM(c.gross_amount), 0)     AS gross,
+                    COALESCE(SUM(c.support_amount), 0)   AS support,
+                    COALESCE(SUM(c.platform_payout), 0)  AS payout,
+                    COALESCE(SUM(c.total_fee_amount), 0) AS fee,
+                    COALESCE(SUM(c.net_amount), 0)       AS net
+               FROM settlement_rider_cycles c
+               INNER JOIN riders r ON r.id = c.rider_id
+              WHERE {$where}",
+            $params
+        );
+
+        if ($row === null) {
+            return $empty;
+        }
+
+        return [
+            'count'   => (int) $row['cnt'],
+            'orders'  => (int) $row['orders'],
+            'gross'   => (int) $row['gross'],
+            'support' => (int) $row['support'],
+            'payout'  => (int) $row['payout'],
+            'fee'     => (int) $row['fee'],
+            'net'     => (int) $row['net'],
+        ];
+    }
+
+    /**
+     * listAdmin()과 동일한 필터로 수수료·차감 항목(fee_code)별 합계를 낸다.
+     *
+     * `label`은 행마다 다를 수 있어(예: "대여금 · 계약명") 대표 라벨은 fee_code 기준
+     * 표준 명칭을 우선 쓰고, 없으면 실제 저장된 라벨 하나를 쓴다.
+     *
+     * @param array<string, mixed> $filters
+     * @return list<array{fee_code:string, label:string, count:int, amount:int, is_debt:bool}>
+     */
+    public static function feeBreakdownAdmin(array $filters = []): array
+    {
+        if (!self::tableExists()) {
+            return [];
+        }
+
+        [$where, $params] = self::buildListWhere($filters, false);
+
+        $rows = db_rows(
+            "SELECT fi.fee_code, MIN(fi.label) AS label, COUNT(*) AS cnt,
+                    COALESCE(SUM(fi.amount), 0) AS amount
+               FROM settlement_fee_items fi
+               INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+               INNER JOIN riders r ON r.id = c.rider_id
+              WHERE {$where}
+              GROUP BY fi.fee_code
+              ORDER BY amount DESC",
+            $params
+        );
+
+        // 미수금(대여금·리스·선지급)은 수수료가 아니라 원금 상환 차감 — 화면에서 구분 표기용
+        $debtCodes = ['loan', 'lease', 'advance', 'rental'];
+        $canonical = [
+            'agency_fee'     => '선정산수수료(대행)',
+            'withholding'    => '원천세',
+            'employment_ins' => '고용보험',
+            'accident_ins'   => '산재보험',
+            'hourly_ins'     => '시간제 보험',
+            'ins_refund'     => '보험료 환급',
+            'loan'           => '대여금',
+            'lease'          => '리스/렌탈',
+            'advance'        => '선지급',
+            'rental'         => '대여금',
+            'manual'         => '수동 차감',
+        ];
+
+        return array_map(static function (array $r) use ($debtCodes, $canonical): array {
+            $code = (string) $r['fee_code'];
+
+            return [
+                'fee_code' => $code,
+                'label'    => $canonical[$code] ?? (string) $r['label'],
+                'count'    => (int) $r['cnt'],
+                'amount'   => (int) $r['amount'],
+                'is_debt'  => in_array($code, $debtCodes, true),
+            ];
+        }, $rows);
     }
 
     /**
@@ -202,6 +340,104 @@ final class SettlementLedger
         );
 
         return array_map([self::class, 'mapCycleRow'], $rows);
+    }
+
+    /**
+     * listForRider()와 동일한 필터로 라이더 1명의 기간 합계를 낸다(라이더 앱 기간 조회용).
+     *
+     * @param array<string, mixed> $filters
+     * @return array{count:int, orders:int, gross:int, support:int, payout:int, fee:int, net:int}
+     */
+    public static function sumForRider(int $riderId, array $filters = []): array
+    {
+        $empty = ['count' => 0, 'orders' => 0, 'gross' => 0, 'support' => 0, 'payout' => 0, 'fee' => 0, 'net' => 0];
+        if ($riderId < 1 || !self::tableExists()) {
+            return $empty;
+        }
+
+        $filters['rider_id'] = $riderId;
+        [$where, $params] = self::buildListWhere($filters, true);
+
+        $row = db_row(
+            "SELECT COUNT(*) AS cnt,
+                    COALESCE(SUM(c.order_count), 0)      AS orders,
+                    COALESCE(SUM(c.gross_amount), 0)     AS gross,
+                    COALESCE(SUM(c.support_amount), 0)   AS support,
+                    COALESCE(SUM(c.platform_payout), 0)  AS payout,
+                    COALESCE(SUM(c.total_fee_amount), 0) AS fee,
+                    COALESCE(SUM(c.net_amount), 0)       AS net
+               FROM settlement_rider_cycles c
+              WHERE {$where}",
+            $params
+        );
+
+        if ($row === null) {
+            return $empty;
+        }
+
+        return [
+            'count'   => (int) $row['cnt'],
+            'orders'  => (int) $row['orders'],
+            'gross'   => (int) $row['gross'],
+            'support' => (int) $row['support'],
+            'payout'  => (int) $row['payout'],
+            'fee'     => (int) $row['fee'],
+            'net'     => (int) $row['net'],
+        ];
+    }
+
+    /**
+     * listForRider()와 동일한 필터로 라이더 1명의 항목별(fee_code) 합계를 낸다.
+     *
+     * @param array<string, mixed> $filters
+     * @return list<array{fee_code:string, label:string, count:int, amount:int, is_debt:bool}>
+     */
+    public static function feeBreakdownForRider(int $riderId, array $filters = []): array
+    {
+        if ($riderId < 1 || !self::tableExists()) {
+            return [];
+        }
+
+        $filters['rider_id'] = $riderId;
+        [$where, $params] = self::buildListWhere($filters, true);
+
+        $rows = db_rows(
+            "SELECT fi.fee_code, MIN(fi.label) AS label, COUNT(*) AS cnt,
+                    COALESCE(SUM(fi.amount), 0) AS amount
+               FROM settlement_fee_items fi
+               INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+              WHERE {$where}
+              GROUP BY fi.fee_code
+              ORDER BY amount DESC",
+            $params
+        );
+
+        $debtCodes = ['loan', 'lease', 'advance', 'rental'];
+        $canonical = [
+            'agency_fee'     => '선정산수수료(대행)',
+            'withholding'    => '원천세',
+            'employment_ins' => '고용보험',
+            'accident_ins'   => '산재보험',
+            'hourly_ins'     => '시간제 보험',
+            'ins_refund'     => '보험료 환급',
+            'loan'           => '대여금',
+            'lease'          => '리스/렌탈',
+            'advance'        => '선지급',
+            'rental'         => '대여금',
+            'manual'         => '수동 차감',
+        ];
+
+        return array_map(static function (array $r) use ($debtCodes, $canonical): array {
+            $code = (string) $r['fee_code'];
+
+            return [
+                'fee_code' => $code,
+                'label'    => $canonical[$code] ?? (string) $r['label'],
+                'count'    => (int) $r['cnt'],
+                'amount'   => (int) $r['amount'],
+                'is_debt'  => in_array($code, $debtCodes, true),
+            ];
+        }, $rows);
     }
 
     /** @return array<string, mixed>|null */
@@ -250,7 +486,7 @@ final class SettlementLedger
      * @param array<string, mixed> $dailyRow settlement_daily_riders row
      * @param array<string, float> $cfg
      */
-    private static function createCycleFromDailyRow(array $dailyRow, int $uploadId, array $cfg, ?int $adminId, ?int $orgId = null): void
+    private static function createCycleFromDailyRow(array $dailyRow, int $uploadId, array $cfg, ?int $adminId, ?int $orgId = null, string $teamRegion = ''): void
     {
         $riderId = (int) $dailyRow['rider_id'];
         $gross   = (int) ($dailyRow['gross_amount'] ?? 0);
@@ -275,16 +511,17 @@ final class SettlementLedger
 
         $cycleId = db_insert(
             'INSERT INTO settlement_rider_cycles
-                (rider_id, upload_id, daily_rider_id, settlement_date, platform,
+                (rider_id, upload_id, daily_rider_id, settlement_date, platform, team_region,
                  gross_amount, support_amount, platform_payout, total_fee_amount, net_amount, order_count,
                  completed_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderId,
                 $uploadId,
                 (int) ($dailyRow['id'] ?? 0) ?: null,
                 (string) $dailyRow['settlement_date'],
                 (string) ($dailyRow['platform'] ?? 'baemin'),
+                $teamRegion,
                 $gross,
                 $support,
                 $payout,
@@ -529,6 +766,7 @@ final class SettlementLedger
             'settlement_date'  => (string) $row['settlement_date'],
             'platform'         => $platform,
             'platform_label'   => self::PLATFORM_LABELS[$platform] ?? $platform,
+            'team_region'      => (string) ($row['team_region'] ?? ''),
             'gross_amount'     => (int) $row['gross_amount'],
             'support_amount'   => (int) ($row['support_amount'] ?? 0),
             'platform_payout'  => (int) $row['platform_payout'],

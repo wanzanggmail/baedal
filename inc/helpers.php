@@ -375,3 +375,47 @@ function rider_nav_accordion_show(string $prefix): string
 
     return str_starts_with($r, $prefix . '/') ? ' show' : '';
 }
+
+/**
+ * 한글 조합형(NFD) → 완성형(NFC) 정규화.
+ *
+ * 정산서 파일명·시트에서 뽑은 팀/지역명이 업로드 환경(macOS=NFD, Windows=NFC)에 따라
+ * **눈에는 같은데 바이트가 다른** 문자열로 들어온다. 이대로 두면 팀지역 UNIQUE 키가
+ * 같은 팀지역을 다른 값으로 취급해 중복 정산 사이클이 생긴다(2026-08-04 실데이터에서 발견).
+ *
+ * intl 확장(Normalizer)이 없는 환경이라, 한글 음절은 알고리즘으로 합성 가능하다는 점을
+ * 이용해 직접 구현한다(한글 외 문자는 그대로 통과 — 팀/지역명 용도로는 충분).
+ */
+function normalize_hangul_nfc(string $s): string
+{
+    if ($s === '' || !preg_match('/[\x{1100}-\x{11FF}]/u', $s)) {
+        return $s;
+    }
+
+    $chars = preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $n     = count($chars);
+    $out   = [];
+
+    for ($i = 0; $i < $n; $i++) {
+        $lIndex = mb_ord($chars[$i], 'UTF-8') - 0x1100;      // 초성
+        if ($lIndex >= 0 && $lIndex < 19 && $i + 1 < $n) {
+            $vIndex = mb_ord($chars[$i + 1], 'UTF-8') - 0x1161; // 중성
+            if ($vIndex >= 0 && $vIndex < 21) {
+                $tIndex = 0;
+                if ($i + 2 < $n) {
+                    $cand = mb_ord($chars[$i + 2], 'UTF-8') - 0x11A7; // 종성(0은 없음)
+                    if ($cand > 0 && $cand < 28) {
+                        $tIndex = $cand;
+                        $i++;
+                    }
+                }
+                $out[] = mb_chr(0xAC00 + ($lIndex * 21 + $vIndex) * 28 + $tIndex, 'UTF-8');
+                $i++;
+                continue;
+            }
+        }
+        $out[] = $chars[$i];
+    }
+
+    return implode('', $out);
+}

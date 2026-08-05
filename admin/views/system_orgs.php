@@ -493,7 +493,7 @@ foreach ($agencyByParent as $orphans) {
 					h += kv('정산수수료(기준일/미만/이상)', ag.fee_config.fee_day_threshold + '일 / ' + ag.fee_config.fee_per_tx_short + '원 / ' + ag.fee_config.fee_per_tx_long + '원');
 				}
 				if (ag.pg_fee) {
-					h += kv('영업대행수수료(총)', ag.pg_fee.total + '%');
+					h += kv('플랫폼 수수료(총)', ag.pg_fee.total + '%');
 				}
 				h += '</div><div class="col-md-6">';
 				h += kv('등록 카드', ag.card_count + '개');

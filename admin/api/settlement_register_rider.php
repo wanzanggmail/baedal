@@ -208,10 +208,13 @@ if ($action === 'link') {
     if ($dup !== null) {
         $err('이 ID는 이미 다른 라이더(#' . (int) $dup['rider_id'] . ')에 연결돼 있습니다.');
     }
-    $existing = db_row('SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? ORDER BY id ASC LIMIT 1', [$targetId, $platform]);
-    if ($existing !== null) {
-        db_execute('UPDATE rider_platforms SET external_id = ?, is_connected = 1 WHERE id = ?', [$licenseId, (int) $existing['id']]);
-    } else {
+    // 한 라이더가 팀지역별로 여러 플랫폼ID를 가질 수 있으므로 기존 ID를 덮어쓰지 않고 **추가**한다.
+    // (같은 ID가 이미 있으면 그대로 두고 넘어감 — 재연결을 반복해도 안전)
+    $already = db_row(
+        'SELECT id FROM rider_platforms WHERE rider_id = ? AND platform = ? AND external_id = ? LIMIT 1',
+        [$targetId, $platform, $licenseId]
+    );
+    if ($already === null) {
         db_insert('INSERT INTO rider_platforms (rider_id, platform, is_connected, external_id) VALUES (?, ?, 1, ?)', [$targetId, $platform, $licenseId]);
     }
     AuditLog::record('rider.platform', (string) $target['rider_code'], "정산 미매칭 → 기존 라이더 연결 · {$platform}:{$licenseId}");
@@ -231,7 +234,9 @@ if ($action === 'link') {
 $name      = trim((string) ($body['name'] ?? ''));
 $phone     = trim((string) ($body['phone'] ?? ''));
 $loginId   = trim((string) ($body['login_id'] ?? ''));
-$password  = (string) ($body['password'] ?? '');
+// 신규 라이더 비밀번호는 초기값(0000)으로 통일 — 최초 로그인 시 변경 강제
+require_once INC_PATH . '/RiderAuth.php';
+$password  = RiderAuth::INITIAL_PASSWORD;
 
 if ($name === '') {
     $err('이름을 입력하세요.');
@@ -242,9 +247,6 @@ if ($loginId === '') {
     $loginId = RiderLoginId::generate($phone);
 } elseif (!preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) {
     $err('로그인 ID는 영문·숫자·_·.·@·- 3~60자입니다.');
-}
-if (strlen($password) < 4) {
-    $err('비밀번호는 4자 이상이어야 합니다.');
 }
 if (db_row('SELECT id FROM riders WHERE login_id = ? LIMIT 1', [$loginId]) !== null) {
     $err('이미 사용 중인 로그인 ID입니다.');
@@ -260,10 +262,11 @@ do {
 
 try {
     $newId = db_transaction(static function () use ($riderCode, $loginId, $password, $name, $phone, $agencyId, $platform, $licenseId): int {
+        // 초기 비밀번호(0000) 통일 + 최초 로그인 시 변경 강제
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
         $id = db_insert(
-            'INSERT INTO riders (rider_code, login_id, password_hash, name, phone, status, team_code, vehicle_type, agency_id)
-             VALUES (?, ?, ?, ?, ?, \'active\', \'etc\', \'motor\', ?)',
+            'INSERT INTO riders (rider_code, login_id, password_hash, must_change_password, name, phone, status, team_code, vehicle_type, agency_id)
+             VALUES (?, ?, ?, 1, ?, ?, \'active\', \'etc\', \'motor\', ?)',
             [$riderCode, $loginId, $hash, $name, $phone, $agencyId]
         );
 

@@ -10,6 +10,21 @@ final class RiderAuth
     private const LOGIN_FAIL_MAX = 5;
     private const LOGIN_FAIL_WINDOW = 600;
 
+    /**
+     * 라이더 초기 비밀번호 — 신규 등록·관리자 초기화 시 이 값으로 통일한다.
+     * 이 상태의 계정은 `riders.must_change_password = 1`이라 최초 로그인 시 변경이 강제된다.
+     */
+    public const INITIAL_PASSWORD = '0000';
+
+    /** 초기 비밀번호로 설정(해시 + 강제변경 플래그를 항상 같이 처리) */
+    public static function applyInitialPassword(int $riderId): void
+    {
+        db_execute(
+            'UPDATE riders SET password_hash = ?, must_change_password = 1, updated_at = NOW() WHERE id = ?',
+            [password_hash(self::INITIAL_PASSWORD, PASSWORD_BCRYPT, ['cost' => 12]), $riderId]
+        );
+    }
+
     /** @var array<string, string> */
     private const STATUS_MESSAGES = [
         'active'        => '',
@@ -150,8 +165,16 @@ final class RiderAuth
             throw new InvalidArgumentException('현재 비밀번호가 올바르지 않습니다.');
         }
 
+        // 초기 비밀번호(0000)를 그대로 다시 쓰는 것은 막는다 — 강제 변경의 의미가 없어지므로.
+        if ($newPw === self::INITIAL_PASSWORD) {
+            throw new InvalidArgumentException('초기 비밀번호와 다른 값으로 설정해 주세요.');
+        }
+
         $hash = password_hash($newPw, PASSWORD_BCRYPT, ['cost' => 12]);
-        db_execute('UPDATE riders SET password_hash = ?, updated_at = NOW() WHERE id = ?', [$hash, $riderId]);
+        db_execute(
+            'UPDATE riders SET password_hash = ?, must_change_password = 0, updated_at = NOW() WHERE id = ?',
+            [$hash, $riderId]
+        );
     }
 
     /** @param array<string, mixed> $row */
@@ -170,6 +193,7 @@ final class RiderAuth
             'bank_account'        => (string) ($row['bank_account'] ?? ''),
             'account_holder'      => (string) ($row['account_holder'] ?? ''),
             'is_daily_settlement' => (int) ($row['is_daily_settlement'] ?? 0) === 1,
+            'must_change_password' => (int) ($row['must_change_password'] ?? 0) === 1,
             'password_hash'       => (string) ($row['password_hash'] ?? ''),
         ];
     }

@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * 라이더 부채 원장 — 대여금(loan)·리스/렌탈(lease)·선지급(advance)
+ * 라이더 미수금 원장 — 대여금(loan)·리스/렌탈(lease)·선지급(advance)
  *
  * PDF 정산명세서의 대여금/리스/선지급 차감 명세 대응. 잔액이 주 단위로 이월되며
  * 일납(daily_amount) × 차감일수(days)만큼 상환/부과된다.
@@ -43,7 +43,7 @@ final class RiderDebt
     }
 
     /**
-     * 라이더의 부채 목록 (라벨·이력수 포함)
+     * 라이더의 미수금 목록 (라벨·이력수 포함)
      *
      * @return list<array<string,mixed>>
      */
@@ -96,7 +96,7 @@ final class RiderDebt
     }
 
     /**
-     * 부채 신규 등록.
+     * 미수금 신규 등록.
      *
      * @param array<string,mixed> $in
      */
@@ -108,7 +108,7 @@ final class RiderDebt
             throw new InvalidArgumentException('라이더가 지정되지 않았습니다.');
         }
         if (!isset(self::KINDS[$kind])) {
-            throw new InvalidArgumentException('부채 종류가 올바르지 않습니다.');
+            throw new InvalidArgumentException('미수금 종류가 올바르지 않습니다.');
         }
         $principal = max(0, (int) ($in['principal_amount'] ?? 0));
         $daily     = max(0, (int) ($in['daily_amount'] ?? 0));
@@ -136,7 +136,7 @@ final class RiderDebt
     }
 
     /**
-     * 부채 기본정보 수정(제목·일납·채권자·상태·메모, 원금/잔액 보정).
+     * 미수금 기본정보 수정(제목·일납·채권자·상태·메모, 원금/잔액 보정).
      *
      * @param array<string,mixed> $in
      */
@@ -144,7 +144,7 @@ final class RiderDebt
     {
         $debt = self::find($id);
         if ($debt === null) {
-            throw new InvalidArgumentException('부채를 찾을 수 없습니다.');
+            throw new InvalidArgumentException('미수금을 찾을 수 없습니다.');
         }
         $sets   = [];
         $params = [];
@@ -192,10 +192,10 @@ final class RiderDebt
     {
         $debt = self::find($debtId);
         if ($debt === null) {
-            throw new InvalidArgumentException('부채를 찾을 수 없습니다.');
+            throw new InvalidArgumentException('미수금을 찾을 수 없습니다.');
         }
         if (($debt['status'] ?? '') !== 'active') {
-            throw new InvalidArgumentException('활성 상태의 부채만 차감할 수 있습니다.');
+            throw new InvalidArgumentException('활성 상태의 미수금만 차감할 수 있습니다.');
         }
         $d = DateTime::createFromFormat('Y-m-d', $appliedDate);
         if (!$d || $d->format('Y-m-d') !== $appliedDate) {
@@ -271,7 +271,7 @@ final class RiderDebt
         }
         $debt = self::find((int) $entry['debt_id']);
         if ($debt === null) {
-            throw new InvalidArgumentException('부채를 찾을 수 없습니다.');
+            throw new InvalidArgumentException('미수금을 찾을 수 없습니다.');
         }
         $isAmortizing = in_array((string) $debt['kind'], self::AMORTIZING, true);
 

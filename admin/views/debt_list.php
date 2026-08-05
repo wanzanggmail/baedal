@@ -82,13 +82,13 @@ $currentUrl = admin_url('deduction/debts');
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-gray-900">대여금·리스·선지급</li>
+				<li class="breadcrumb-item text-gray-900">미수금(대여금·리스·선지급)</li>
 			</ul>
 		</div>
 		<?php if ($canWrite && !$needsMigrate): ?>
 		<div class="d-flex gap-2">
 			<button type="button" class="btn btn-sm btn-primary fw-bold" id="btn_debt_new">
-				<i class="ki-duotone ki-plus fs-4"></i>부채 등록
+				<i class="ki-duotone ki-plus fs-4"></i>미수금 등록
 			</button>
 		</div>
 		<?php endif; ?>
@@ -98,7 +98,7 @@ $currentUrl = admin_url('deduction/debts');
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
 
 	<?php if ($needsMigrate): ?>
-	<div class="alert alert-warning p-5">부채 원장 테이블이 아직 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
+	<div class="alert alert-warning p-5">미수금 원장 테이블이 아직 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 	<?php else: ?>
 
 	<div id="debt_toast" class="alert alert-dismissible d-none mb-6"><span id="debt_toast_msg"></span></div>
@@ -107,7 +107,7 @@ $currentUrl = admin_url('deduction/debts');
 	<div class="row g-5 g-xl-8 mb-8">
 		<div class="col-xl-3 col-md-6">
 			<div class="card card-flush h-100"><div class="card-body py-6">
-				<div class="text-gray-500 fw-semibold fs-7 mb-1">진행 중 부채</div>
+				<div class="text-gray-500 fw-semibold fs-7 mb-1">진행 중 미수금</div>
 				<div class="fw-bold fs-2 text-gray-900"><?= number_format($kpi['active']) ?>건</div>
 			</div></div>
 		</div>
@@ -172,12 +172,12 @@ $currentUrl = admin_url('deduction/debts');
 
 	<div class="card card-flush">
 		<div class="card-header pt-5">
-			<h3 class="card-title fw-bold m-0">부채 목록 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($rows)) ?>건</span></h3>
+			<h3 class="card-title fw-bold m-0">미수금 목록 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($rows)) ?>건</span></h3>
 		</div>
 		<div class="card-body pt-2">
 			<?php if (empty($rows)): ?>
 			<div class="text-center text-gray-500 py-10">
-				<?= ($filterQ !== '' || $filterKind !== '' || $filterStatus !== '') ? '조건에 맞는 부채가 없습니다.' : '등록된 대여금·리스·선지급이 없습니다. 우측 상단 「부채 등록」으로 추가하세요.' ?>
+				<?= ($filterQ !== '' || $filterKind !== '' || $filterStatus !== '') ? '조건에 맞는 미수금이 없습니다.' : '등록된 미수금(대여금·리스·선지급)이 없습니다. 우측 상단 「미수금 등록」으로 추가하세요.' ?>
 			</div>
 			<?php else: ?>
 			<div class="table-responsive">
@@ -239,7 +239,7 @@ $currentUrl = admin_url('deduction/debts');
 				</table>
 			</div>
 			<?php endif; ?>
-			<div class="text-muted fs-8 mt-3">차감을 실행하면 해당 귀속일의 정산 반영 시 자동으로 차감됩니다. 리스/렌탈은 일납×일수만큼 매 정산 부과되며 잔액은 줄지 않습니다. 차감 이력·취소는 라이더 상세의 「부채」 카드에서 확인합니다.</div>
+			<div class="text-muted fs-8 mt-3">차감을 실행하면 해당 귀속일의 정산 반영 시 자동으로 차감됩니다. 리스/렌탈은 일납×일수만큼 매 정산 부과되며 잔액은 줄지 않습니다. 차감 이력·취소는 라이더 상세의 「미수금」 카드에서 확인합니다.</div>
 		</div>
 	</div>
 
@@ -247,7 +247,7 @@ $currentUrl = admin_url('deduction/debts');
 	<!--begin::New Modal-->
 	<div class="modal fade" id="kt_debt_new_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered mw-650px"><div class="modal-content">
-			<div class="modal-header"><h2 class="fw-bold">부채 등록</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+			<div class="modal-header"><h2 class="fw-bold">미수금 등록</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
 			<div class="modal-body py-lg-8 px-lg-10">
 				<div id="debt_new_alert" class="d-none mb-4"></div>
 				<div class="mb-4">
@@ -338,7 +338,7 @@ $currentUrl = admin_url('deduction/debts');
 	<!--begin::Edit Modal-->
 	<div class="modal fade" id="kt_debt_edit_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered mw-500px"><div class="modal-content">
-			<div class="modal-header"><h2 class="fw-bold">부채 수정</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
+			<div class="modal-header"><h2 class="fw-bold">미수금 수정</h2><div class="btn btn-icon btn-sm" data-bs-dismiss="modal"><i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i></div></div>
 			<div class="modal-body py-lg-8 px-lg-10">
 				<div id="debt_edit_alert" class="d-none mb-4"></div>
 				<input type="hidden" id="de_debt_id" />

@@ -44,6 +44,12 @@ final class MigrateRunner
         self::migrateCycleSupportAmountColumn();
         self::migrateLeasePlannedEndColumn();
         self::migrateDebtEntryUniqueKey();
+        self::migrateUploadTeamRegionColumns();
+        self::migrateCycleTeamRegion();
+        self::migrateTeamRegionNormalize();
+        self::migrateRiderPlatformMultiId();
+        self::migrateRiderMustChangePassword();
+        self::migratePlatformFeeSplit();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -710,6 +716,365 @@ final class MigrateRunner
             echo "OK    uq_rde_debt_applied\n";
         } catch (Throwable $e) {
             echo 'ERROR uq_rde_debt_applied → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 팀지역별 업로드 분리 — 한 대리점이 같은 날 여러 팀지역 정산서를 올릴 수 있어야 한다.
+     * 기존엔 팀/지역이 stored_path JSON에만 들어 있어 조회·중복판정에 쓸 수 없었다.
+     */
+    private static function migrateUploadTeamRegionColumns(): void
+    {
+        echo "== settlement_uploads.team_name / region_name ==\n";
+
+        if (!db_table_exists('settlement_uploads')) {
+            echo "SKIP  settlement_uploads (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_uploads'), 'Field');
+        if (in_array('team_name', $cols, true) && in_array('region_name', $cols, true)) {
+            echo "SKIP  team_name/region_name (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            if (!in_array('team_name', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE settlement_uploads
+                        ADD COLUMN team_name VARCHAR(60) NOT NULL DEFAULT ''
+                            COMMENT '팀명(정산서 기준). 같은 날 여러 팀지역 업로드 구분용' AFTER agency_id"
+                );
+                echo "OK    team_name\n";
+            }
+            if (!in_array('region_name', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE settlement_uploads
+                        ADD COLUMN region_name VARCHAR(60) NOT NULL DEFAULT ''
+                            COMMENT '지역명(정산서 기준)' AFTER team_name"
+                );
+                echo "OK    region_name\n";
+            }
+
+            // 기존 행의 stored_path JSON에 들어 있던 team/region을 새 컬럼으로 승격(백필)
+            $filled = 0;
+            foreach (db_rows("SELECT id, stored_path FROM settlement_uploads WHERE team_name = '' AND region_name = ''") as $row) {
+                $meta = json_decode((string) ($row['stored_path'] ?? ''), true);
+                if (!is_array($meta)) {
+                    continue;
+                }
+                $team   = trim((string) ($meta['team'] ?? ''));
+                $region = trim((string) ($meta['region'] ?? ''));
+                if ($team === '' && $region === '') {
+                    continue;
+                }
+                db_execute(
+                    'UPDATE settlement_uploads SET team_name = ?, region_name = ? WHERE id = ?',
+                    [mb_substr($team, 0, 60), mb_substr($region, 0, 60), (int) $row['id']]
+                );
+                $filled++;
+            }
+            echo "OK    기존 {$filled}건 팀/지역 백필\n";
+
+            $idx = array_column(db_rows('SHOW INDEX FROM settlement_uploads'), 'Key_name');
+            if (!in_array('idx_su_agency_date_team', $idx, true)) {
+                db_execute(
+                    'ALTER TABLE settlement_uploads
+                        ADD KEY idx_su_agency_date_team (agency_id, settlement_date, team_name, region_name)'
+                );
+                echo "OK    idx_su_agency_date_team\n";
+            }
+        } catch (Throwable $e) {
+            echo 'ERROR team/region → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 정산 사이클을 팀지역 단위로 분리 — 한 라이더가 같은 날 두 팀지역에서 일하면 사이클 2건.
+     * 기존 UNIQUE(rider_id, settlement_date, platform)로는 두 번째가 조용히 skip 됐다.
+     */
+    private static function migrateCycleTeamRegion(): void
+    {
+        echo "== settlement_rider_cycles.team_region ==\n";
+
+        if (!db_table_exists('settlement_rider_cycles')) {
+            echo "SKIP  settlement_rider_cycles (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field');
+        $idx  = array_column(db_rows('SHOW INDEX FROM settlement_rider_cycles'), 'Key_name');
+
+        if (in_array('team_region', $cols, true) && in_array('uq_src_rider_date_pf_team', $idx, true)) {
+            echo "SKIP  team_region + UNIQUE (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            if (!in_array('team_region', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE settlement_rider_cycles
+                        ADD COLUMN team_region VARCHAR(120) NOT NULL DEFAULT ''
+                            COMMENT '팀지역(업로드의 team_name/region_name 결합). 같은 날 다른 팀지역 정산을 분리' AFTER platform"
+                );
+                echo "OK    team_region\n";
+            }
+
+            // 기존 사이클에 업로드의 팀지역 백필(업로드가 지워진 건은 빈 값 유지 → 기존 동작과 동일)
+            $n = db_execute(
+                "UPDATE settlement_rider_cycles c
+                   INNER JOIN settlement_uploads u ON u.id = c.upload_id
+                    SET c.team_region = TRIM(CONCAT(u.team_name, ' ', u.region_name))
+                  WHERE c.team_region = ''"
+            );
+            echo "OK    기존 {$n}건 team_region 백필\n";
+
+            if (in_array('uq_src_rider_date_pf', $idx, true)) {
+                db_execute('ALTER TABLE settlement_rider_cycles DROP INDEX uq_src_rider_date_pf');
+                echo "OK    기존 UNIQUE 제거\n";
+            }
+            if (!in_array('uq_src_rider_date_pf_team', $idx, true)) {
+                db_execute(
+                    'ALTER TABLE settlement_rider_cycles
+                        ADD UNIQUE KEY uq_src_rider_date_pf_team (rider_id, settlement_date, platform, team_region)'
+                );
+                echo "OK    uq_src_rider_date_pf_team\n";
+            }
+        } catch (Throwable $e) {
+            echo 'ERROR team_region → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 팀/지역명 유니코드 정규화 백필 — 조합형(NFD)과 완성형(NFC)이 섞여 들어와
+     * "눈에는 같은데 다른 값"이 되어 팀지역 UNIQUE가 무력화되는 것을 막는다.
+     * 저장 시점 정규화는 settlement_upload.php에서 하고, 여기서는 기존 데이터를 정리한다.
+     */
+    private static function migrateTeamRegionNormalize(): void
+    {
+        echo "== 팀/지역명 유니코드 정규화(NFD→NFC) ==\n";
+
+        if (!db_table_exists('settlement_uploads')) {
+            echo "SKIP  settlement_uploads (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_uploads'), 'Field');
+        if (!in_array('team_name', $cols, true)) {
+            echo "SKIP  team_name 컬럼 없음\n";
+
+            return;
+        }
+
+        try {
+            $fixed = 0;
+            foreach (db_rows('SELECT id, team_name, region_name FROM settlement_uploads') as $r) {
+                $t = normalize_hangul_nfc((string) $r['team_name']);
+                $g = normalize_hangul_nfc((string) $r['region_name']);
+                if ($t !== (string) $r['team_name'] || $g !== (string) $r['region_name']) {
+                    db_execute('UPDATE settlement_uploads SET team_name = ?, region_name = ? WHERE id = ?', [$t, $g, (int) $r['id']]);
+                    $fixed++;
+                }
+            }
+            echo "OK    uploads {$fixed}건 정규화\n";
+
+            if (db_table_exists('settlement_rider_cycles')
+                && in_array('team_region', array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field'), true)) {
+                $fixedC = 0;
+                foreach (db_rows("SELECT id, team_region FROM settlement_rider_cycles WHERE team_region <> ''") as $r) {
+                    $v = normalize_hangul_nfc((string) $r['team_region']);
+                    if ($v !== (string) $r['team_region']) {
+                        db_execute('UPDATE settlement_rider_cycles SET team_region = ? WHERE id = ?', [$v, (int) $r['id']]);
+                        $fixedC++;
+                    }
+                }
+                echo "OK    cycles {$fixedC}건 정규화\n";
+            }
+        } catch (Throwable $e) {
+            // 정규화 후 같은 (rider,date,platform,team_region)이 겹치면 UNIQUE 위반 → 수동 확인 필요
+            echo 'ERROR 팀지역 정규화 → ' . $e->getMessage() . "\n";
+            echo "      (정규화 시 중복이 생기는 사이클이 있습니다. 해당 건을 확인 후 정리하세요.)\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 쿠팡 ID 다중 보유 — 한 라이더가 팀지역별로 여러 쿠팡ID를 가질 수 있다.
+     * 기존 코드는 플랫폼당 1개만 두고 덮어썼는데, 정식으로 여러 행을 허용하되
+     * **완전히 같은 (라이더, 플랫폼, ID)** 중복만 UNIQUE로 막는다.
+     */
+    private static function migrateRiderPlatformMultiId(): void
+    {
+        echo "== rider_platforms UNIQUE(rider, platform, external_id) ==\n";
+
+        if (!db_table_exists('rider_platforms')) {
+            echo "SKIP  rider_platforms (테이블 없음)\n";
+
+            return;
+        }
+
+        $idx = array_column(db_rows('SHOW INDEX FROM rider_platforms'), 'Key_name');
+        if (in_array('uq_rp_rider_pf_ext', $idx, true)) {
+            echo "SKIP  uq_rp_rider_pf_ext (이미 있음)\n";
+
+            return;
+        }
+
+        // 기존 중복 정리(같은 라이더·플랫폼·ID가 여러 행이면 가장 오래된 것만 남김)
+        $dups = db_rows(
+            'SELECT rider_id, platform, external_id, COUNT(*) c, MIN(id) keep_id
+               FROM rider_platforms
+              GROUP BY rider_id, platform, external_id
+             HAVING c > 1'
+        );
+        foreach ($dups as $d) {
+            db_execute(
+                'DELETE FROM rider_platforms
+                  WHERE rider_id = ? AND platform = ? AND external_id = ? AND id <> ?',
+                [(int) $d['rider_id'], (string) $d['platform'], (string) $d['external_id'], (int) $d['keep_id']]
+            );
+        }
+        if ($dups !== []) {
+            echo 'OK    중복 ' . count($dups) . "종 정리\n";
+        }
+
+        try {
+            db_execute('ALTER TABLE rider_platforms ADD UNIQUE KEY uq_rp_rider_pf_ext (rider_id, platform, external_id)');
+            echo "OK    uq_rp_rider_pf_ext\n";
+        } catch (Throwable $e) {
+            echo 'ERROR uq_rp_rider_pf_ext → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /** 라이더 최초 로그인 시 비밀번호 강제 변경 플래그 */
+    private static function migrateRiderMustChangePassword(): void
+    {
+        echo "== riders.must_change_password ==\n";
+
+        if (!db_table_exists('riders')) {
+            echo "SKIP  riders (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+        if (in_array('must_change_password', $cols, true)) {
+            echo "SKIP  must_change_password (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE riders
+                    ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0
+                        COMMENT '1=초기 비밀번호(0000) 상태. 최초 로그인 시 변경 강제' AFTER password_hash"
+            );
+            echo "OK    must_change_password\n";
+        } catch (Throwable $e) {
+            echo 'ERROR must_change_password → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * 플랫폼 수수료(구 영업대행수수료) — 대리점 기준 3분할.
+     * 기존: 조직마다 "내 몫" 1개(본사 1개·총판 1개를 모든 하위가 공유).
+     * 변경: **대리점마다** 본사/총판/대리점 몫을 각각 설정(대리점별로 다르게 줄 수 있음).
+     */
+    private static function migratePlatformFeeSplit(): void
+    {
+        echo "== org_fee_config 대리점별 3분할 ==\n";
+
+        if (!db_table_exists('org_fee_config')) {
+            echo "SKIP  org_fee_config (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM org_fee_config'), 'Field');
+        $need = ['hq_pct', 'distributor_pct', 'agency_pct'];
+        if (count(array_intersect($need, $cols)) === count($need)) {
+            echo "SKIP  hq/distributor/agency_pct (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            foreach ([
+                'hq_pct'          => '본사 몫(%)',
+                'distributor_pct' => '총판 몫(%)',
+                'agency_pct'      => '대리점 몫(%)',
+            ] as $col => $comment) {
+                if (in_array($col, $cols, true)) {
+                    continue;
+                }
+                db_execute(
+                    "ALTER TABLE org_fee_config
+                        ADD COLUMN {$col} DECIMAL(5,2) NOT NULL DEFAULT 0.00 COMMENT '{$comment}'"
+                );
+                echo "OK    {$col}\n";
+            }
+
+            // 기존 값 이관: 대리점 행마다 본사/상위총판/자기 pct를 조회해 3개 컬럼으로 펼친다.
+            if (!db_table_exists('organizations')) {
+                echo "SKIP  백필 (organizations 없음)\n";
+
+                return;
+            }
+            $hqPct = 0.0;
+            foreach (db_rows(
+                "SELECT f.pg_service_fee_pct p FROM org_fee_config f
+                   INNER JOIN organizations o ON o.id = f.org_id
+                  WHERE o.level = 'admin' LIMIT 1"
+            ) as $r) {
+                $hqPct = (float) $r['p'];
+            }
+            $distPct = [];
+            foreach (db_rows(
+                "SELECT f.org_id, f.pg_service_fee_pct p FROM org_fee_config f
+                   INNER JOIN organizations o ON o.id = f.org_id
+                  WHERE o.level = 'distributor'"
+            ) as $r) {
+                $distPct[(int) $r['org_id']] = (float) $r['p'];
+            }
+
+            $n = 0;
+            foreach (db_rows(
+                "SELECT o.id, o.parent_id, COALESCE(f.pg_service_fee_pct, 0) p
+                   FROM organizations o
+                   LEFT JOIN org_fee_config f ON f.org_id = o.id
+                  WHERE o.level = 'agency'"
+            ) as $r) {
+                $agencyId = (int) $r['id'];
+                $own      = (float) $r['p'];
+                $dist     = $distPct[(int) $r['parent_id']] ?? 0.0;
+                if (db_row('SELECT org_id FROM org_fee_config WHERE org_id = ?', [$agencyId]) === null) {
+                    db_execute(
+                        'INSERT INTO org_fee_config (org_id, pg_service_fee_pct, hq_pct, distributor_pct, agency_pct)
+                         VALUES (?, ?, ?, ?, ?)',
+                        [$agencyId, $own, $hqPct, $dist, $own]
+                    );
+                } else {
+                    db_execute(
+                        'UPDATE org_fee_config SET hq_pct = ?, distributor_pct = ?, agency_pct = ? WHERE org_id = ?',
+                        [$hqPct, $dist, $own, $agencyId]
+                    );
+                }
+                $n++;
+            }
+            echo "OK    대리점 {$n}곳 3분할 백필(본사 {$hqPct}% + 상위총판 + 자기몫)\n";
+        } catch (Throwable $e) {
+            echo 'ERROR platform fee split → ' . $e->getMessage() . "\n";
             exit(1);
         }
     }

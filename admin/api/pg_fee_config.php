@@ -3,13 +3,16 @@
 declare(strict_types=1);
 
 /**
- * 영업대행수수료 분배 요율 API (본사 super 전용) — LOGIC §7 #12
- * GET  — 전 조직 요율 목록
- * POST { action:'save', org_id, pct }
+ * 수수료 설정 API (본사 super 전용) — 대리점 기준.
+ *   action=save_platform  : 플랫폼 수수료 3분할(본사/총판/대리점 %)
+ *   action=save_settlement: 정산수수료(건별 단가·임계일) + 보증금
+ *
+ * 참고: LOGIC.md §7 #12
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/PgFeeConfig.php';
+require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -34,7 +37,7 @@ $err = static function (string $msg, int $code = 422): never {
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
-    echo json_encode(['ok' => true, 'rows' => PgFeeConfig::listAll()], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true, 'rows' => PgFeeConfig::listAgencyConfigs()], JSON_UNESCAPED_UNICODE);
     exit;
 }
 if ($method !== 'POST') {
@@ -45,22 +48,56 @@ $raw  = file_get_contents('php://input');
 $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
 $body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}', true) : $_POST;
 
-if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
-    $err('action=save', 400);
+$action  = trim((string) ($body['action'] ?? ''));
+$orgId   = (int) ($body['org_id'] ?? 0);
+$adminId = (int) ($_SESSION['admin_id'] ?? 0);
+
+$org = db_row("SELECT id, name, level FROM organizations WHERE id = ? LIMIT 1", [$orgId]);
+if ($org === null) {
+    $err('조직을 찾을 수 없습니다.', 404);
+}
+if ((string) $org['level'] !== 'agency') {
+    $err('수수료는 대리점 단위로만 설정합니다.');
 }
 
 try {
-    $orgId   = (int) ($body['org_id'] ?? 0);
-    $pct     = (float) ($body['pct'] ?? 0);
-    $adminId = (int) ($_SESSION['admin_id'] ?? 0);
+    if ($action === 'save_platform') {
+        $hq   = (float) ($body['hq_pct'] ?? 0);
+        $dist = (float) ($body['distributor_pct'] ?? 0);
+        $ag   = (float) ($body['agency_pct'] ?? 0);
 
-    $org = db_row('SELECT id, name FROM organizations WHERE id = ? LIMIT 1', [$orgId]);
-    if ($org === null) {
-        $err('조직을 찾을 수 없습니다.', 404);
+        PgFeeConfig::saveForAgency($orgId, $hq, $dist, $ag, $adminId > 0 ? $adminId : null);
+        AuditLog::record(
+            'org.platform_fee',
+            (string) $orgId,
+            sprintf('%s 플랫폼 수수료 · 본사 %.2f%% / 총판 %.2f%% / 대리점 %.2f%% (합 %.2f%%)',
+                (string) $org['name'], $hq, $dist, $ag, $hq + $dist + $ag)
+        );
+    } elseif ($action === 'save_settlement') {
+        $saved = WithdrawalConfig::save([
+            'reserve_amount'    => (int) ($body['reserve_amount'] ?? 0),
+            'fee_day_threshold' => (int) ($body['fee_day_threshold'] ?? 7),
+            'fee_per_tx_short'  => (int) ($body['fee_per_tx_short'] ?? 0),
+            'fee_per_tx_long'   => (int) ($body['fee_per_tx_long'] ?? 0),
+        ], $orgId, $adminId > 0 ? $adminId : null);
+
+        AuditLog::record(
+            'org.settlement_fee',
+            (string) $orgId,
+            sprintf('%s 정산수수료 · %d일 이내 %d원 / 이후 %d원 · 보증금 %s원',
+                (string) $org['name'],
+                $saved['fee_day_threshold'], $saved['fee_per_tx_short'], $saved['fee_per_tx_long'],
+                number_format($saved['reserve_amount']))
+        );
+    } else {
+        $err('action이 올바르지 않습니다.', 400);
     }
-    PgFeeConfig::save($orgId, $pct, $adminId > 0 ? $adminId : null);
-    AuditLog::record('org.pg_fee', (string) $orgId, sprintf('%s 영업대행수수료 몫 %.2f%%', (string) $org['name'], $pct));
-    echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'rows' => PgFeeConfig::listAll()], JSON_UNESCAPED_UNICODE);
+
+    echo json_encode([
+        'ok'      => true,
+        'message' => '저장되었습니다.',
+        'rows'    => PgFeeConfig::listAgencyConfigs(),
+    ], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);
 } catch (Throwable $e) {

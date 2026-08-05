@@ -13,7 +13,10 @@ $riderRoute = rider_requested_route();
 
 if ($riderRoute === 'logout') {
     rider_logout();
-    header('Location: ' . rider_url('login') . '?out=1', true, 302);
+    $loginUrl = rider_url('login');
+    $loginUrl .= str_contains($loginUrl, '?') ? '&' : '?';
+    $loginUrl .= 'out=1';
+    header('Location: ' . $loginUrl, true, 302);
     exit;
 }
 
@@ -29,6 +32,15 @@ if (!rider_is_logged_in() && $riderRoute !== 'login') {
 
 if (rider_is_logged_in() && $riderRoute === 'login') {
     header('Location: ' . rider_url('home'), true, 302);
+    exit;
+}
+
+// 초기 비밀번호(0000) 상태면 비밀번호를 바꾸기 전까지 다른 화면 접근을 막는다.
+// 허용 라우트: 비밀번호 변경 화면 자체와 로그아웃.
+if (rider_is_logged_in() && !empty($_SESSION['rider']['must_change_password'])
+    && !in_array($riderRoute, ['profile/password', 'logout'], true)) {
+    $_SESSION['rider_flash_error'] = '초기 비밀번호 상태입니다. 먼저 비밀번호를 변경해 주세요.';
+    header('Location: ' . rider_url('profile/password'), true, 302);
     exit;
 }
 
@@ -120,7 +132,14 @@ if ($riderRoute === 'profile/password' && $_SERVER['REQUEST_METHOD'] === 'POST')
         unset($_SESSION['rider_pw_csrf']);
         rider_clear_remember_cookie();
         session_regenerate_id(true);
+        // 강제 변경 상태 해제 — 이걸 안 풀면 변경 후에도 계속 이 화면에 갇힌다.
+        $wasForced = !empty($_SESSION['rider']['must_change_password']);
+        $_SESSION['rider']['must_change_password'] = false;
         $_SESSION['rider_flash_ok'] = '비밀번호가 변경되었습니다.';
+        if ($wasForced) {
+            header('Location: ' . rider_url('home'), true, 302);
+            exit;
+        }
     } catch (InvalidArgumentException $e) {
         $_SESSION['rider_flash_error'] = $e->getMessage();
     } catch (Throwable $e) {

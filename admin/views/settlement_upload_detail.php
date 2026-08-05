@@ -108,10 +108,12 @@ $supportRow = db_row(
 $supportCount = (int) ($supportRow['cnt'] ?? 0);
 $supportTotal = (int) ($supportRow['total'] ?? 0);
 
+// 팀지역은 정식 컬럼 우선(2026-08-04~), 없으면 예전 stored_path JSON에서 폴백
 $meta = json_decode((string) ($upload['stored_path'] ?? ''), true);
-$teamRegion = is_array($meta)
-    ? trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? ''))
-    : '';
+$teamRegion = trim((string) ($upload['team_name'] ?? '') . ' ' . (string) ($upload['region_name'] ?? ''));
+if ($teamRegion === '' && is_array($meta)) {
+    $teamRegion = trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? ''));
+}
 
 $platformLabels = [
     'baemin'  => '배달의민족',
@@ -461,8 +463,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
 							</div>
 							<div class="col-md-6 mb-4">
-								<label class="form-label required">비밀번호</label>
-								<input type="text" class="form-control form-control-solid" id="qrPassword" maxlength="60" autocomplete="off" />
+								<label class="form-label">초기 비밀번호</label>
+								<input type="text" class="form-control form-control-solid" id="qrPassword" value="0000" readonly />
+								<div class="form-text fs-9">최초 로그인 시 라이더가 직접 변경합니다.</div>
 							</div>
 						</div>
 						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
@@ -533,7 +536,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			document.getElementById('qrName').value = name;
 			document.getElementById('qrPhone').value = '';
 			document.getElementById('qrLoginId').value = '';
-			document.getElementById('qrPassword').value = randomPw();
+			document.getElementById('qrPassword').value = '0000';
 			var al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
 			var warn = document.getElementById('qrRematchWarn');
 			if (matched) {

@@ -78,7 +78,7 @@ if (!$needsMigrate) {
         $listParams[] = $offset;
 
         $uploads = db_rows(
-            "SELECT u.id, u.settlement_date, u.original_filename, u.platform,
+            "SELECT u.id, u.settlement_date, u.original_filename, u.platform, u.team_name, u.region_name,
                     u.total_rows, u.ok_rows, u.error_rows, u.status, u.created_at,
                     a.name AS uploaded_by_name, u.stored_path
                FROM settlement_uploads u
@@ -229,7 +229,13 @@ $queryParams = array_filter([
 						<tr>
 							<td class="fw-bold text-gray-900"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td><?= htmlspecialchars($teamLabel !== '' ? $teamLabel : '-', ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-gray-700 fs-7 text-break"><?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-700 fs-7 text-break">
+							<?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?>
+							<?php $tr = trim((string) ($up['team_name'] ?? '') . ' ' . (string) ($up['region_name'] ?? '')); ?>
+							<?php if ($tr !== '') : ?>
+							<span class="badge badge-light-info fs-9 d-inline-block mt-1"><?= htmlspecialchars($tr, ENT_QUOTES, 'UTF-8') ?></span>
+							<?php endif; ?>
+						</td>
 							<td><?= htmlspecialchars($platLabel, ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
 								<?= number_format((int) $up['total_rows']) ?>명

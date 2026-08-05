@@ -46,6 +46,8 @@ function rider_set_session_user(array $rider): void
         'status'              => (string) ($rider['status'] ?? 'active'),
         'vehicle_type'        => (string) ($rider['vehicle_type'] ?? ''),
         'is_daily_settlement' => !empty($rider['is_daily_settlement']),
+        // 초기 비밀번호(0000) 상태 — rider/index.php가 비밀번호 변경 전 다른 화면 접근을 막는다.
+        'must_change_password' => !empty($rider['must_change_password']),
     ];
 }
 
@@ -164,6 +166,7 @@ function rider_current_user(): ?array
         'phone'               => (string) ($_SESSION['rider']['phone'] ?? ''),
         'email'               => (string) ($_SESSION['rider']['email'] ?? ''),
         'is_daily_settlement' => !empty($_SESSION['rider']['is_daily_settlement']),
+        'must_change_password' => !empty($_SESSION['rider']['must_change_password']),
     ];
 }
 

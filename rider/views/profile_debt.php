@@ -27,7 +27,7 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 		<?php if (!$debtReady) : ?>
 		<p class="text-muted fs-7 py-6 mb-0">준비 중입니다.</p>
 		<?php elseif ($debts === []) : ?>
-		<p class="text-muted fs-7 py-6 mb-0 text-center">등록된 대여금·리스·선지급이 없습니다.</p>
+		<p class="text-muted fs-7 py-6 mb-0 text-center">등록된 미수금(대여금·리스·선지급)이 없습니다.</p>
 		<?php else : ?>
 		<div class="d-flex flex-column gap-3">
 			<?php foreach ($debts as $d) :

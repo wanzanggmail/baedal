@@ -82,6 +82,9 @@ if ($settlementDate === '') {
     $settlementDate = date('Y-m-d');
 }
 
+// 팀/지역은 파일명(팀_지역_날짜.xlsx)에서 뽑되, 업로드 폼에서 직접 지정하면 그 값을 우선한다.
+// ⚠️ 반드시 유니코드 정규화(NFC)할 것 — 업로드 환경에 따라 조합형/완성형이 섞여 들어와
+//    "눈에는 같은데 다른 팀지역"이 되면 같은 날 중복 정산이 생긴다(2026-08-04 실데이터 사고).
 $teamName   = '';
 $regionName = '';
 $baseName   = pathinfo($origName, PATHINFO_FILENAME);
@@ -90,9 +93,19 @@ if (count($parts) >= 3) {
     $teamName   = $parts[0] ?? '';
     $regionName = implode('_', array_slice($parts, 1, -1));
 }
+$teamInput   = trim((string) ($_POST['team_name'] ?? ''));
+$regionInput = trim((string) ($_POST['region_name'] ?? ''));
+if ($teamInput !== '') {
+    $teamName = $teamInput;
+}
+if ($regionInput !== '') {
+    $regionName = $regionInput;
+}
+$teamName   = mb_substr(normalize_hangul_nfc($teamName), 0, 60);
+$regionName = mb_substr(normalize_hangul_nfc($regionName), 0, 60);
 
 $fileHash = hash_file('sha256', $tmpPath) ?: '';
-$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId);
+$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId, $teamName, $regionName);
 $dupWarning = null;
 if ($dupError !== null) {
     if ($dryRun) {
@@ -273,10 +286,10 @@ try {
         $totalRows = count($rows);
         $uploadId  = db_insert(
             'INSERT INTO settlement_uploads
-                (kind, platform, agency_id, original_filename, stored_path, settlement_date,
+                (kind, platform, agency_id, team_name, region_name, original_filename, stored_path, settlement_date,
                  total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
-            ['daily', $platform, $agencyId, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)',
+            ['daily', $platform, $agencyId, $teamName, $regionName, $origName, $metaJson, $settlementDate, $totalRows, 'parsed', $adminId]
         );
 
         // 시간제보험(§7 #6): 라이더 이름(원본 문자열) → 금액. 종합탭 daily_riders.hourly_insurance 채우기 + 별도 내역 테이블 저장에 공용.
@@ -703,20 +716,30 @@ function settlement_upload_duplicate_error(
     string $settlementDate,
     string $origName,
     string $fileHash,
-    int $agencyId
+    int $agencyId,
+    string $teamName = '',
+    string $regionName = ''
 ): ?string {
     if (!db_table_exists('settlement_uploads')) {
         return null;
     }
 
-    // 중복 판정은 같은 대리점 범위 내에서 (대리점마다 같은 날짜 파일을 각각 업로드)
-    $rows = db_rows(
-        'SELECT id, original_filename, stored_path
-           FROM settlement_uploads
-          WHERE kind = ? AND platform = ? AND settlement_date = ? AND agency_id = ?
-          ORDER BY id DESC',
-        ['daily', $platform, $settlementDate, $agencyId]
-    );
+    // 중복 판정은 같은 대리점 + **같은 팀지역** 범위 내에서.
+    // 한 대리점이 같은 날 여러 팀지역 정산서를 올리는 게 정상이므로, 팀지역이 다르면 중복이 아니다.
+    $hasTeamCol = in_array('team_name', array_column(db_rows('SHOW COLUMNS FROM settlement_uploads'), 'Field'), true);
+
+    $sql    = 'SELECT id, original_filename, stored_path
+                 FROM settlement_uploads
+                WHERE kind = ? AND platform = ? AND settlement_date = ? AND agency_id = ?';
+    $params = ['daily', $platform, $settlementDate, $agencyId];
+    if ($hasTeamCol) {
+        $sql     .= ' AND team_name = ? AND region_name = ?';
+        $params[] = $teamName;
+        $params[] = $regionName;
+    }
+    $sql .= ' ORDER BY id DESC';
+
+    $rows = db_rows($sql, $params);
 
     foreach ($rows as $row) {
         $existingId   = (int) ($row['id'] ?? 0);
@@ -739,9 +762,11 @@ function settlement_upload_duplicate_error(
         $first     = $rows[0];
         $existingId   = (int) ($first['id'] ?? 0);
         $existingName = (string) ($first['original_filename'] ?? '');
+        $where = trim($teamName . ' ' . $regionName);
+        $whereLabel = $where !== '' ? "{$where} " : '';
 
-        return "해당 일자·플랫폼 정산이 이미 등록되어 있습니다. ({$settlementDate}, 기존: {$existingName}, 업로드 #{$existingId}) "
-            . '다른 파일로 교체하려면 기존 업로드를 삭제한 뒤 다시 업로드하세요.';
+        return "해당 일자·플랫폼의 {$whereLabel}정산이 이미 등록되어 있습니다. ({$settlementDate}, 기존: {$existingName}, 업로드 #{$existingId}) "
+            . '다른 팀지역이라면 팀/지역명을 확인하고, 같은 자료 교체라면 기존 업로드를 삭제한 뒤 다시 업로드하세요.';
     }
 
     return null;
