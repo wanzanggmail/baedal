@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `admins` (
     `password_hash`  VARCHAR(255)     NOT NULL,
     `name`           VARCHAR(80)      NOT NULL,
     `email`          VARCHAR(120)     NULL,
-    `role`           ENUM('super','admin','operation','settlement') NOT NULL DEFAULT 'admin',
+    `role`           ENUM('super','admin','operation','settlement','manager') NOT NULL DEFAULT 'admin',
     `is_active`      TINYINT(1)       NOT NULL DEFAULT 1,
     `last_login_at`  DATETIME         NULL,
     `created_at`     DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,

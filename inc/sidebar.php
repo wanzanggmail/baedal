@@ -26,6 +26,7 @@ $route = $route ?? '';
 										</div>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('settlement/upload')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('settlement/') ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -80,8 +81,10 @@ $route = $route ?? '';
 												</div>
 											</div>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('deduction/agency-fee')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
@@ -93,10 +96,12 @@ $route = $route ?? '';
 												<span class="menu-title">선공제(대행 수수료)</span>
 											</a>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
 										<?php // 구 "선지급(대여금) 입력"(deduction/advance)은 2026-07-24 부채 원장(deduction/debts)으로 대체돼 메뉴에서 제거.
 										      // 라우트·화면은 남아 있어 직접 URL로는 접근 가능. ?>
+										<?php if (admin_can_access_route('deduction/debts')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('deduction/debts') ?>" href="<?= htmlspecialchars(admin_url('deduction/debts'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
@@ -112,8 +117,27 @@ $route = $route ?? '';
 												<span class="menu-title">미수금 원장</span>
 											</a>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('promotion')) : ?>
+										<div class="menu-item">
+											<a class="menu-link<?= (($route ?? '') === 'promotion' || ($route ?? '') === 'promotion/detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(admin_url('promotion'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-gift fs-2">
+														<span class="path1"></span>
+														<span class="path2"></span>
+														<span class="path3"></span>
+														<span class="path4"></span>
+													</i>
+												</span>
+												<span class="menu-title">프로모션 지급</span>
+											</a>
+										</div>
+										<?php endif; ?>
+										<!--end:Menu item-->
+										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('withdrawal/list')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('withdrawal/') ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -180,8 +204,10 @@ $route = $route ?? '';
 												<?php endif; ?>
 											</div>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('content/notices')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('content/') ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -212,8 +238,10 @@ $route = $route ?? '';
 												</div>
 											</div>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('riders/list')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('riders/') ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -239,6 +267,7 @@ $route = $route ?? '';
 												</div>
 											</div>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 										<?php if (admin_can_manage_team()) : ?>
 										<!--begin:Menu item-->
@@ -253,6 +282,7 @@ $route = $route ?? '';
 										<!--end:Menu item-->
 										<?php endif; ?>
 										<!--begin:Menu item-->
+										<?php if (admin_has_role('super')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('system/') ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -265,7 +295,6 @@ $route = $route ?? '';
 												<span class="menu-arrow"></span>
 											</span>
 											<div class="menu-sub menu-sub-accordion">
-												<?php if (admin_can_manage_orgs()) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('system/orgs') ?>" href="<?= htmlspecialchars(admin_url('system/orgs'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
@@ -274,13 +303,20 @@ $route = $route ?? '';
 														<span class="menu-title">조직 관리(총판·대리점)</span>
 													</a>
 												</div>
-												<?php endif; ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('system/admins') ?>" href="<?= htmlspecialchars(admin_url('system/admins'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
 															<span class="bullet bullet-dot"></span>
 														</span>
 														<span class="menu-title">관리자 계정·권한</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/permissions') ?>" href="<?= htmlspecialchars(admin_url('system/permissions'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">권한 관리</span>
 													</a>
 												</div>
 												<div class="menu-item">
@@ -307,7 +343,6 @@ $route = $route ?? '';
 														<span class="menu-title">감사 로그</span>
 													</a>
 												</div>
-												<?php if (admin_has_role('super')) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('system/pg-fee') ?>" href="<?= htmlspecialchars(admin_url('system/pg-fee'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">
@@ -324,9 +359,9 @@ $route = $route ?? '';
 														<span class="menu-title">정산/잔액 수동 조정</span>
 													</a>
 												</div>
-												<?php endif; ?>
 											</div>
 										</div>
+										<?php endif; ?>
 										<!--end:Menu item-->
 									</div>
 									<!--end::Menu-->

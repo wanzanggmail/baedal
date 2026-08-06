@@ -104,34 +104,34 @@ function admin_role_label(string $role): string
         'admin'      => '조회 전용',
         'operation'  => '운영',
         'settlement' => '정산',
+        'manager'    => '총괄 관리자',
         default      => $role,
     };
 }
 
 /**
- * @return array<string, list<string>>
+ * 라우트 접두사 → 권한관리 화면(system/permissions)에서 설정하는 area 키.
+ * 여기 없는 라우트(system/* 등)는 area 권한과 무관하게 별도 규칙으로 처리된다.
+ *
+ * @return array<string, string>
  */
-function admin_route_access_rules(): array
+function admin_route_area_map(): array
 {
     return [
-        'system/admins' => ['super'],
-        'system/codes'  => ['super'],
-        'system/manual-adjust' => ['super'],
-        'system/pg-fee' => ['super'],
-        'system/settlement-excel' => ['super', 'settlement'],
-        'system/audit'  => ['super', 'admin'],
-        'settlement/'   => ['super', 'settlement', 'operation'],
-        'deduction/'    => ['super', 'settlement'],
-        'content/'      => ['super', 'operation'],
-        'riders/'       => ['super', 'operation'],
-        'withdrawal/settings' => ['super'],
-        'withdrawal/'   => ['super', 'admin', 'operation', 'settlement'],
-        'dashboard'     => ['super', 'admin', 'operation', 'settlement'],
+        'settlement/' => 'settlement',
+        'deduction/'  => 'deduction',
+        'promotion'   => 'promotion',
+        'withdrawal/' => 'withdrawal',
+        'content/'    => 'content',
+        'riders/'     => 'riders',
+        'dashboard'   => 'dashboard',
     ];
 }
 
 function admin_can_access_route(string $route): bool
 {
+    require_once INC_PATH . '/RolePermission.php';
+
     $route = $route === '' ? 'dashboard' : $route;
     $user  = admin_user();
     if ($user === null) {
@@ -141,27 +141,37 @@ function admin_can_access_route(string $route): bool
         return true;
     }
 
-    // 멀티테넌시: 조직 관리 — 레벨 기반(본사/총판)
+    // 멀티테넌시: 조직 관리 — 본사(admin 레벨) 최고관리자만
     if (str_starts_with($route, 'system/orgs')) {
         return admin_can_manage_orgs();
     }
 
-    // 대표·서브계정 관리 — 조직 대표계정만
+    // 대표·서브계정 관리 — 조직 대표계정만 (시스템관리 메뉴가 아닌 별도 자기조직 관리 기능)
     if (str_starts_with($route, 'system/team')) {
         return admin_can_manage_team();
     }
 
-    // 멀티테넌시: 출금 정책 — 본사(전역) 또는 대리점(자기 설정)
-    if ($route === 'withdrawal/settings') {
-        return $user['role'] === 'super' || admin_org_level() === Org::LEVEL_AGENCY;
+    // 시스템관리(system/*)는 역할별 권한관리와 무관하게 최고관리자 전용으로 고정
+    if (str_starts_with($route, 'system/')) {
+        return false;
     }
 
-    $rules = admin_route_access_rules();
-    uksort($rules, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+    // 멀티테넌시: 출금 정책 — 본사(전역) 또는 대리점(자기 설정)
+    if ($route === 'withdrawal/settings') {
+        return admin_org_level() === Org::LEVEL_AGENCY;
+    }
 
-    foreach ($rules as $prefix => $roles) {
+    $map = admin_route_area_map();
+    uksort($map, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+    foreach ($map as $prefix => $area) {
         if ($route === $prefix || ($prefix !== 'dashboard' && str_starts_with($route, $prefix))) {
-            return in_array($user['role'], $roles, true);
+            // manager: 자기 조직 범위 내 전체 화면 조회 가능(시스템관리 제외, 위에서 이미 차단됨)
+            if ($user['role'] === 'manager') {
+                return true;
+            }
+
+            return RolePermission::canView($user['role'], $area);
         }
     }
 
@@ -170,6 +180,8 @@ function admin_can_access_route(string $route): bool
 
 function admin_can_write(string $area): bool
 {
+    require_once INC_PATH . '/RolePermission.php';
+
     $user = admin_user();
     if ($user === null) {
         return false;
@@ -179,37 +191,36 @@ function admin_can_write(string $area): bool
     if ($role === 'super') {
         return true;
     }
-    if ($role === 'admin') {
+
+    // 시스템관리(system/*) 쓰기는 최고관리자 전용으로 고정
+    if ($area === 'system') {
         return false;
     }
 
-    // 2026-07 재설계: 공지·배너 작성은 본사(admin 레벨)만. 총판·대리점은 조회(broadcast 수신)만.
-    if ($area === 'content') {
-        return $role === 'operation' && admin_org_level() === Org::LEVEL_ADMIN;
+    if (!array_key_exists($area, RolePermission::AREAS)) {
+        return false;
     }
 
-    return match ($area) {
-        'riders'             => $role === 'operation',
-        'withdrawal'         => $role === 'operation',
-        'settlement', 'deduction' => $role === 'settlement',
-        'system'             => $role === 'super',
-        default              => false,
-    };
+    // manager: 자기 조직 범위 내 전체 화면 쓰기 가능(시스템관리 제외, 위에서 이미 차단됨)
+    $canWrite = $role === 'manager' ? true : RolePermission::canWrite($role, $area);
+
+    // 2026-07 재설계: 공지·배너 작성은 본사(admin 레벨)만. 총판·대리점은 조회(broadcast 수신)만.
+    if ($area === 'content') {
+        return $canWrite && admin_org_level() === Org::LEVEL_ADMIN;
+    }
+
+    return $canWrite;
 }
 
 /**
  * 멀티테넌시: 조직(총판/대리점) 생성·관리 권한.
  * 2026-07 재설계: 본사(admin 레벨)만 조직을 생성·관리. 총판의 조직 생성 권한은 회수됨
- * (총판은 대시보드에서 하위 대리점을 조회만 함). 최고/운영 역할일 때 허용.
+ * (총판은 대시보드에서 하위 대리점을 조회만 함).
+ * 시스템관리(system/*) 소속 화면이라 역할별 권한관리와 무관하게 최고관리자 전용.
  */
 function admin_can_manage_orgs(): bool
 {
-    if (admin_org_level() !== Org::LEVEL_ADMIN) {
-        return false;
-    }
-    $user = admin_user();
-
-    return $user !== null && in_array($user['role'], ['super', 'operation'], true);
+    return admin_org_level() === Org::LEVEL_ADMIN && admin_has_role('super');
 }
 
 /**

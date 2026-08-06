@@ -72,79 +72,19 @@ try {
 	</div>
 
 	<div class="row g-6 mb-8">
-		<div class="col-xl-4">
-			<div class="card card-flush h-xl-100">
+		<div class="col-xl-12">
+			<div class="card card-flush">
 				<div class="card-header pt-5">
 					<h3 class="card-title fw-bold">역할 요약</h3>
 					<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">로그인 시 역할별 메뉴·API 권한 적용</span>
 				</div>
 				<div class="card-body pt-0 fs-7">
-					<ul class="list-unstyled mb-0">
-						<li class="mb-3"><span class="badge badge-light-danger me-2">최고</span> 전 메뉴·관리자 계정·시스템 설정</li>
-						<li class="mb-3"><span class="badge badge-light-primary me-2">운영</span> 라이더·콘텐츠·출금 처리</li>
-						<li class="mb-3"><span class="badge badge-light-success me-2">정산</span> 정산·프로모션·차감</li>
-						<li class="mb-0"><span class="badge badge-light-dark me-2">조회</span> 통계·출금·감사 로그 읽기 전용</li>
+					<ul class="list-unstyled mb-3">
+						<li class="mb-3"><span class="badge badge-light-danger me-2">최고</span> 전 메뉴·관리자 계정·시스템 설정까지 항상 전권</li>
+						<li class="mb-3"><span class="badge badge-light-warning me-2">총괄</span> 시스템 관리를 제외한 소속 조직(총판/대리점)의 모든 화면을 조회·수정 — 담당자 1명이 그 조직 업무 전체를 처리하는 경우용</li>
+						<li class="mb-3"><span class="badge badge-light-primary me-2">운영</span> · <span class="badge badge-light-success me-2">정산</span> · <span class="badge badge-light-dark me-2">조회</span> 화면별 조회·쓰기 권한은 고정이 아니라 <a href="<?= htmlspecialchars(admin_url('system/permissions'), ENT_QUOTES, 'UTF-8') ?>">「권한 관리」</a> 화면에서 역할별로 직접 설정합니다(기본값: 운영=라이더·콘텐츠·출금 쓰기, 정산=정산·차감·프로모션 쓰기, 조회=전 화면 읽기전용).</li>
 					</ul>
-				</div>
-			</div>
-		</div>
-		<div class="col-xl-8">
-			<div class="card card-flush h-xl-100">
-				<div class="card-header pt-5">
-					<h3 class="card-title fw-bold">권한 매트릭스</h3>
-				</div>
-				<div class="card-body pt-0">
-					<div class="table-responsive">
-						<table class="table table-row-bordered align-middle gs-0 gy-2 fs-7 mb-0">
-							<thead>
-								<tr class="fw-bold text-muted">
-									<th>기능 영역</th>
-									<th class="text-center">최고</th>
-									<th class="text-center">운영</th>
-									<th class="text-center">정산</th>
-									<th class="text-center">조회</th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr>
-									<td>대시보드·통계 조회</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-success">●</td>
-								</tr>
-								<tr>
-									<td>라이더·콘텐츠 편집</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">—</td>
-									<td class="text-center text-muted">—</td>
-								</tr>
-								<tr>
-									<td>정산·프로모션·차감</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">△</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">—</td>
-								</tr>
-								<tr>
-									<td>출금 처리</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">—</td>
-									<td class="text-center text-muted">—</td>
-								</tr>
-								<tr>
-									<td>관리자·코드·감사</td>
-									<td class="text-center text-success">●</td>
-									<td class="text-center text-muted">—</td>
-									<td class="text-center text-muted">—</td>
-									<td class="text-center text-muted">△</td>
-								</tr>
-							</tbody>
-						</table>
-					</div>
-					<p class="text-gray-500 fs-8 mb-0 mt-3">● 전체 · △ 일부(감사 로그 조회) · — 없음</p>
+					<p class="text-gray-500 fs-8 mb-0">시스템 관리(이 화면 포함)는 역할 설정과 무관하게 항상 최고 관리자만 접근할 수 있습니다.</p>
 				</div>
 			</div>
 		</div>
@@ -182,6 +122,7 @@ try {
 						    $role = (string) $row['role'];
 						    $badgeClass = match ($role) {
 						        'super' => 'danger',
+						        'manager' => 'warning',
 						        'operation' => 'primary',
 						        'settlement' => 'success',
 						        default => 'dark',

@@ -25,6 +25,8 @@ final class MigrateRunner
         self::runSqlFile('rider_debts.sql');
         self::runSqlFile('withdrawal_cycles.sql');
         self::runSqlFile('settlement_support.sql');
+        self::runSqlFile('promotions.sql');
+        self::runSqlFile('role_permissions.sql');
 
         self::migrateAgencyFeeColumns();
         self::migrateWithdrawalWalletExtras();
@@ -50,6 +52,7 @@ final class MigrateRunner
         self::migrateRiderPlatformMultiId();
         self::migrateRiderMustChangePassword();
         self::migratePlatformFeeSplit();
+        self::migrateAdminManagerRole();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1091,5 +1094,39 @@ final class MigrateRunner
         }
 
         self::runSqlFile('audit_tables.sql');
+    }
+
+    /**
+     * 총괄 관리자 역할(manager) 추가 — 대리점·총판 소속 계정 1명이 그 조직의
+     * 모든 화면(시스템관리 제외)을 조회·쓰기할 수 있게 하는 역할.
+     */
+    private static function migrateAdminManagerRole(): void
+    {
+        echo "== admins.role ENUM에 manager 추가 ==\n";
+
+        if (!db_table_exists('admins')) {
+            echo "SKIP  admins (테이블 없음)\n";
+
+            return;
+        }
+
+        $col = db_row("SHOW COLUMNS FROM admins WHERE Field = 'role'");
+        if ($col !== null && str_contains((string) $col['Type'], "'manager'")) {
+            echo "SKIP  manager (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "ALTER TABLE admins
+                    MODIFY COLUMN role ENUM('super','admin','operation','settlement','manager')
+                        NOT NULL DEFAULT 'admin'"
+            );
+            echo "OK    manager\n";
+        } catch (Throwable $e) {
+            echo 'ERROR admins.role manager → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
     }
 }

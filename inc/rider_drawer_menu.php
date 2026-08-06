@@ -47,6 +47,13 @@ $riderRoute = $riderRoute ?? '';
 		</div>
 	</div>
 
+	<div class="menu-item mb-1">
+		<a class="menu-link<?= rider_nav_active('promotions') ?>" href="<?= htmlspecialchars(rider_url('promotions'), ENT_QUOTES, 'UTF-8') ?>">
+			<span class="menu-icon"><i class="ki-duotone ki-gift fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i></span>
+			<span class="menu-title">프로모션</span>
+		</a>
+	</div>
+
 	<div data-kt-menu-trigger="click" class="menu-item menu-accordion mb-1<?= rider_nav_accordion_show('withdrawal') ?>">
 		<span class="menu-link">
 			<span class="menu-icon"><i class="ki-duotone ki-wallet fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i></span>

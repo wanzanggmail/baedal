@@ -3,7 +3,7 @@
 > **목적:** 실제 DB에 어떤 테이블·컬럼·관계가 있는지 한눈에 파악하기 위한 기준 문서.
 > **원본:** `SHOW CREATE TABLE`(정보스키마) 기준 — 코드(`sql/*.sql`, `MigrateRunner.php`)가 아니라 **실제 서버 DB 상태**를 그대로 기술한다.
 > **갱신 규칙(필수):** 테이블 추가·삭제, 컬럼 추가·변경·삭제, 인덱스/FK 변경, enum 값 추가 등 **스키마가 바뀌는 모든 작업에서 이 문서를 함께 갱신**한다. (`.cursor/rules/db-schema-sync.mdc`)
-> **최종 확인:** 2026-07-30, DB `my_web_db`, 테이블 31개 (Phase A~F 관리자 재설계 + 정산 엑셀 row-level 저장 확장 + 라이더 부채 원장 + 지원금 파싱 반영 완료 시점)
+> **최종 확인:** 2026-08-05, DB `my_web_db`, 테이블 34개 (프로모션 지급 + 역할별 권한관리(`role_permissions`) 반영 완료 시점)
 
 ---
 
@@ -77,10 +77,11 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 | 컬럼 | 설명 |
 |---|---|
 | `org_id` | FK 없음(인덱스만) → `organizations.id`. 계정≠조직, 한 조직에 여러 계정 가능 |
-| `role` | enum(`super`,`admin`,`operation`,`settlement`) — 기능 축(조직 축은 `org_id`) |
+| `role` | enum(`super`,`admin`,`operation`,`settlement`,`manager`) — 기능 축(조직 축은 `org_id`) |
 
 - **대표계정** = 조직 내 최소 `id`(최초 계정). `OrgAccount::primaryId()`
 - `super`는 조직 계정에 부여 금지(스코프 우회 위험) — 앱 레벨 관례, DB 제약 아님
+- `manager`(2026-08-05 추가) = 소속 조직 범위 내 시스템관리 제외 전 화면 조회·쓰기(대리점/총판 담당자가 그 조직 업무를 혼자 처리하는 경우용). `OrgAccount::ASSIGNABLE_ROLES`/`Organization::ACCOUNT_ROLES`에 포함돼 있어 조직 계정에도 부여 가능(super와 달리 스코프 우회 없음 — `org_id` 스코핑은 그대로 적용됨). `inc/RolePermission.php`의 `role_permissions` 테이블 대상이 아니라 `admin_can_access_route()`/`admin_can_write()`에서 항상 true로 처리.
 
 ---
 
@@ -260,6 +261,9 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 `actor_type`(admin/rider/system), `action`(정규화된 코드: CREATE/UPDATE/DELETE/LOGIN/MANUAL_ADJUST 등), `target_table`/`target_id`, `before_value`/`after_value`(JSON, `CHECK json_valid()`).
 기본은 `after_value`만 채움(간단 로그). **예외: 본사 수동조정(`ManualAdjust`)만 `before_value`도 채워 변경 전/후를 모두 남김.**
 
+### `role_permissions` — 역할별 화면 조회·쓰기 권한 (2026-08-05)
+PK `(role, area)`. `role`: `admin`/`operation`/`settlement`(super는 항상 전권이라 행 없음). `area`: `dashboard`/`settlement`/`deduction`/`promotion`/`withdrawal`/`content`/`riders`. `can_view`/`can_write`(TINYINT). 「권한 관리」(`system/permissions`, super 전용) 화면에서 편집, `inc/RolePermission.php`가 캐시 조회. **`system/*`(시스템관리)는 이 테이블과 무관하게 코드로 super 전용 고정**(라우트별 area 매핑 대상 아님).
+
 ---
 
 ## 10. 알려진 스키마 특이사항 (읽을 때 주의)
@@ -302,6 +306,8 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-05 (4) | **총괄 관리자 역할(`manager`) 추가.** `admins.role` ENUM에 `manager` 추가(테이블 수 변화 없음). §2 참고. |
+| 2026-08-05 (3) | **역할별 권한 관리 신규.** `role_permissions`(role×area→can_view/can_write) 추가 → **34개 테이블**. 기존 `inc/auth.php` 하드코딩 라우트·역할 매핑을 DB화, 「권한 관리」(`system/permissions`, super 전용) 화면에서 편집. `system/*`(시스템관리)는 이 테이블과 무관하게 코드로 super 전용 고정. §9 참고. |
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |
 | 2026-07-23 | 정산 엑셀 row-level 저장 확장(실 파일 검증). 신규 `settlement_order_details`(오더별 상세내역, 328행/업로드), `settlement_hourly_insurance`(시간제보험) 추가 → 27개 테이블. `settlement_weekly_deductions`에 `registered_entry_id` 컬럼 추가 + 파서 컬럼매핑 버그 수정(배달비→금액 오탐 교정) + 라이더 매칭 추가. `settlement_daily_riders.hourly_insurance` 실값 채움 확인. |
 | 2026-07-23 (2) | 배달의민족 정산서 지원. `settlement_daily_riders` UNIQUE를 `(upload_id,license_id)`→`(upload_id,license_id,settlement_date)`로 확장(배민 다중 운행일 대응, 인덱스명 `uq_sdr_upload_license_date`). 스키마 신규 테이블 없음 — 배민 주문을 기존 `settlement_daily_riders`/`settlement_order_details`에 집계·저장. |
@@ -309,3 +315,4 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 | 2026-07-30 | **지원금 파싱 + 리스 자동계산(정산명세서 실 파서 `parser.py` 분석 결과 반영).** ① 신규 `settlement_support_amounts`(지원금·추가지원금 원본) → **31개 테이블**, `settlement_daily_riders.support_amount`·`settlement_rider_cycles.support_amount` 컬럼 추가. `XlsxParser::parseSupportSheet()`/`parseAddSupportSheet()` 신규 — 시트 제목("지원금 상세 내역서")에 헤더 키워드가 겹쳐 오판하던 버그를 실 파일로 발견·수정. `SettlementLedger`가 net_amount 계산 시 지원금을 gross에 가산하도록 수정. 실 파일+가짜데이터 e2e 검증(5,000+2,000원 정확히 가산 확인). ② `rider_debts.planned_end_on`(리스 계약 종료 예정일) + `rider_debt_entries` UNIQUE(debt_id,applied_date) 추가 — `RiderDebt::applyLeaseForPeriod()`가 계약기간∩정산기간 겹치는 일수를 자동 계산해 차감(수동 일수 입력 불필요), 재실행해도 이중 차감 안 됨(11/11 + SettlementLedger 배선 검증). |
 | 2026-07-24 | **라이더 부채 원장 신규.** `rider_debts`(대여금/리스/선지급 헤더: 원금·잔액·일납·채권자·상태) + `rider_debt_entries`(차감 이력) 추가 → **29개 테이블**. 라이더 정산명세서(PDF)의 대여금/리스/선지급 차감 명세 대응. 차감 실행 시 `deduction_entries`(kind=`loan`/`lease`/`advance`)를 생성해 기존 정산 반영 흐름이 그대로 차감. `sql/rider_debts.sql`, `inc/RiderDebt.php`, `admin/api/debt_action.php`, 라이더 상세 "부채" 카드. |
 | 2026-08-05 | **팀지역 분리 · 쿠팡ID 다중 · 초기비번 플래그 · 플랫폼 수수료 3분할 (갑 지시 재편, 신규 테이블 없음 — 31개 유지).** ① `settlement_uploads`에 `team_name`/`region_name` 컬럼 추가(기존 `stored_path` JSON에서 백필) + `idx_su_agency_date_team`. 한 대리점이 **같은 날 여러 팀지역** 정산서를 올릴 수 있게 됨. ② `settlement_rider_cycles.team_region` 추가하고 **UNIQUE를 `uq_src_rider_date_pf`(rider,date,platform) → `uq_src_rider_date_pf_team`(rider,date,platform,team_region)로 교체**. 한 라이더가 같은 날 두 팀지역에서 일하면 사이클 2건이 정상 생성됨(기존엔 두 번째가 조용히 skip). ⚠️ 팀/지역 문자열은 **반드시 NFC 정규화 후 저장**할 것 — 실데이터에서 같은 "팀도깨비 서울_강서남부"가 NFD(조합형)/NFC(완성형) 두 형태로 섞여 있어 UNIQUE가 무력화될 뻔했다(`normalize_hangul_nfc()` in `inc/helpers.php`, 마이그레이션에서 기존 데이터 일괄 정규화). ③ `rider_platforms`에 `UNIQUE(rider_id, platform, external_id)` 추가 — 한 라이더가 **팀지역별로 여러 쿠팡ID 보유 가능**(플랫폼당 1개 제약 폐지, 완전 중복만 차단). ④ `riders.must_change_password` 추가(1=초기비번 0000 상태, 최초 로그인 시 변경 강제). ⑤ `org_fee_config`에 `hq_pct`/`distributor_pct`/`agency_pct` 추가 — 플랫폼 수수료(구 영업대행수수료)를 **조직당 "내 몫" 1개 → 대리점 행 하나에 본사/총판/대리점 3몫**으로 재편(기존 값 이관). 구 `pg_service_fee_pct`는 이관 후 미사용(호환 위해 컬럼 유지). |
+| 2026-08-05 (2) | **프로모션 지급 신규 → 33개 테이블.** `promotion_batches`(업로드 1회분 = 대리점 + 지급일자 단위. status: draft/paid/partial/failed, 대상·성공 인원과 금액·수수료 집계) + `promotion_entries`(엑셀 1행 = 1건. `rider_id`(미매칭 시 NULL) · `rider_code_raw`/`rider_name_raw`(엑셀 원본) · `promo1_amount`/`promo2_amount`/`total_amount` · `fee_amount`(이 건에 붙은 플랫폼 수수료) · status(pending/paid/failed/skipped) · `pg_payment_id`(성공한 카드결제 FK) · `fail_reason`). 지급은 **라이더별 카드결제(프로모션액 + 플랫폼 수수료) 성공 건만** `rider_wallets`에 적립하며, 결제 기록은 기존 `pg_payments`를 그대로 쓴다(`upload_id`는 NULL — 정산 업로드와 무관한 지급이라). 라이더 식별키는 `riders.rider_code`. |

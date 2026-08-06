@@ -12,8 +12,8 @@ require_once INC_PATH . '/Org.php';
  */
 final class Organization
 {
-    /** 조직 계정에 부여 가능한 기능 역할 (super는 플랫폼 루트 전용이라 제외) */
-    public const ACCOUNT_ROLES = ['operation', 'settlement', 'admin'];
+    /** 조직 계정에 부여 가능한 기능 역할 (super는 플랫폼 루트 전용이라 제외). manager=자기 조직 내 전체 화면 조회·쓰기(시스템관리 제외) */
+    public const ACCOUNT_ROLES = ['operation', 'settlement', 'admin', 'manager'];
 
     /** @return array<string,string> */
     public static function accountRoleLabels(): array
@@ -22,6 +22,7 @@ final class Organization
             'operation'  => '운영',
             'settlement' => '정산',
             'admin'      => '조회 전용',
+            'manager'    => '총괄 관리자',
         ];
     }
 

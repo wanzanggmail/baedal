@@ -8,7 +8,7 @@ declare(strict_types=1);
 final class AdminAccount
 {
     /** @var list<string> */
-    public const ROLES = ['super', 'admin', 'operation', 'settlement'];
+    public const ROLES = ['super', 'admin', 'operation', 'settlement', 'manager'];
 
     /** @return array<string, string> */
     public static function roleLabels(): array
@@ -18,6 +18,7 @@ final class AdminAccount
             'admin'      => '조회 전용',
             'operation'  => '운영',
             'settlement' => '정산',
+            'manager'    => '총괄 관리자',
         ];
     }
 

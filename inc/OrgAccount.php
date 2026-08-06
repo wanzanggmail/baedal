@@ -12,13 +12,13 @@ require_once __DIR__ . '/Org.php';
  */
 final class OrgAccount
 {
-    /** 서브계정에 부여 가능한 역할 (super 제외) */
-    public const ASSIGNABLE_ROLES = ['operation', 'settlement', 'admin'];
+    /** 서브계정에 부여 가능한 역할 (super 제외). manager=자기 조직 내 전체 화면 조회·쓰기(시스템관리 제외) */
+    public const ASSIGNABLE_ROLES = ['operation', 'settlement', 'admin', 'manager'];
 
     /** @return array<string,string> */
     public static function roleLabels(): array
     {
-        return ['operation' => '운영', 'settlement' => '정산', 'admin' => '조회 전용'];
+        return ['operation' => '운영', 'settlement' => '정산', 'admin' => '조회 전용', 'manager' => '총괄 관리자'];
     }
 
     /** 조직의 대표계정 id (최초 계정). 없으면 0. */

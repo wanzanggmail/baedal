@@ -72,7 +72,7 @@ if ($method !== 'POST' && $method !== 'PATCH') {
     exit;
 }
 
-admin_deny_write_json('riders');
+admin_deny_write_json('deduction');
 
 $raw  = file_get_contents('php://input');
 $body = (array) json_decode($raw ?: '{}', true);
