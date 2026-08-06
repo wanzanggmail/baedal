@@ -84,6 +84,18 @@ $route = $route ?? '';
 										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('system/settlement-excel')) : ?>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('system/settlement-excel') ?>" href="<?= htmlspecialchars(admin_url('system/settlement-excel'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-lock-2 fs-2"><span class="path1"></span><span class="path2"></span></i>
+												</span>
+												<span class="menu-title">정산 엑셀 암호</span>
+											</a>
+										</div>
+										<?php endif; ?>
+										<!--end:Menu item-->
+										<!--begin:Menu item-->
 										<?php if (admin_can_access_route('deduction/agency-fee')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
@@ -325,14 +337,6 @@ $route = $route ?? '';
 															<span class="bullet bullet-dot"></span>
 														</span>
 														<span class="menu-title">코드/마스터</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('system/settlement-excel') ?>" href="<?= htmlspecialchars(admin_url('system/settlement-excel'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet">
-															<span class="bullet bullet-dot"></span>
-														</span>
-														<span class="menu-title">정산 엑셀 암호</span>
 													</a>
 												</div>
 												<div class="menu-item">

@@ -151,7 +151,17 @@ function admin_can_access_route(string $route): bool
         return admin_can_manage_team();
     }
 
-    // 시스템관리(system/*)는 역할별 권한관리와 무관하게 최고관리자 전용으로 고정
+    // 정산 엑셀 열기 암호 — 대리점이 자기 암호를 스스로 설정할 수 있어야 해서
+    // "시스템 관리" 메뉴 소속이지만 super 전용이 아니라 'settlement' 영역 권한을 따른다.
+    if (str_starts_with($route, 'system/settlement-excel')) {
+        if ($user['role'] === 'manager') {
+            return true;
+        }
+
+        return RolePermission::canView($user['role'], 'settlement');
+    }
+
+    // 시스템관리(system/*, 나머지)는 역할별 권한관리와 무관하게 최고관리자 전용으로 고정
     if (str_starts_with($route, 'system/')) {
         return false;
     }

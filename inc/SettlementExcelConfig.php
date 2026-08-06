@@ -47,6 +47,40 @@ final class SettlementExcelConfig
         return $out;
     }
 
+    /**
+     * 본사·총판용 — 조회 권한 범위(Org::agencyScopeClause) 내 대리점 목록 + 각자 저장된 암호.
+     *
+     * @return list<array{id:int, name:string, code:string, parent_name:?string, passwords:array<string,string>}>
+     */
+    public static function listAgencyRows(): array
+    {
+        if (!db_table_exists('organizations')) {
+            return [];
+        }
+        require_once __DIR__ . '/Org.php';
+
+        [$where, $params] = Org::agencyScopeClause('o.id');
+        $sql = "SELECT o.id, o.name, o.code, p.name AS parent_name
+                  FROM organizations o
+                  LEFT JOIN organizations p ON p.id = o.parent_id
+                 WHERE o.level = 'agency'" . ($where !== '' ? " AND {$where}" : '') . '
+                 ORDER BY p.name ASC, o.name ASC';
+
+        $out = [];
+        foreach (db_rows($sql, $params) as $r) {
+            $id = (int) $r['id'];
+            $out[] = [
+                'id'          => $id,
+                'name'        => (string) $r['name'],
+                'code'        => (string) $r['code'],
+                'parent_name' => $r['parent_name'] !== null ? (string) $r['parent_name'] : null,
+                'passwords'   => self::allStored($id),
+            ];
+        }
+
+        return $out;
+    }
+
     /** @return array{length: int, configured: bool} */
     public static function storedPasswordMeta(string $platform, ?int $orgId = null): array
     {

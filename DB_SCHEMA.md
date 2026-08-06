@@ -161,6 +161,7 @@ UNIQUE(`rider_id`,`settlement_date`,`platform`) — 같은 날 중복 반영 방
 
 ### `settlement_excel_config` — 정산 엑셀 열기 암호(대리점별 오버라이드)
 UNIQUE(`org_id`,`platform`), `org_id IS NULL`=전역 기본. 복호화 순서: 업로드 직접입력→대리점→전역→env→baemin 하드코딩.
+관리 화면(`system/settlement-excel`)은 2026-08-05부터 `system/*` 일괄 super 전용 규칙의 예외 — `RolePermission`의 `settlement` 영역 권한을 따르며, 대리점 계정은 자기 암호만, 본사·총판은 스코프 내 대리점 전체를 리스트로 본다(`SettlementExcelConfig::listAgencyRows()`, `Org::agencyScopeClause()` 사용).
 
 ---
 
