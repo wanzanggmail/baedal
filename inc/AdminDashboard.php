@@ -48,6 +48,8 @@ final class AdminDashboard
             'recent_uploads'   => [],
             'risk_alerts'      => [],
             'large_withdrawals'=> [],
+            'trend'            => ['labels' => [], 'payout' => [], 'orders' => [], 'bucket' => 'day'],
+            'top_riders'       => [],
         ];
 
         try {
@@ -78,6 +80,13 @@ final class AdminDashboard
             $data['platform_total'] = array_sum(array_column($data['platform_rows'], 'amount'));
         } catch (Throwable $e) {
             $data['errors'][] = '정산: ' . $e->getMessage();
+        }
+
+        try {
+            $data['trend']      = self::dailyTrend($weekStart, $weekEnd);
+            $data['top_riders'] = self::topRiders($weekStart, $weekEnd);
+        } catch (Throwable $e) {
+            // 차트는 부가 정보 — 실패해도 대시보드 전체를 막지 않는다
         }
 
         try {
@@ -266,6 +275,115 @@ final class AdminDashboard
             'payout' => (int) ($row['payout'] ?? 0),
             'orders' => (int) ($row['orders'] ?? 0),
         ];
+    }
+
+    /**
+     * 기간 내 일별 정산 추이 — 차트용(대리점 대시보드).
+     * 데이터 없는 날도 0으로 채워 x축이 실제 날짜 간격을 반영하게 하고,
+     * 62일을 넘으면 주 단위로 묶는다. 집계 소스는 KPI와 같은 `payout_amount`.
+     *
+     * @return array{labels: list<string>, payout: list<int>, orders: list<int>, bucket: string}
+     */
+    private static function dailyTrend(string $from, string $to): array
+    {
+        $empty = ['labels' => [], 'payout' => [], 'orders' => [], 'bucket' => 'day'];
+        if (!self::tableExists('settlement_daily_riders')) {
+            return $empty;
+        }
+
+        [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $rows = db_rows(
+            "SELECT sdr.settlement_date d,
+                    COALESCE(SUM(sdr.payout_amount), 0) payout,
+                    COALESCE(SUM(sdr.order_count), 0)   orders
+               FROM settlement_daily_riders sdr {$join}
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
+              GROUP BY sdr.settlement_date",
+            array_merge([$from, $to], $scopeParams)
+        );
+
+        $byDate = [];
+        foreach ($rows as $r) {
+            $byDate[(string) $r['d']] = ['payout' => (int) $r['payout'], 'orders' => (int) $r['orders']];
+        }
+
+        $days = (int) round((strtotime($to) - strtotime($from)) / 86400) + 1;
+        if ($days < 1) {
+            return $empty;
+        }
+        $weekly = $days > 62;
+
+        $labels = [];
+        $payout = [];
+        $orders = [];
+        $bPayout = 0;
+        $bOrders = 0;
+        $bStart  = null;
+
+        for ($i = 0; $i < $days; $i++) {
+            $date = date('Y-m-d', strtotime($from . ' +' . $i . ' days'));
+            $v = $byDate[$date] ?? ['payout' => 0, 'orders' => 0];
+
+            if (!$weekly) {
+                $labels[] = date('n/j', strtotime($date));
+                $payout[] = $v['payout'];
+                $orders[] = $v['orders'];
+                continue;
+            }
+
+            $bStart ??= $date;
+            $bPayout += $v['payout'];
+            $bOrders += $v['orders'];
+            if ((($i + 1) % 7 === 0) || $i === $days - 1) {
+                $labels[] = date('n/j', strtotime($bStart));
+                $payout[] = $bPayout;
+                $orders[] = $bOrders;
+                $bPayout = 0;
+                $bOrders = 0;
+                $bStart  = null;
+            }
+        }
+
+        return ['labels' => $labels, 'payout' => $payout, 'orders' => $orders, 'bucket' => $weekly ? 'week' : 'day'];
+    }
+
+    /**
+     * 기간 내 정산액 상위 라이더 — 가로 막대 차트용.
+     *
+     * @return list<array{id: int, name: string, rider_code: string, payout: int, orders: int}>
+     */
+    private static function topRiders(string $from, string $to, int $limit = 8): array
+    {
+        if (!self::tableExists('settlement_daily_riders')) {
+            return [];
+        }
+        [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $limit = max(1, min(20, $limit));
+
+        $rows = db_rows(
+            "SELECT r.id, r.name, r.rider_code,
+                    COALESCE(SUM(sdr.payout_amount), 0) payout,
+                    COALESCE(SUM(sdr.order_count), 0)   orders
+               FROM settlement_daily_riders sdr
+               INNER JOIN riders r ON r.id = sdr.rider_id
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
+              GROUP BY r.id, r.name, r.rider_code
+             HAVING payout > 0
+              ORDER BY payout DESC
+              LIMIT {$limit}",
+            array_merge([$from, $to], $scopeParams)
+        );
+
+        return array_map(static fn (array $r): array => [
+            'id'         => (int) $r['id'],
+            'name'       => (string) $r['name'],
+            'rider_code' => (string) $r['rider_code'],
+            'payout'     => (int) $r['payout'],
+            'orders'     => (int) $r['orders'],
+        ], $rows);
     }
 
     /**

@@ -52,6 +52,8 @@ final class OrgDashboard
             'attention'        => [],
             'risk_alerts'      => [],
             'large_withdrawals'=> [],
+            'trend'            => ['labels' => [], 'net' => [], 'orders' => [], 'bucket' => 'day'],
+            'platform_mix'     => [],
         ];
 
         try {
@@ -91,6 +93,13 @@ final class OrgDashboard
         }
 
         $data['attention'] = self::attentionRows($data['agency_rows']);
+
+        try {
+            $data['trend']        = self::dailyTrend($weekStart, $weekEnd);
+            $data['platform_mix'] = self::platformMix($weekStart, $weekEnd);
+        } catch (Throwable $e) {
+            // 차트는 부가 정보 — 실패해도 대시보드 전체를 막지 않는다
+        }
 
         try {
             $data['risk_alerts']       = AdminDashboard::riskAlerts();
@@ -269,6 +278,115 @@ final class OrgDashboard
         usort($list, static fn (array $a, array $b): int => $b['week_payout'] <=> $a['week_payout']);
 
         return $list;
+    }
+
+    /**
+     * 기간 내 일별 정산 추이 — 차트용. 데이터 없는 날도 0으로 채워 x축이 실제 날짜 간격을
+     * 반영하게 한다(데이터 있는 날만 이으면 2월과 6월이 붙어 보여 오해를 부른다).
+     * 기간이 길면 포인트가 과해지므로 62일을 넘으면 주 단위로 묶는다.
+     *
+     * ⚠️ 집계 소스는 반드시 KPI·순위와 같은 `settlement_daily_riders.payout_amount`를 쓴다.
+     *    `settlement_rider_cycles.net_amount`(수수료·공제 후 지갑 적립액)로 그리면 바로 위
+     *    "기간 정산 합계" 숫자와 차트가 어긋나 버그처럼 보인다(실측 차이 39만원).
+     *
+     * @return array{labels:list<string>, net:list<int>, orders:list<int>, bucket:string}
+     */
+    private static function dailyTrend(string $from, string $to): array
+    {
+        $empty = ['labels' => [], 'net' => [], 'orders' => [], 'bucket' => 'day'];
+        if (!db_table_exists('settlement_daily_riders')) {
+            return $empty;
+        }
+
+        [$scope, $params] = Org::agencyScopeClause('r.agency_id');
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $rows = db_rows(
+            "SELECT sdr.settlement_date d,
+                    COALESCE(SUM(sdr.payout_amount), 0) net,
+                    COALESCE(SUM(sdr.order_count), 0)   orders
+               FROM settlement_daily_riders sdr
+               INNER JOIN riders r ON r.id = sdr.rider_id
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
+              GROUP BY sdr.settlement_date",
+            array_merge([$from, $to], $params)
+        );
+
+        $byDate = [];
+        foreach ($rows as $r) {
+            $byDate[(string) $r['d']] = ['net' => (int) $r['net'], 'orders' => (int) $r['orders']];
+        }
+
+        $days = (int) round((strtotime($to) - strtotime($from)) / 86400) + 1;
+        if ($days < 1) {
+            return $empty;
+        }
+        $weekly = $days > 62;
+
+        $labels = [];
+        $net    = [];
+        $orders = [];
+        $bucketNet = 0;
+        $bucketOrd = 0;
+        $bucketStart = null;
+
+        for ($i = 0; $i < $days; $i++) {
+            $date = date('Y-m-d', strtotime($from . ' +' . $i . ' days'));
+            $v = $byDate[$date] ?? ['net' => 0, 'orders' => 0];
+
+            if (!$weekly) {
+                $labels[] = date('n/j', strtotime($date));
+                $net[]    = $v['net'];
+                $orders[] = $v['orders'];
+                continue;
+            }
+
+            $bucketStart ??= $date;
+            $bucketNet += $v['net'];
+            $bucketOrd += $v['orders'];
+            // 7일마다 또는 마지막 날에 버킷을 닫는다
+            if ((($i + 1) % 7 === 0) || $i === $days - 1) {
+                $labels[] = date('n/j', strtotime($bucketStart));
+                $net[]    = $bucketNet;
+                $orders[] = $bucketOrd;
+                $bucketNet = 0;
+                $bucketOrd = 0;
+                $bucketStart = null;
+            }
+        }
+
+        return ['labels' => $labels, 'net' => $net, 'orders' => $orders, 'bucket' => $weekly ? 'week' : 'day'];
+    }
+
+    /**
+     * 기간 내 플랫폼별 정산 비중 — 도넛 차트용.
+     * dailyTrend()와 같은 이유로 KPI와 동일한 `payout_amount`를 집계 소스로 쓴다.
+     *
+     * @return list<array{platform:string, label:string, net:int}>
+     */
+    private static function platformMix(string $from, string $to): array
+    {
+        if (!db_table_exists('settlement_daily_riders')) {
+            return [];
+        }
+        $labels = ['baemin' => '배달의민족', 'coupang' => '쿠팡이츠', 'other' => '기타'];
+
+        [$scope, $params] = Org::agencyScopeClause('r.agency_id');
+        $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $rows = db_rows(
+            "SELECT sdr.platform, COALESCE(SUM(sdr.payout_amount), 0) net
+               FROM settlement_daily_riders sdr
+               INNER JOIN riders r ON r.id = sdr.rider_id
+              WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
+              GROUP BY sdr.platform
+              ORDER BY net DESC",
+            array_merge([$from, $to], $params)
+        );
+
+        return array_map(static fn (array $r): array => [
+            'platform' => (string) $r['platform'],
+            'label'    => $labels[(string) $r['platform']] ?? (string) $r['platform'],
+            'net'      => (int) $r['net'],
+        ], $rows);
     }
 
     /**

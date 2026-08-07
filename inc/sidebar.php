@@ -26,6 +26,16 @@ $route = $route ?? '';
 										</div>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('docs/manual') ?>" href="<?= htmlspecialchars(admin_url('docs/manual'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-book fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
+												</span>
+												<span class="menu-title">매뉴얼</span>
+											</a>
+										</div>
+										<!--end:Menu item-->
+										<!--begin:Menu item-->
 										<?php if (admin_can_access_route('settlement/upload')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('settlement/') ?>">
 											<span class="menu-link">

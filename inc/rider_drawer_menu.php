@@ -126,6 +126,13 @@ $riderRoute = $riderRoute ?? '';
 		</div>
 	</div>
 
+	<div class="menu-item">
+		<a class="menu-link<?= rider_nav_active('manual') ?>" href="<?= htmlspecialchars(rider_url('manual'), ENT_QUOTES, 'UTF-8') ?>">
+			<span class="menu-icon"><i class="ki-duotone ki-questionnaire-tablet fs-2"><span class="path1"></span><span class="path2"></span></i></span>
+			<span class="menu-title">이용 안내</span>
+		</a>
+	</div>
+
 	<div class="separator my-5"></div>
 	<div class="menu-item">
 		<a class="menu-link" href="<?= htmlspecialchars(rider_url('logout'), ENT_QUOTES, 'UTF-8') ?>">

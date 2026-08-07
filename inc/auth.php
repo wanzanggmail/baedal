@@ -141,6 +141,11 @@ function admin_can_access_route(string $route): bool
         return true;
     }
 
+    // 매뉴얼은 정보 열람용이라 역할·조직과 무관하게 로그인한 관리자 전원에게 허용
+    if (str_starts_with($route, 'docs/manual')) {
+        return true;
+    }
+
     // 멀티테넌시: 조직 관리 — 본사(admin 레벨) 최고관리자만
     if (str_starts_with($route, 'system/orgs')) {
         return admin_can_manage_orgs();

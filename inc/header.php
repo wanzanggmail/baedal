@@ -87,8 +87,8 @@ if (!isset($pageTitle)) {
 						<!--end::sidebar menu-->
 						<!--begin::Footer-->
 						<div class="app-sidebar-footer flex-column-auto pt-2 pb-6 px-6" id="kt_app_sidebar_footer">
-							<a href="https://preview.keenthemes.com/html/metronic/docs" class="btn btn-flex flex-center btn-custom btn-primary overflow-hidden text-nowrap px-0 h-40px w-100" data-bs-toggle="tooltip" data-bs-trigger="hover" data-bs-dismiss-="click" title="200+ in-house components and 3rd-party plugins">
-								<span class="btn-label">Docs & Components</span>
+							<a href="<?= htmlspecialchars(admin_url('docs/manual'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-flex flex-center btn-custom btn-primary overflow-hidden text-nowrap px-0 h-40px w-100" data-bs-toggle="tooltip" data-bs-trigger="hover" data-bs-dismiss-="click" title="사용 매뉴얼 보기">
+								<span class="btn-label">매뉴얼 · 도움말</span>
 								<i class="ki-duotone ki-document btn-icon fs-2 m-0">
 									<span class="path1"></span>
 									<span class="path2"></span>

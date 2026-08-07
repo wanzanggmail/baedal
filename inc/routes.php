@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 return [
     'dashboard' => ['title' => '대시보드', 'view' => 'dashboard'],
+    'docs/manual' => ['title' => '매뉴얼', 'view' => 'manual_docs'],
     'settlement/upload' => ['title' => '엑셀 업로드', 'view' => 'settlement_upload'],
     'settlement/upload-detail' => ['title' => '업로드 상세', 'view' => 'settlement_upload_detail'],
     'settlement/history' => ['title' => '업로드 이력', 'view' => 'settlement_history'],

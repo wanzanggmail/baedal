@@ -1,5 +1,6 @@
 {
     "require": {
-        "phpoffice/phpspreadsheet": "^5.7"
+        "phpoffice/phpspreadsheet": "^5.7",
+        "erusev/parsedown": "^1.8"
     }
 }
