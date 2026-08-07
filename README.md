@@ -11,6 +11,7 @@ Metronic 8.3.3 + PHP + MariaDB/MySQL.
 |------|------|
 | **[LOGIC.md](LOGIC.md)** | 메뉴별 구현 상태, RBAC, 정산·출금·지갑 규칙, API·테이블, migrate/seed |
 | **[DEPLOY.md](DEPLOY.md)** | GitHub Actions → rsync 배포, `.env`, 서버 최초 설정, DB 복구 |
+| **[docs/manual/](docs/manual/README.md)** | 사용자용 매뉴얼 — 관리자/라이더 사용법, 설치·운영, 업무 흐름 참조서, 현재 제약사항 |
 | **`.env.example`** | DB·정산 엑셀 암호 환경 변수 예시 (실제 값은 `.env`, Git 제외) |
 
 아래 Phase 체크리스트는 **초기 기획용**이며, 실제 진행 상황은 **LOGIC.md §3** 표가 더 정확합니다.
