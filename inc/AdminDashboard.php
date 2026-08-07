@@ -137,7 +137,7 @@ final class AdminDashboard
      *
      * @return list<array{at:string, action:string, actor:string, detail:string, level:string}>
      */
-    private static function riskAlerts(): array
+    public static function riskAlerts(): array
     {
         if (admin_org_level() !== Org::LEVEL_ADMIN || !self::tableExists('audit_logs')) {
             return [];
@@ -178,7 +178,7 @@ final class AdminDashboard
      *
      * @return list<array{name:string, amount:int, amount_label:string, status:string, at:string, kind:string}>
      */
-    private static function largeWithdrawals(): array
+    public static function largeWithdrawals(): array
     {
         if (!self::tableExists('withdrawal_requests')) {
             return [];
@@ -398,7 +398,7 @@ final class AdminDashboard
         return $events;
     }
 
-    private static function formatPeriodLabel(string $from, string $to): string
+    public static function formatPeriodLabel(string $from, string $to): string
     {
         $fy = (int) date('Y', strtotime($from));
         $ty = (int) date('Y', strtotime($to));

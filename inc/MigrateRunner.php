@@ -53,6 +53,7 @@ final class MigrateRunner
         self::migrateRiderMustChangePassword();
         self::migratePlatformFeeSplit();
         self::migrateAdminManagerRole();
+        self::migratePgPaymentFeeSplit();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1126,6 +1127,77 @@ final class MigrateRunner
             echo "OK    manager\n";
         } catch (Throwable $e) {
             echo 'ERROR admins.role manager → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * pg_payments에 결제 시점 본사/총판/대리점 수수료 분배 스냅샷 컬럼 추가.
+     * 이전엔 분배 비율(org_fee_config)이 바뀌면 과거 결제건의 "몫"도 재계산돼
+     * 실제 그 시점에 나눈 금액과 달라지는 문제가 있었다 — 결제 시점 요율·금액을 그대로 저장한다.
+     */
+    private static function migratePgPaymentFeeSplit(): void
+    {
+        echo "== pg_payments 수수료 분배 스냅샷 ==\n";
+
+        if (!db_table_exists('pg_payments')) {
+            echo "SKIP  pg_payments (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
+        $need = ['hq_amount', 'distributor_amount', 'agency_amount', 'hq_pct', 'distributor_pct', 'agency_pct'];
+        if (count(array_intersect($need, $cols)) === count($need)) {
+            echo "SKIP  분배 컬럼 (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            $adds = [];
+            foreach (['hq_amount', 'distributor_amount', 'agency_amount'] as $c) {
+                if (!in_array($c, $cols, true)) {
+                    $adds[] = "ADD COLUMN {$c} INT NOT NULL DEFAULT 0";
+                }
+            }
+            foreach (['hq_pct', 'distributor_pct', 'agency_pct'] as $c) {
+                if (!in_array($c, $cols, true)) {
+                    $adds[] = "ADD COLUMN {$c} DECIMAL(5,2) NOT NULL DEFAULT 0.00";
+                }
+            }
+            db_execute('ALTER TABLE pg_payments ' . implode(', ', $adds));
+            echo 'OK    ' . count($adds) . "개 컬럼 추가\n";
+
+            // 기존 행 백필 — 과거 실제 분배 비율은 알 수 없으므로 "현재 설정값" 기준 최선 근사치.
+            // (신규 결제부터는 PgPayment::chargeForRider()가 결제 시점 값을 정확히 저장)
+            require_once __DIR__ . '/PgFeeConfig.php';
+            $rows = db_rows("SELECT id, agency_id, service_fee FROM pg_payments WHERE status = 'success' AND hq_pct = 0 AND distributor_pct = 0 AND agency_pct = 0");
+            $n = 0;
+            foreach ($rows as $r) {
+                $bd = PgFeeConfig::breakdownForAgency((int) $r['agency_id']);
+                if ($bd['total'] <= 0) {
+                    continue;
+                }
+                $fee = (int) $r['service_fee'];
+                db_execute(
+                    'UPDATE pg_payments
+                        SET hq_pct = ?, distributor_pct = ?, agency_pct = ?,
+                            hq_amount = ?, distributor_amount = ?, agency_amount = ?
+                      WHERE id = ?',
+                    [
+                        $bd['hq'], $bd['distributor'], $bd['agency'],
+                        (int) round($fee * $bd['hq'] / $bd['total']),
+                        (int) round($fee * $bd['distributor'] / $bd['total']),
+                        (int) round($fee * $bd['agency'] / $bd['total']),
+                        (int) $r['id'],
+                    ]
+                );
+                $n++;
+            }
+            echo "OK    기존 결제 {$n}건 백필(현재 설정값 근사치)\n";
+        } catch (Throwable $e) {
+            echo 'ERROR pg_payments 분배 스냅샷 → ' . $e->getMessage() . "\n";
             exit(1);
         }
     }

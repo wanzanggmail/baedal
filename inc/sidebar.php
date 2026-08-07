@@ -79,6 +79,14 @@ $route = $route ?? '';
 														<span class="menu-title">원천세 명세</span>
 													</a>
 												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('settlement/platform-fee') ?>" href="<?= htmlspecialchars(admin_url('settlement/platform-fee'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">플랫폼 수수료 내역</span>
+													</a>
+												</div>
 											</div>
 										</div>
 										<?php endif; ?>

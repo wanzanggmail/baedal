@@ -19,6 +19,11 @@ require_once __DIR__ . '/PgFeeConfig.php';
  */
 final class PgPayment
 {
+    public static function tableExists(): bool
+    {
+        return db_table_exists('pg_payments');
+    }
+
     /**
      * 라이더 1명분 PG 결제(자금 조달).
      *
@@ -113,6 +118,109 @@ final class PgPayment
         return ['charged' => $charged, 'funded' => $funded, 'failed' => $failed];
     }
 
+    /**
+     * 조회 범위(Org 스코프) 내 플랫폼 수수료 내역 — 「플랫폼 수수료 내역」 화면용.
+     *
+     * @param array{from?:string, to?:string, agency_id?:int, status?:string, limit?:int} $filters
+     * @return list<array<string,mixed>>
+     */
+    public static function listScoped(array $filters = []): array
+    {
+        if (!db_table_exists('pg_payments')) {
+            return [];
+        }
+        [$sql, $params] = self::buildScopedWhere($filters);
+        $limit = max(1, min(500, (int) ($filters['limit'] ?? 200)));
+
+        return db_rows(
+            "SELECT p.*, r.name AS rider_name, o.name AS agency_name, o.code AS agency_code, c.alias AS card_alias
+               FROM pg_payments p
+               LEFT JOIN riders r ON r.id = p.rider_id
+               LEFT JOIN organizations o ON o.id = p.agency_id
+               LEFT JOIN agency_cards c ON c.id = p.card_id
+              {$sql}
+              ORDER BY p.id DESC
+              LIMIT {$limit}",
+            $params
+        );
+    }
+
+    /**
+     * 조회 범위 내 합계 — 필터 전체 대상(표시 상한과 무관).
+     *
+     * @param array{from?:string, to?:string, agency_id?:int, status?:string} $filters
+     * @return array{count:int, success_count:int, net:int, fee:int, hq:int, distributor:int, agency:int}
+     */
+    public static function sumScoped(array $filters = []): array
+    {
+        $zero = ['count' => 0, 'success_count' => 0, 'net' => 0, 'fee' => 0, 'hq' => 0, 'distributor' => 0, 'agency' => 0];
+        if (!db_table_exists('pg_payments')) {
+            return $zero;
+        }
+        [$sql, $params] = self::buildScopedWhere($filters);
+        $row = db_row(
+            "SELECT COUNT(*) cnt,
+                    SUM(status = 'success') ok_cnt,
+                    COALESCE(SUM(CASE WHEN status = 'success' THEN net_amount ELSE 0 END), 0) net,
+                    COALESCE(SUM(CASE WHEN status = 'success' THEN service_fee ELSE 0 END), 0) fee,
+                    COALESCE(SUM(CASE WHEN status = 'success' THEN hq_amount ELSE 0 END), 0) hq,
+                    COALESCE(SUM(CASE WHEN status = 'success' THEN distributor_amount ELSE 0 END), 0) dist,
+                    COALESCE(SUM(CASE WHEN status = 'success' THEN agency_amount ELSE 0 END), 0) agy
+               FROM pg_payments p
+              {$sql}",
+            $params
+        );
+        if ($row === null) {
+            return $zero;
+        }
+
+        return [
+            'count'         => (int) $row['cnt'],
+            'success_count' => (int) $row['ok_cnt'],
+            'net'           => (int) $row['net'],
+            'fee'           => (int) $row['fee'],
+            'hq'            => (int) $row['hq'],
+            'distributor'   => (int) $row['dist'],
+            'agency'        => (int) $row['agy'],
+        ];
+    }
+
+    /**
+     * @param array{from?:string, to?:string, agency_id?:int, status?:string} $filters
+     * @return array{0:string, 1:list<mixed>}
+     */
+    private static function buildScopedWhere(array $filters): array
+    {
+        require_once __DIR__ . '/Org.php';
+        [$scope, $params] = Org::agencyScopeClause('p.agency_id');
+        $conds = $scope !== '' ? [$scope] : [];
+
+        $from = trim((string) ($filters['from'] ?? ''));
+        if ($from !== '') {
+            $conds[] = 'p.created_at >= ?';
+            $params[] = $from . ' 00:00:00';
+        }
+        $to = trim((string) ($filters['to'] ?? ''));
+        if ($to !== '') {
+            $conds[] = 'p.created_at <= ?';
+            $params[] = $to . ' 23:59:59';
+        }
+        $agencyId = (int) ($filters['agency_id'] ?? 0);
+        if ($agencyId > 0) {
+            $conds[] = 'p.agency_id = ?';
+            $params[] = $agencyId;
+        }
+        $status = trim((string) ($filters['status'] ?? ''));
+        if (in_array($status, ['success', 'failed'], true)) {
+            $conds[] = 'p.status = ?';
+            $params[] = $status;
+        }
+
+        $sql = $conds !== [] ? 'WHERE ' . implode(' AND ', $conds) : '';
+
+        return [$sql, $params];
+    }
+
     /** @return list<array<string,mixed>> */
     public static function listForAgency(int $agencyId, int $limit = 100): array
     {
@@ -134,6 +242,34 @@ final class PgPayment
 
     private static function record(int $agencyId, ?int $riderId, ?int $uploadId, ?int $cardId, int $net, int $fee, int $total, string $status, string $tid, string $failReason, int $attempts, ?int $adminId): int
     {
+        // 결제 시점 본사/총판/대리점 분배를 스냅샷으로 남긴다 — 나중에 org_fee_config
+        // 요율이 바뀌어도 이 건의 실제 분배 내역은 그대로 보존된다.
+        $bd = PgFeeConfig::breakdownForAgency($agencyId);
+        $hqAmount   = $bd['total'] > 0 ? (int) round($fee * $bd['hq'] / $bd['total']) : 0;
+        $distAmount = $bd['total'] > 0 ? (int) round($fee * $bd['distributor'] / $bd['total']) : 0;
+        $agyAmount  = $fee - $hqAmount - $distAmount;
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
+        $hasSplit = in_array('hq_amount', $cols, true);
+
+        if ($hasSplit) {
+            return db_insert(
+                'INSERT INTO pg_payments
+                    (agency_id, rider_id, upload_id, card_id, net_amount, service_fee, total_charged, status, pg_tid, fail_reason, attempts, created_by,
+                     hq_pct, distributor_pct, agency_pct, hq_amount, distributor_amount, agency_amount)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $agencyId,
+                    ($riderId !== null && $riderId > 0) ? $riderId : null,
+                    ($uploadId !== null && $uploadId > 0) ? $uploadId : null,
+                    ($cardId !== null && $cardId > 0) ? $cardId : null,
+                    $net, $fee, $total, $status, $tid, mb_substr($failReason, 0, 300), max(1, $attempts),
+                    ($adminId !== null && $adminId > 0) ? $adminId : null,
+                    $bd['hq'], $bd['distributor'], $bd['agency'], $hqAmount, $distAmount, $agyAmount,
+                ]
+            );
+        }
+
         return db_insert(
             'INSERT INTO pg_payments
                 (agency_id, rider_id, upload_id, card_id, net_amount, service_fee, total_charged, status, pg_tid, fail_reason, attempts, created_by)

@@ -232,8 +232,9 @@ PK=`agency_id`. `balance`(PG 충전 잔액) · `withholding_reserve`(원천세 �
 결제 시 `priority` 순 시도 → 실패(한도초과 등) 시 다음 카드 자동 재시도(`PgPayment::chargeForRider`).
 
 ### `pg_payments` — PG 결제 이력(라이더별 건건히)
-`net_amount`(지갑 충전분) + `service_fee`(영업대행수수료, `org_fee_config` 기준) = `total_charged`(카드 청구 총액).
+`net_amount`(지갑 충전분) + `service_fee`(플랫폼 수수료, `org_fee_config` 기준) = `total_charged`(카드 청구 총액).
 `status`(`success`/`failed`), `attempts`(시도한 카드 수), `card_id`(실제 승인 카드).
+`hq_amount`/`distributor_amount`/`agency_amount`(🆕 2026-08-05) — `service_fee`의 본사/총판/대리점 분배 **금액 스냅샷**, `hq_pct`/`distributor_pct`/`agency_pct`는 그 시점 요율 스냅샷. `PgPayment::record()`가 결제 순간의 `PgFeeConfig::breakdownForAgency()` 결과를 그대로 저장 — 이후 `org_fee_config` 요율이 바뀌어도 이 값은 불변(재계산 안 함). 「플랫폼 수수료 내역」(`settlement/platform-fee`) 화면과 `OrgDashboard`의 "내 몫" 집계 둘 다 이 스냅샷 컬럼을 그대로 합산한다(실시간 재계산 금지).
 
 ### `agency_bank_accounts` — 🆕 대리점 오픈뱅킹 출금 계좌
 PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 발급 가능).
@@ -307,6 +308,7 @@ PK `(role, area)`. `role`: `admin`/`operation`/`settlement`(super는 항상 전�
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-05 (7) | **`pg_payments` 수수료 분배 스냅샷 추가.** `hq_amount`/`distributor_amount`/`agency_amount`/`hq_pct`/`distributor_pct`/`agency_pct` 6컬럼 추가(테이블 수 변화 없음). §7 참고. |
 | 2026-08-05 (4) | **총괄 관리자 역할(`manager`) 추가.** `admins.role` ENUM에 `manager` 추가(테이블 수 변화 없음). §2 참고. |
 | 2026-08-05 (3) | **역할별 권한 관리 신규.** `role_permissions`(role×area→can_view/can_write) 추가 → **34개 테이블**. 기존 `inc/auth.php` 하드코딩 라우트·역할 매핑을 DB화, 「권한 관리」(`system/permissions`, super 전용) 화면에서 편집. `system/*`(시스템관리)는 이 테이블과 무관하게 코드로 super 전용 고정. §9 참고. |
 | 2026-07-22 | 이 문서 최초 작성 — Phase A~F(관리자 재설계) 완료 시점의 DB 전체(25개 테이블) 스냅샷 |

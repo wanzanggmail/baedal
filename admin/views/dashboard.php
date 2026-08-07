@@ -3,6 +3,15 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/AdminDashboard.php';
+require_once INC_PATH . '/Org.php';
+
+// 본사·총판은 "대리점 관리" 관점의 별도 대시보드를 본다.
+// 아래 화면(라이더 운영 관점)은 대리점 계정 전용.
+if (in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DISTRIBUTOR], true)) {
+    require __DIR__ . '/dashboard_org.php';
+
+    return;
+}
 
 $dash = AdminDashboard::load();
 $dashErrors = $dash['errors'];
