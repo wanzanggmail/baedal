@@ -12,6 +12,7 @@ return [
     'settlement/withholding' => ['title' => '원천세 대상자 명세', 'view' => 'withholding_report'],
     'settlement/fee-report' => ['title' => '수수료·차감 통합 조회', 'view' => 'fee_report'],
     'settlement/platform-fee' => ['title' => '플랫폼 수수료 내역', 'view' => 'platform_fee_history'],
+    'settlement/order-details' => ['title' => '오더별 상세 내역', 'view' => 'order_detail_list'],
     'promotion' => ['title' => '프로모션 지급', 'view' => 'promotion'],
     'promotion/detail' => ['title' => '프로모션 지급 상세', 'view' => 'promotion_detail'],
     'deduction/agency-fee' => ['title' => '선공제(대행 수수료) 설정', 'view' => 'deduction_agency_fee'],

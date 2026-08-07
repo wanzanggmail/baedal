@@ -854,7 +854,11 @@ $platformLabels = [
 						<li>저장된 라이더: <strong>${data.rows}명</strong> (매칭 ${data.matched}명)</li>
 						<li>차감내역: <strong>${data.deductions}건</strong></li>`;
 				if (data.unmatched && data.unmatched.length > 0) html += `<li class="text-warning">여전히 미매칭(${data.unmatched.length}명): ${data.unmatched.slice(0, 5).map(escHtml).join(', ')}${data.unmatched.length > 5 ? ' …' : ''}</li>`;
-				html += `</ul></div>`;
+				html += `</ul>`;
+				if (data.warnings && data.warnings.length > 0) {
+					html += `<div class="alert alert-warning mt-3 mb-0 p-3 fs-8">${data.warnings.map(escHtml).join('<br>')}</div>`;
+				}
+				html += `</div>`;
 				showResult('', html, true);
 				setTimeout(() => location.reload(), 2200);
 			} else if (data.code === 'platform_mismatch') {

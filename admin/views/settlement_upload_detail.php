@@ -164,6 +164,10 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				<?= ($upload['status'] ?? '') === 'applied' ? '정산 재반영 (신규 매칭분)' : '정산 반영 · 수수료·지갑' ?>
 			</button>
 			<?php endif; ?>
+			<a href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload_export.php?id=' . $uploadId, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-success fw-bold">
+				<i class="ki-duotone ki-file-down fs-3"><span class="path1"></span><span class="path2"></span></i>
+				엑셀 다운로드
+			</a>
 			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">수수료 내역</a>
 			<a href="<?= htmlspecialchars($uploadListUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">업로드</a>
 			<a href="<?= htmlspecialchars($historyUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">전체 이력</a>
@@ -172,6 +176,16 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 </div>
 <!--end::Toolbar-->
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
+
+	<?php if ((string) $upload['platform'] !== 'baemin' && (int) $upload['ok_rows'] > 0 && $orderDetailCount === 0) : ?>
+	<div class="alert alert-warning d-flex align-items-center p-5 mb-6">
+		<i class="ki-duotone ki-information-5 fs-2hx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+		<div class="fs-7 text-gray-800">
+			<strong>건단위(오더상세) 데이터가 없습니다.</strong> 라이더 요약은 정상 저장됐지만, 원본 파일에서 "오더별" 상세 탭을 찾지 못한 것으로 보입니다.
+			탭 이름·헤더가 바뀌었는지 원본 파일을 확인한 뒤 다시 업로드해 주세요.
+		</div>
+	</div>
+	<?php endif; ?>
 
 	<!--begin::요약-->
 	<div class="row g-5 g-xl-8 mb-8">
@@ -215,7 +229,22 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<div class="text-gray-500 fw-semibold fs-7 mb-1">파일 · 상태</div>
 					<div class="text-gray-800 fs-7 text-break mb-2"><?= htmlspecialchars((string) $upload['original_filename'], ENT_QUOTES, 'UTF-8') ?></div>
 					<span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
-					<div class="text-muted fs-8 mt-2">차감 <?= number_format($deductionCount) ?>건 · 오더상세 <?= number_format($orderDetailCount) ?>건 · 시간제보험 <?= number_format($hourlyInsCount) ?>건<?php if ($supportCount > 0): ?> · 지원금 <?= number_format($supportCount) ?>건(<?= $fmtWon($supportTotal) ?>)<?php endif; ?></div>
+					<div class="text-muted fs-8 mt-2">
+						차감 <?= number_format($deductionCount) ?>건 ·
+						<?php if ($orderDetailCount > 0) : ?>
+						<?php
+						$odUrl = admin_url('settlement/order-details');
+						$odUrl .= (str_contains($odUrl, '?') ? '&' : '?')
+							. 'upload_id=' . $uploadId
+							. '&from=' . urlencode((string) $upload['settlement_date'])
+							. '&to=' . urlencode((string) $upload['settlement_date']);
+						?>
+						<a href="<?= htmlspecialchars($odUrl, ENT_QUOTES, 'UTF-8') ?>">오더상세 <?= number_format($orderDetailCount) ?>건</a> ·
+						<?php else : ?>
+						오더상세 <?= number_format($orderDetailCount) ?>건 ·
+						<?php endif; ?>
+						시간제보험 <?= number_format($hourlyInsCount) ?>건<?php if ($supportCount > 0): ?> · 지원금 <?= number_format($supportCount) ?>건(<?= $fmtWon($supportTotal) ?>)<?php endif; ?>
+					</div>
 					<div class="text-muted fs-8"><?= htmlspecialchars((string) ($upload['operator_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(substr((string) $upload['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></div>
 				</div>
 			</div>

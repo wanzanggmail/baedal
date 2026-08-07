@@ -1,48 +1,348 @@
-/* 라이더 앱 모바일 전용 보정 */
+/* 라이더 앱 모바일 전용 보정
+   ⚠️ Metronic 루트 font-size가 12px이라 rem은 의도보다 25% 작게 나온다 → 크기는 px로 고정. */
 
-/* 홈 — 정산/출금 요약 카드 */
-.rider-home-settlement-top {
-	padding-bottom: 0.85rem;
-	margin-bottom: 0.85rem;
+/* ───────────────────────────── 홈: 인사말 ───────────────────────────── */
+.rider-home-greeting-name {
+	font-size: 19px;
+	font-weight: 700;
+	line-height: 1.25;
+	color: var(--bs-gray-900);
 }
-.rider-home-settlement-withdraw {
-	padding-top: 0.1rem;
+.rider-home-greeting-sub {
+	font-size: 12px;
+	line-height: 1.4;
+	margin-top: 2px;
 }
 
-/* 홈 — 큰 액션 버튼(달력 보기 / 출금 신청). 손가락으로 누르기 좋게 세로로 키운다.
-   ⚠️ Metronic 루트 font-size가 12px이라 rem은 의도보다 25% 작게 나온다 → px로 고정. */
-.rider-home-actions-row .rider-home-big-action {
+/* ───────────────────────── 홈: 상태 알림(막힘) ───────────────────────── */
+.rider-home-alert {
+	display: flex;
+	padding: 13px 14px;
+	border-radius: 12px;
+	border: 1px solid transparent;
+}
+.rider-home-alert i {
+	font-size: 24px;
+	line-height: 1;
+}
+.rider-home-alert-title {
+	font-size: 14px;
+	font-weight: 700;
+	line-height: 1.3;
+}
+.rider-home-alert-sub {
+	font-size: 12px;
+	line-height: 1.4;
+	margin-top: 1px;
+	opacity: 0.85;
+}
+.rider-home-alert-danger {
+	background: var(--bs-danger-light);
+	border-color: rgba(241, 65, 108, 0.25);
+	color: var(--bs-danger);
+}
+.rider-home-alert-danger .rider-home-alert-sub {
+	color: var(--bs-gray-700);
+}
+.rider-home-alert-info {
+	background: var(--bs-info-light);
+	border-color: rgba(114, 57, 234, 0.2);
+	color: var(--bs-info);
+}
+.rider-home-alert-info .rider-home-alert-sub {
+	color: var(--bs-gray-700);
+}
+.rider-home-alert:active {
+	transform: scale(0.99);
+}
+
+/* ────────────────────── 홈: 출금 가능액 히어로 카드 ────────────────────── */
+.rider-home-hero {
+	background: linear-gradient(135deg, #009ef7 0%, #0080d6 100%);
+	border-radius: 16px;
+	padding: 20px 18px 16px;
+	color: #fff;
+	box-shadow: 0 6px 18px rgba(0, 158, 247, 0.28);
+}
+.rider-home-hero-label {
+	font-size: 13px;
+	font-weight: 600;
+	opacity: 0.9;
+	line-height: 1.2;
+}
+.rider-home-hero-amount {
+	font-size: 34px;
+	font-weight: 800;
+	line-height: 1.15;
+	letter-spacing: -0.5px;
+	margin-top: 4px;
+	word-break: keep-all;
+}
+.rider-home-hero-note {
+	font-size: 11px;
+	opacity: 0.82;
+	line-height: 1.4;
+	margin-top: 3px;
+}
+.rider-home-hero-cta {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-height: 48px;
+	margin-top: 14px;
+	border-radius: 10px;
+	background: #fff;
+	color: #0080d6;
+	font-size: 16px;
+	font-weight: 700;
+	text-decoration: none;
+}
+.rider-home-hero-cta:hover,
+.rider-home-hero-cta:focus {
+	color: #0080d6;
+	background: #fff;
+}
+.rider-home-hero-cta:active {
+	transform: scale(0.98);
+}
+.rider-home-hero-cta-ghost {
+	background: rgba(255, 255, 255, 0.18);
+	color: #fff;
+	border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.rider-home-hero-cta-ghost:hover,
+.rider-home-hero-cta-ghost:focus {
+	background: rgba(255, 255, 255, 0.18);
+	color: #fff;
+}
+.rider-home-hero-foot {
+	display: flex;
+	align-items: center;
+	margin-top: 14px;
+	padding-top: 12px;
+	border-top: 1px solid rgba(255, 255, 255, 0.25);
+}
+.rider-home-hero-foot-item {
+	flex: 1 1 0;
+	min-width: 0;
+	text-align: center;
+}
+.rider-home-hero-foot-divider {
+	width: 1px;
+	align-self: stretch;
+	background: rgba(255, 255, 255, 0.25);
+}
+.rider-home-hero-foot-label {
+	display: block;
+	font-size: 11px;
+	opacity: 0.85;
+	line-height: 1.3;
+}
+.rider-home-hero-foot-value {
+	display: block;
+	font-size: 14px;
+	font-weight: 700;
+	line-height: 1.35;
+	margin-top: 1px;
+}
+
+/* ─────────────────────── 홈: 이번 달 요약 타일 3개 ─────────────────────── */
+.rider-home-stats {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 8px;
+}
+.rider-home-stat {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	min-height: 82px;
+	padding: 11px 9px;
+	border-radius: 12px;
+	background: var(--bs-body-bg);
+	border: 1px solid var(--bs-gray-200);
+	text-decoration: none;
+}
+.rider-home-stat:active {
+	transform: scale(0.98);
+}
+.rider-home-stat-label {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--bs-gray-500);
+	line-height: 1.2;
+}
+.rider-home-stat-value {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--bs-gray-900);
+	line-height: 1.25;
+	margin-top: 4px;
+	word-break: break-all;
+}
+.rider-home-stat-unit {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--bs-gray-600);
+	margin-left: 1px;
+}
+.rider-home-stat-sub {
+	font-size: 10px;
+	color: var(--bs-gray-500);
+	line-height: 1.3;
+	margin-top: 2px;
+}
+.rider-home-stat-warn {
+	background: var(--bs-warning-light);
+	border-color: rgba(255, 199, 0, 0.35);
+}
+.rider-home-stat-warn .rider-home-stat-value {
+	color: #b38600;
+}
+
+/* ─────────────────────────── 홈: 바로가기 4칸 ─────────────────────────── */
+.rider-home-quick {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 6px;
+}
+.rider-home-quick-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 2px;
+	text-decoration: none;
+}
+.rider-home-quick-item:active {
+	transform: scale(0.96);
+}
+.rider-home-quick-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 52px;
+	height: 52px;
+	border-radius: 14px;
+}
+.rider-home-quick-icon i {
+	font-size: 25px;
+	line-height: 1;
+}
+.rider-home-quick-label {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--bs-gray-700);
+	line-height: 1.2;
+	text-align: center;
+}
+
+/* ──────────────────────────── 홈: 최근 정산 ──────────────────────────── */
+.rider-home-cycle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 0;
+	border-bottom: 1px dashed var(--bs-gray-200);
+}
+.rider-home-cycle:last-child {
+	border-bottom: 0;
+	padding-bottom: 0;
+}
+.rider-home-cycle-date {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--bs-gray-900);
+	line-height: 1.3;
+}
+.rider-home-cycle-sub {
+	font-size: 11px;
+	color: var(--bs-gray-500);
+	line-height: 1.3;
+	margin-top: 1px;
+}
+.rider-home-cycle-amount {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--bs-primary);
+	line-height: 1.3;
+}
+.rider-home-cycle-fee {
+	font-size: 10px;
+	color: var(--bs-gray-500);
+	line-height: 1.3;
+	margin-top: 1px;
+}
+
+/* ──────────────────────────── 홈: 공지 목록 ──────────────────────────── */
+.rider-home-notice-list li + li {
+	margin-top: 0.5rem;
+}
+
+/* ───────────────────────── 하단 탭바(전 화면 공통) ─────────────────────── */
+.rider-tabbar {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 90;
+	display: flex;
+	background: var(--bs-body-bg);
+	border-top: 1px solid var(--bs-gray-200);
+	padding-bottom: env(safe-area-inset-bottom);
+	box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.04);
+}
+.rider-tabbar-item {
+	flex: 1 1 0;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 10px;
-	min-height: 130px;
-	padding: 20px 12px;
-	border-radius: 12px;
+	gap: 3px;
+	min-height: 56px;
+	padding: 6px 2px;
+	text-decoration: none;
+	color: var(--bs-gray-500);
 }
-.rider-home-actions-row .rider-home-big-action i {
-	font-size: 40px;
+.rider-tabbar-item i {
+	font-size: 22px;
 	line-height: 1;
 }
-.rider-home-actions-row .rider-home-big-action .rider-home-big-action-label {
-	font-size: 17px;
-	font-weight: 700;
+.rider-tabbar-label {
+	font-size: 10px;
+	font-weight: 600;
 	line-height: 1.2;
 }
-.rider-home-actions-row .rider-home-big-action:active {
-	transform: scale(0.98);
+.rider-tabbar-item.active {
+	color: var(--bs-primary);
 }
-@media (min-width: 400px) {
-	.rider-home-actions-row .rider-home-big-action {
-		min-height: 145px;
-	}
-	.rider-home-actions-row .rider-home-big-action i {
-		font-size: 44px;
-	}
+.rider-tabbar-item.active i {
+	color: var(--bs-primary);
+}
+.rider-tabbar-item:active {
+	background: var(--bs-gray-100);
 }
 
-/* 홈 — 공지 목록 */
-.rider-home-notice-list li + li {
-	margin-top: 0.5rem;
+/* 탭바에 콘텐츠가 가리지 않도록 본문 하단 여백 확보 */
+.rider-has-tabbar {
+	padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+}
+
+/* ─────────────────────────── 넓은 화면 보정 ─────────────────────────── */
+@media (min-width: 400px) {
+	.rider-home-hero-amount {
+		font-size: 38px;
+	}
+	.rider-home-quick-icon {
+		width: 56px;
+		height: 56px;
+	}
+	.rider-home-quick-label {
+		font-size: 12px;
+	}
+	.rider-home-stat-value {
+		font-size: 16px;
+	}
 }

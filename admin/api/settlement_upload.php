@@ -549,6 +549,15 @@ AuditLog::record(
     "{$platform} · {$settlementDate} · {$result['inserted']}명 저장"
 );
 
+// 쿠팡/기타는 "종합"(라이더 요약)과 "오더별"(건단위) 탭을 각각 별도로 파싱한다.
+// 요약탭은 찾았는데 오더별 탭을 못 찾으면(이름 변경·형식 상이 등) 업로드 자체는 성공하지만
+// 건단위 데이터가 조용히 0건이 되므로, 놓치기 쉬운 이 상황을 명시적으로 경고한다.
+// 배민은 두 데이터가 같은 시트·같은 루프에서 함께 만들어져 이 문제가 구조적으로 없다.
+$warnings = [];
+if ($platform !== 'baemin' && $result['matched'] > 0 && $result['order_details'] === 0) {
+    $warnings[] = '"오더별" 상세 탭을 찾지 못해 건단위(오더상세) 데이터가 저장되지 않았습니다. 파일의 탭 이름/헤더를 확인해 주세요. (라이더 요약은 정상 저장됨)';
+}
+
 echo json_encode([
     'ok'         => true,
     'upload_id'  => $result['upload_id'],
@@ -562,6 +571,7 @@ echo json_encode([
     'hourly_insurance' => $result['hourly_insurance'],
     'support'    => $result['support'],
     'unmatched'  => $result['unmatched'],
+    'warnings'   => $warnings,
     'message'    => "총 {$result['inserted']}명 정산 데이터가 저장되었습니다. (라이더 매칭 {$result['matched']}명, 오더 상세 {$result['order_details']}건, 시간제보험 {$result['hourly_insurance']}건, 지원금 {$result['support']}건)",
 ], JSON_UNESCAPED_UNICODE);
 

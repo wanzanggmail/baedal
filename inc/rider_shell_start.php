@@ -106,4 +106,4 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 			</div>
 		</header>
 
-		<main class="flex-grow-1 overflow-auto px-4 py-4 <?= $riderMinimalShell ? 'pb-10' : 'pb-20' ?>" id="kt_rider_main">
+		<main class="flex-grow-1 overflow-auto px-4 py-4 <?= $riderMinimalShell ? 'pb-10' : 'rider-has-tabbar' ?>" id="kt_rider_main">
