@@ -10,7 +10,8 @@ declare(strict_types=1);
 require_once INC_PATH . '/AdminDashboard.php';
 require_once INC_PATH . '/OrgDashboard.php';
 
-$dash  = OrgDashboard::load();
+$period = dashboard_period_from_get();
+$dash  = OrgDashboard::load($period['from'], $period['to']);
 $isHq  = (bool) $dash['is_hq'];
 $rows  = $dash['agency_rows'];
 
@@ -29,7 +30,7 @@ if (!function_exists('org_delta_badge')) {
     function org_delta_badge(?float $delta): string
     {
         if ($delta === null) {
-            return '<span class="badge badge-light-secondary fs-base">전주 비교 없음</span>';
+            return '<span class="badge badge-light-secondary fs-base">직전 기간 비교 없음</span>';
         }
         $up  = $delta >= 0;
         $cls = $up ? 'success' : 'danger';
@@ -56,10 +57,7 @@ if (!function_exists('org_delta_badge')) {
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2 gap-lg-3">
-			<div class="btn btn-sm fw-bold btn-secondary d-flex align-items-center px-4">
-				<span class="text-gray-700 fw-bold"><?= $esc((string) $dash['period_label']) ?></span>
-				<span class="text-gray-500 fs-8 ms-2">(이번 주)</span>
-			</div>
+			<?php $periodFrom = $period['from']; $periodTo = $period['to']; require INC_PATH . '/dashboard_range_picker.php'; ?>
 			<?php if ($isHq && admin_can_access_route('system/orgs')) : ?>
 			<a href="<?= $esc(admin_url('system/orgs')) ?>" class="btn btn-sm fw-bold btn-primary">
 				<i class="ki-duotone ki-office-bag fs-3"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
@@ -121,7 +119,7 @@ if (!function_exists('org_delta_badge')) {
 					<i class="ki-duotone ki-wallet fs-2hx text-gray-600"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 					<div class="d-flex flex-column my-7">
 						<span class="fw-semibold fs-2x text-gray-800 lh-1 ls-n2"><?= $won((int) $dash['week_payout']) ?></span>
-						<span class="fw-semibold fs-6 text-gray-500">이번 주 정산 합계</span>
+						<span class="fw-semibold fs-6 text-gray-500">기간 정산 합계</span>
 					</div>
 					<?= org_delta_badge($dash['week_payout_delta'] !== null ? (float) $dash['week_payout_delta'] : null) ?>
 				</div>
@@ -136,9 +134,9 @@ if (!function_exists('org_delta_badge')) {
 						<span class="fw-semibold fs-6 text-gray-500">플랫폼 수수료 <?= $esc((string) $dash['fee_revenue_label']) ?></span>
 					</div>
 					<?php if ((int) $dash['fee_revenue'] > 0) : ?>
-					<span class="badge badge-light-success fs-base">이번 주 카드결제분</span>
+					<span class="badge badge-light-success fs-base">선택 기간 카드결제분</span>
 					<?php else : ?>
-					<span class="badge badge-light-secondary fs-base">이번 주 결제 없음</span>
+					<span class="badge badge-light-secondary fs-base">기간 내 결제 없음</span>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -238,7 +236,7 @@ if (!function_exists('org_delta_badge')) {
 			<div class="card card-flush">
 				<div class="card-header pt-5">
 					<h3 class="card-title fw-bold">총판별 요약</h3>
-					<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">이번 주 기준 · 하위 대리점 합산</span>
+					<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">선택 기간 기준 · 하위 대리점 합산</span>
 				</div>
 				<div class="card-body pt-2">
 					<div class="table-responsive">
@@ -281,7 +279,7 @@ if (!function_exists('org_delta_badge')) {
 				<div class="card-header align-items-center py-5 gap-2 gap-md-5">
 					<div class="card-title">
 						<h3 class="fw-bold m-0">대리점별 현황</h3>
-						<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">이번 주 정산액 순 · 잔액/미수금은 현재 시점</span>
+						<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">선택 기간 정산액 순 · 잔액/미수금은 현재 시점</span>
 					</div>
 					<div class="card-toolbar">
 						<?php if (admin_can_access_route('system/pg-fee')) : ?>

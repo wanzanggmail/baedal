@@ -13,7 +13,8 @@ if (in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DISTRIBUTOR], true
     return;
 }
 
-$dash = AdminDashboard::load();
+$period = dashboard_period_from_get();
+$dash = AdminDashboard::load($period['from'], $period['to']);
 $dashErrors = $dash['errors'];
 
 $uploadStatusLabels = [
@@ -40,7 +41,7 @@ $platformShort = [
 function dash_delta_badge(?float $delta, bool $invert = false): string
 {
     if ($delta === null) {
-        return '<span class="badge badge-light-secondary fs-base">전주 비교 없음</span>';
+        return '<span class="badge badge-light-secondary fs-base">직전 기간 비교 없음</span>';
     }
     $up = $delta >= 0;
     $good = $invert ? !$up : $up;
@@ -69,14 +70,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2 gap-lg-3">
-			<div class="btn btn-sm fw-bold btn-secondary d-flex align-items-center px-4">
-				<span class="text-gray-700 fw-bold"><?= htmlspecialchars((string) $dash['period_label'], ENT_QUOTES, 'UTF-8') ?></span>
-				<span class="text-gray-500 fs-8 ms-2">(이번 주)</span>
-				<i class="ki-duotone ki-calendar-8 fs-2 ms-2 me-0 text-gray-600">
-					<span class="path1"></span><span class="path2"></span><span class="path3"></span>
-					<span class="path4"></span><span class="path5"></span><span class="path6"></span>
-				</i>
-			</div>
+			<?php $periodFrom = $period['from']; $periodTo = $period['to']; require INC_PATH . '/dashboard_range_picker.php'; ?>
 			<a href="<?= htmlspecialchars(admin_url('settlement/upload'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm fw-bold btn-primary">
 				<i class="ki-duotone ki-file-up fs-3"><span class="path1"></span><span class="path2"></span></i>
 				정산 엑셀 업로드
@@ -116,9 +110,9 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 						</div>
 					</div>
 					<?php if ((int) $dash['riders_new_week'] > 0) : ?>
-					<span class="badge badge-light-success fs-base">이번 주 +<?= (int) $dash['riders_new_week'] ?>명</span>
+					<span class="badge badge-light-success fs-base">기간 내 +<?= (int) $dash['riders_new_week'] ?>명</span>
 					<?php else : ?>
-					<span class="badge badge-light-secondary fs-base">이번 주 신규 0</span>
+					<span class="badge badge-light-secondary fs-base">기간 내 신규 0</span>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -134,7 +128,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 					<div class="d-flex flex-column my-7">
 						<span class="fw-semibold fs-2x text-gray-800 lh-1 ls-n2"><?= AdminDashboard::formatWon((int) $dash['week_payout']) ?></span>
 						<div class="m-0">
-							<span class="fw-semibold fs-6 text-gray-500">이번 주 정산 합계</span>
+							<span class="fw-semibold fs-6 text-gray-500">기간 정산 합계</span>
 						</div>
 					</div>
 					<?= dash_delta_badge($dash['week_payout_delta'] !== null ? (float) $dash['week_payout_delta'] : null) ?>
@@ -153,7 +147,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 					<div class="d-flex flex-column my-7">
 						<span class="fw-semibold fs-3x text-gray-800 lh-1 ls-n2"><?= AdminDashboard::formatCount((int) $dash['week_orders']) ?></span>
 						<div class="m-0">
-							<span class="fw-semibold fs-6 text-gray-500">이번 주 배달 건수</span>
+							<span class="fw-semibold fs-6 text-gray-500">기간 배달 건수</span>
 						</div>
 					</div>
 					<?= dash_delta_badge($dash['week_orders_delta'] !== null ? (float) $dash['week_orders_delta'] : null) ?>
@@ -289,7 +283,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 				<div class="card-header pt-7">
 					<h3 class="card-title align-items-start flex-column">
 						<span class="card-label fw-bold text-gray-900">플랫폼별 정산 요약</span>
-						<span class="text-gray-500 pt-2 fw-semibold fs-6">이번 주 · 일간 정산서 반영분</span>
+						<span class="text-gray-500 pt-2 fw-semibold fs-6">선택 기간 · 일간 정산서 반영분</span>
 					</h3>
 					<div class="card-toolbar">
 						<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">수수료 내역</a>
@@ -297,7 +291,7 @@ function dash_delta_badge(?float $delta, bool $invert = false): string
 				</div>
 				<div class="card-body pt-5">
 					<?php if ($dash['platform_rows'] === []) : ?>
-					<p class="text-muted fs-7 mb-0">이번 주 정산 데이터가 없습니다. 엑셀을 업로드해 주세요.</p>
+					<p class="text-muted fs-7 mb-0">선택 기간에 정산 데이터가 없습니다. 엑셀을 업로드해 주세요.</p>
 					<?php else : ?>
 					<?php
                     $barClass = ['baemin' => 'bg-primary', 'coupang' => 'bg-success', 'other' => 'bg-secondary'];

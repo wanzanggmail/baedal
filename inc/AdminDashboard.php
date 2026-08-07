@@ -11,14 +11,18 @@ final class AdminDashboard
     public const LARGE_WITHDRAWAL_THRESHOLD = 1_000_000;
 
     /**
+     * @param ?string $from 기간 시작(YYYY-MM-DD). 생략 시 이번 주 월요일
+     * @param ?string $to   기간 끝(YYYY-MM-DD). 생략 시 오늘
      * @return array<string, mixed>
      */
-    public static function load(): array
+    public static function load(?string $from = null, ?string $to = null): array
     {
-        $weekStart = date('Y-m-d', strtotime('monday this week'));
-        $weekEnd   = date('Y-m-d');
-        $prevStart = date('Y-m-d', strtotime($weekStart . ' -7 days'));
-        $prevEnd   = date('Y-m-d', strtotime($weekEnd . ' -7 days'));
+        $weekStart = $from ?? date('Y-m-d', strtotime('monday this week'));
+        $weekEnd   = $to ?? date('Y-m-d');
+        // 이전 기간 비교 — 선택한 기간과 같은 일수만큼 직전 구간(고정 7일 아님)
+        $periodDays = (int) round((strtotime($weekEnd) - strtotime($weekStart)) / 86400) + 1;
+        $prevEnd    = date('Y-m-d', strtotime($weekStart . ' -1 day'));
+        $prevStart  = date('Y-m-d', strtotime($prevEnd . ' -' . ($periodDays - 1) . ' days'));
         $monthStart = date('Y-m-01');
 
         $data = [

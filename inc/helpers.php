@@ -419,3 +419,29 @@ function normalize_hangul_nfc(string $s): string
 
     return implode('', $out);
 }
+
+/**
+ * 대시보드 기간 선택(daterangepicker) — $_GET[from/to]를 검증해 유효 기간을 반환.
+ * 없거나 형식이 틀리면 "이번 주"(월요일~오늘) 기본값. from > to 면 서로 바꾼다.
+ *
+ * @return array{from: string, to: string}
+ */
+function dashboard_period_from_get(): array
+{
+    $isDate = static fn (string $s): bool => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $s) && strtotime($s) !== false;
+
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $to   = trim((string) ($_GET['to'] ?? ''));
+
+    if (!$isDate($from)) {
+        $from = date('Y-m-d', strtotime('monday this week'));
+    }
+    if (!$isDate($to)) {
+        $to = date('Y-m-d');
+    }
+    if ($from > $to) {
+        [$from, $to] = [$to, $from];
+    }
+
+    return ['from' => $from, 'to' => $to];
+}
