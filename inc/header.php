@@ -18,6 +18,7 @@ if (!isset($pageTitle)) {
     <!--begin::Global Stylesheets Bundle(mandatory for all pages)-->
     <link href="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
     <link href="<?= htmlspecialchars(web_asset('css/style.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
+    <link href="<?= htmlspecialchars(web_asset('css/admin.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
     <!--end::Global Stylesheets Bundle-->
     <script>// Frame-busting to prevent site from being loaded within a frame without permission (click-jacking) if (window.top != window.self) { window.top.location.replace(window.self.location.href); }</script>
 </head>

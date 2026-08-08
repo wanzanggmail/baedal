@@ -1,0 +1,41 @@
+/* 관리자 화면 보정 — Metronic 번들은 수정하지 않는다. */
+
+/* 미수금 수수료 배분: form-control-solid + input-group 조합 시 중간 인풋 보더가 사라짐 */
+.debt-fee-split.input-group {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.debt-fee-split.input-group > .input-group-text,
+.debt-fee-split.input-group > .form-control {
+  border: 1px solid var(--bs-gray-300);
+  height: auto;
+}
+.debt-fee-split.input-group > .input-group-text {
+  background-color: var(--bs-gray-100);
+  color: var(--bs-gray-700);
+}
+.debt-fee-split.input-group > .form-control {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-gray-700);
+  min-width: 0;
+  z-index: 1;
+  box-shadow: none;
+}
+.debt-fee-split.input-group > .form-control:focus {
+  border-color: var(--bs-primary);
+  background-color: var(--bs-body-bg);
+  box-shadow: none;
+  z-index: 3;
+}
+.debt-fee-split.input-group:focus-within > .input-group-text {
+  border-color: var(--bs-primary);
+}
+.debt-fee-split.input-group > .form-control[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.debt-fee-split.input-group > .form-control[type="number"]::-webkit-outer-spin-button,
+.debt-fee-split.input-group > .form-control[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

@@ -663,16 +663,25 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 									<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액 · 합계는 일납 이하)</span></label>
 									<div class="row g-3">
 										<div class="col-md-4 d-none" id="dn_fee_hq_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">본사</span>
-												<input type="number" class="form-control form-control-solid" id="dn_fee_hq" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">본사</span>
+												<input type="number" class="form-control" id="dn_fee_hq" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 										<div class="col-md-4 d-none" id="dn_fee_dist_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">총판</span>
-												<input type="number" class="form-control form-control-solid" id="dn_fee_distributor" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">총판</span>
+												<input type="number" class="form-control" id="dn_fee_distributor" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 										<div class="col-md-4" id="dn_fee_ag_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">대리점</span>
-												<input type="number" class="form-control form-control-solid" id="dn_fee_agency" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">대리점</span>
+												<input type="number" class="form-control" id="dn_fee_agency" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 									</div>
 									<div class="form-text fs-8" id="dn_fee_hint"></div>
@@ -770,16 +779,25 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 									<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액)</span></label>
 									<div class="row g-3">
 										<div class="col-md-4 d-none" id="de_fee_hq_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">본사</span>
-												<input type="number" class="form-control form-control-solid" id="de_fee_hq" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">본사</span>
+												<input type="number" class="form-control" id="de_fee_hq" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 										<div class="col-md-4 d-none" id="de_fee_dist_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">총판</span>
-												<input type="number" class="form-control form-control-solid" id="de_fee_distributor" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">총판</span>
+												<input type="number" class="form-control" id="de_fee_distributor" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 										<div class="col-md-4" id="de_fee_ag_wrap">
-											<div class="input-group input-group-sm"><span class="input-group-text">대리점</span>
-												<input type="number" class="form-control form-control-solid" id="de_fee_agency" min="0" step="10" value="0" /></div>
+											<div class="input-group input-group-sm debt-fee-split">
+												<span class="input-group-text">대리점</span>
+												<input type="number" class="form-control" id="de_fee_agency" min="0" step="10" value="0" />
+												<span class="input-group-text">원</span>
+											</div>
 										</div>
 									</div>
 									<div class="form-text fs-8" id="de_fee_hint"></div>
