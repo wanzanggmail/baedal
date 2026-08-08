@@ -141,6 +141,32 @@ php seed.php
 - `sql/*.sql`: 테이블별 초기 스키마
 - `seed.php`: 권장 기본 데이터 시드
 - `seed.sql`: 레거시 시드, 신규 환경에서는 사용하지 않음
+- `scripts/reset_operational_data.php`: 최고 관리자와 본사·전역 설정만 남기고 운영 데이터 삭제
+
+### 운영 데이터 초기화 (최고 관리자만 유지)
+
+테스트 데이터를 지우고 최고 관리자만 남길 때 사용합니다. **되돌릴 수 없으므로 실행 전 DB 백업을 확인합니다.**
+
+남기는 항목:
+
+- `admins` 중 `role=super` 계정
+- 해당 계정의 본사 조직(`organizations`)
+- `system_codes`, `role_permissions`
+- 전역 설정(`deduction_global_config`, `withdrawal_config`, `settlement_excel_config`의 `org_id IS NULL` 또는 본사 행)
+- 본사 `org_fee_config`
+
+삭제하는 항목:
+
+- 총판·대리점 조직과 그 관리자 계정
+- 라이더·지갑·정산 업로드·반영·출금·미수금·프로모션·콘텐츠·감사 로그
+- 대리점 지갑·카드·계좌
+
+```bash
+php scripts/reset_operational_data.php           # 미리보기
+php scripts/reset_operational_data.php --execute # 실제 삭제
+```
+
+실행 후 최고 관리자로 다시 로그인해 총판·대리점·라이더를 새로 구성합니다.
 
 ### 스키마 확인
 

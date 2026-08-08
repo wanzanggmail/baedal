@@ -364,6 +364,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							<th class="text-end">남은 잔액</th>
 							<th class="text-end">일납</th>
 							<th>채권자</th>
+							<th>계약기간(리스)</th>
 							<th>미납갱신</th>
 							<th>상태</th>
 							<th class="text-end">관리</th>
@@ -383,6 +384,21 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							<td class="text-end fw-bold <?= $isAmort && (int) $d['balance_amount'] > 0 ? 'text-danger' : 'text-gray-500' ?>"><?= $isAmort ? $fmtWon($d['balance_amount']) : '—' ?></td>
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $fmtWon($d['daily_amount']) : '—' ?></td>
 							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-600 fs-8">
+								<?php $gap = $dk === 'lease' ? RiderDebt::leaseAccrualGap($d) : null; ?>
+								<?php if ($dk === 'lease' && (string) ($d['opened_on'] ?? '') !== '' && (string) ($d['planned_end_on'] ?? '') !== ''): ?>
+								<?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?>
+								<?php if ($gap !== null && $gap['overdue']): ?>
+								<br><span class="badge badge-light-danger fs-9"><?= (int) $gap['gap_days'] ?>일 지연</span>
+								<?php elseif ($gap !== null && $gap['gap_days'] > 0): ?>
+								<br><span class="badge badge-light-secondary fs-9"><?= (int) $gap['gap_days'] ?>일 경과</span>
+								<?php endif; ?>
+								<?php elseif ($dk === 'lease'): ?>
+								<span class="badge badge-light-warning fs-9">종료일 미설정 · 자동차감 안됨</span>
+								<?php else: ?>
+								—
+								<?php endif; ?>
+							</td>
 							<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) ($d['due_updated_on'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
 								<span class="badge badge-light-<?= $d['status'] === 'active' ? 'success' : ($d['status'] === 'closed' ? 'dark' : 'warning') ?> fs-8"><?= htmlspecialchars($debtStatusLabel[$d['status']] ?? $d['status'], ENT_QUOTES, 'UTF-8') ?></span>
@@ -401,7 +417,8 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 									data-id="<?= (int) $d['id'] ?>" data-title="<?= htmlspecialchars((string) $d['title'], ENT_QUOTES, 'UTF-8') ?>"
 									data-daily="<?= (int) $d['daily_amount'] ?>" data-creditor="<?= htmlspecialchars((string) $d['creditor'], ENT_QUOTES, 'UTF-8') ?>"
 									data-balance="<?= (int) $d['balance_amount'] ?>" data-status="<?= htmlspecialchars((string) $d['status'], ENT_QUOTES, 'UTF-8') ?>"
-									data-amort="<?= $isAmort ? 1 : 0 ?>" title="수정">
+									data-amort="<?= $isAmort ? 1 : 0 ?>" data-kind="<?= htmlspecialchars($dk, ENT_QUOTES, 'UTF-8') ?>"
+									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" title="수정">
 									<i class="ki-duotone ki-pencil fs-5"><span class="path1"></span><span class="path2"></span></i>
 								</button>
 							</td>
@@ -616,6 +633,11 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							<label class="form-label fs-7 fw-semibold">개시일/출고일</label>
 							<input type="date" class="form-control form-control-sm form-control-solid" id="dn_opened" />
 						</div>
+						<div class="col-md-6 d-none" id="dn_planned_end_wrap">
+							<label class="form-label fs-7 fw-semibold">계약 종료 예정일</label>
+							<input type="date" class="form-control form-control-sm form-control-solid" id="dn_planned_end" />
+							<div class="form-text fs-8">비워두면 정산 반영 시 자동 차감이 되지 않아 「차감」 버튼으로 직접 처리해야 합니다.</div>
+						</div>
 						<div class="col-12">
 							<label class="form-label fs-7 fw-semibold">메모</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="dn_note" maxlength="255" />
@@ -683,6 +705,10 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 						<div class="col-md-6" id="de_balance_wrap">
 							<label class="form-label fs-7 fw-semibold">남은 잔액 보정</label>
 							<input type="number" class="form-control form-control-sm form-control-solid" id="de_balance" min="0" step="1000" />
+						</div>
+						<div class="col-md-6" id="de_planned_end_wrap">
+							<label class="form-label fs-7 fw-semibold">계약 종료 예정일(리스)</label>
+							<input type="date" class="form-control form-control-sm form-control-solid" id="de_planned_end" />
 						</div>
 						<div class="col-md-6">
 							<label class="form-label fs-7 fw-semibold">채권자/구분</label>
@@ -922,13 +948,15 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	// ── 신규 등록 ──
 	var kindEl = document.getElementById('dn_kind');
 	function syncPrincipal() {
-		document.getElementById('dn_principal_wrap').style.display = (kindEl.value === 'lease') ? 'none' : '';
+		var isLease = (kindEl.value === 'lease');
+		document.getElementById('dn_principal_wrap').style.display = isLease ? 'none' : '';
+		document.getElementById('dn_planned_end_wrap').classList.toggle('d-none', !isLease);
 	}
 	if (kindEl) { kindEl.addEventListener('change', syncPrincipal); }
 	var btnNew = document.getElementById('btn_debt_new');
 	if (btnNew) {
 		btnNew.addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_note'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note'].forEach(function (i) { document.getElementById(i).value = ''; });
 			kindEl.value = 'loan'; syncPrincipal();
 			document.getElementById('debt_new_alert').className = 'd-none';
 			modal('kt_debt_new_modal').show();
@@ -943,6 +971,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			daily_amount: Number(document.getElementById('dn_daily').value) || 0,
 			creditor: document.getElementById('dn_creditor').value.trim(),
 			opened_on: document.getElementById('dn_opened').value,
+			planned_end_on: document.getElementById('dn_planned_end').value,
 			note: document.getElementById('dn_note').value.trim()
 		}).then(function (d) {
 			if (d.ok) { window.location.reload(); }
@@ -997,6 +1026,8 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			document.getElementById('de_status').value = b.dataset.status || 'active';
 			document.getElementById('de_balance').value = b.dataset.balance || 0;
 			document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
+			document.getElementById('de_planned_end').value = b.dataset.plannedEnd || '';
+			document.getElementById('de_planned_end_wrap').classList.toggle('d-none', b.dataset.kind !== 'lease');
 			document.getElementById('debt_edit_alert').className = 'd-none';
 			modal('kt_debt_edit_modal').show();
 		});
@@ -1012,6 +1043,9 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 		};
 		if (document.getElementById('de_balance_wrap').style.display !== 'none') {
 			payload.balance_amount = Number(document.getElementById('de_balance').value) || 0;
+		}
+		if (!document.getElementById('de_planned_end_wrap').classList.contains('d-none')) {
+			payload.planned_end_on = document.getElementById('de_planned_end').value;
 		}
 		post(payload).then(function (d) {
 			if (d.ok) { window.location.reload(); }

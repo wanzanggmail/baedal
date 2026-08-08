@@ -53,7 +53,17 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 					<?php if (!empty($d['due_updated_on'])) : ?>
 					<span>최근 차감 <?= htmlspecialchars((string) $d['due_updated_on'], ENT_QUOTES, 'UTF-8') ?></span>
 					<?php endif; ?>
+					<?php if ($dk === 'lease' && !empty($d['opened_on']) && !empty($d['planned_end_on'])) : ?>
+					<span>계약기간 <?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?></span>
+					<?php endif; ?>
 				</div>
+				<?php $gap = $dk === 'lease' ? RiderDebt::leaseAccrualGap($d) : null; ?>
+				<?php if ($gap !== null && $gap['overdue']) : ?>
+				<div class="fs-8 text-warning mt-1">
+					<i class="ki-duotone ki-information-5 fs-7 me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+					최근 반영 이후 <?= (int) $gap['gap_days'] ?>일 경과 — 정산 업로드가 이루어지면 그동안의 리스료가 한 번에 반영됩니다.
+				</div>
+				<?php endif; ?>
 				<?php if (!empty($d['entries'])) : ?>
 				<button type="button" class="btn btn-sm btn-light py-1 px-3 mt-2" data-bs-toggle="collapse" data-bs-target="#rd_hist_<?= (int) $d['id'] ?>">차감 이력 <?= count($d['entries']) ?></button>
 				<div class="collapse mt-3" id="rd_hist_<?= (int) $d['id'] ?>">

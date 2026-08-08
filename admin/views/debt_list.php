@@ -14,7 +14,7 @@ $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $filterQ      = trim((string) ($_GET['q']      ?? ''));
 
 $rows = [];
-$kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0];
+$kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0, 'lease_overdue' => 0];
 
 if (!$needsMigrate) {
     [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
@@ -54,17 +54,22 @@ if (!$needsMigrate) {
             SUM(CASE WHEN d.status = 'active' AND d.kind IN ('loan','advance') THEN d.balance_amount ELSE 0 END) AS balance_sum,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' THEN d.daily_amount ELSE 0 END) AS lease_daily,
             SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt,
-            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND (d.opened_on IS NULL OR d.planned_end_on IS NULL) THEN 1 ELSE 0 END) AS lease_no_end
+            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND (d.opened_on IS NULL OR d.planned_end_on IS NULL) THEN 1 ELSE 0 END) AS lease_no_end,
+            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND d.opened_on IS NOT NULL AND d.planned_end_on IS NOT NULL
+                     AND d.opened_on <= CURDATE()
+                     AND DATEDIFF(LEAST(CURDATE(), d.planned_end_on), COALESCE(d.due_updated_on, DATE_SUB(d.opened_on, INTERVAL 1 DAY))) >= " . RiderDebt::GAP_WARNING_DAYS . "
+                THEN 1 ELSE 0 END) AS lease_overdue
            FROM rider_debts d INNER JOIN riders r ON r.id = d.rider_id
           WHERE 1=1 {$kWhere}",
         $scopeParams
     ) ?: [];
     $kpi = [
-        'active'       => (int) ($k['active_cnt']  ?? 0),
-        'balance'      => (int) ($k['balance_sum'] ?? 0),
-        'lease_daily'  => (int) ($k['lease_daily'] ?? 0),
-        'closed'       => (int) ($k['closed_cnt']  ?? 0),
-        'lease_no_end' => (int) ($k['lease_no_end'] ?? 0),
+        'active'        => (int) ($k['active_cnt']  ?? 0),
+        'balance'       => (int) ($k['balance_sum'] ?? 0),
+        'lease_daily'   => (int) ($k['lease_daily'] ?? 0),
+        'closed'        => (int) ($k['closed_cnt']  ?? 0),
+        'lease_no_end'  => (int) ($k['lease_no_end'] ?? 0),
+        'lease_overdue' => (int) ($k['lease_overdue'] ?? 0),
     ];
 }
 
@@ -112,6 +117,16 @@ $currentUrl = admin_url('deduction/debts');
 			<strong><?= number_format($kpi['lease_no_end']) ?>건</strong>의 진행 중 리스/렌탈에 개시일 또는 계약 종료 예정일이 없습니다.
 			계약기간이 없으면 정산 반영 시 <strong>자동 차감이 되지 않으며</strong>, 「차감」 버튼으로 직접 차감해야 합니다.
 			아래 목록의 「계약기간(리스)」 열에서 확인 후 수정 버튼으로 채워 주세요.
+		</div>
+	</div>
+	<?php endif; ?>
+	<?php if ($kpi['lease_overdue'] > 0) : ?>
+	<div class="alert alert-danger d-flex align-items-center p-5 mb-6">
+		<i class="ki-duotone ki-time fs-2hx text-danger me-4"><span class="path1"></span><span class="path2"></span></i>
+		<div>
+			<strong><?= number_format($kpi['lease_overdue']) ?>건</strong>의 리스/렌탈이 최근 차감일 기준 <?= RiderDebt::GAP_WARNING_DAYS ?>일 이상 반영되지 않고 있습니다.
+			이 시스템은 <strong>정산 엑셀을 업로드·반영할 때만</strong> 차감되므로, 해당 대리점의 정산 업로드가 밀렸는지 확인해 주세요.
+			아래 목록에서 <span class="badge badge-light-danger fs-9">N일 지연</span> 배지가 붙은 건입니다.
 		</div>
 	</div>
 	<?php endif; ?>
@@ -228,15 +243,20 @@ $currentUrl = admin_url('deduction/debts');
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $won($d['daily_amount']) : '—' ?></td>
 							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-600 fs-8">
-								<?php if ($dk === 'lease' && (string) ($d['opened_on'] ?? '') !== '' && (string) ($d['planned_end_on'] ?? '') !== ''): ?>
-								<?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?>
-								<?php elseif ($dk === 'lease'): ?>
+								<?php $gap = $dk === "lease" ? RiderDebt::leaseAccrualGap($d) : null; ?>
+								<?php if ($dk === "lease" && (string) ($d["opened_on"] ?? "") !== "" && (string) ($d["planned_end_on"] ?? "") !== ""): ?>
+								<?= htmlspecialchars((string) $d["opened_on"], ENT_QUOTES, "UTF-8") ?> ~ <?= htmlspecialchars((string) $d["planned_end_on"], ENT_QUOTES, "UTF-8") ?>
+								<?php if ($gap !== null && $gap["overdue"]): ?>
+								<br><span class="badge badge-light-danger fs-9"><?= (int) $gap["gap_days"] ?>일 지연</span>
+								<?php elseif ($gap !== null && $gap["gap_days"] > 0): ?>
+								<br><span class="badge badge-light-secondary fs-9"><?= (int) $gap["gap_days"] ?>일 경과</span>
+								<?php endif; ?>
+								<?php elseif ($dk === "lease"): ?>
 								<span class="badge badge-light-warning fs-9">종료일 미설정 · 자동차감 안됨</span>
 								<?php else: ?>
 								—
 								<?php endif; ?>
 							</td>
-							<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) ($d['due_updated_on'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td><span class="badge badge-light-<?= $d['status'] === 'active' ? 'success' : ($d['status'] === 'closed' ? 'dark' : 'warning') ?> fs-8"><?= htmlspecialchars($statusLabel[$d['status']] ?? $d['status'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="text-end text-nowrap">
 								<?php if ($canWrite && $d['status'] === 'active'): ?>

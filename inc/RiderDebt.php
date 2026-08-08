@@ -32,6 +32,15 @@ final class RiderDebt
     /** 잔액이 상각(감소)되는 종류. 리스는 반복 부과라 잔액이 줄지 않음 */
     private const AMORTIZING = ['loan', 'advance'];
 
+    /**
+     * 리스 차감 공백 경고 기준일수. 이 시스템엔 매일 도는 배치가 없어 리스 차감은
+     * 정산 반영(엑셀 업로드) 시점에만 일어난다 — 그 사이 업로드가 뜸하면 계약기간은
+     * 흘러가는데 차감은 안 되는 공백이 생길 수 있어, 최근 차감일이 이 일수 이상
+     * 뒤처지면 "지연" 으로 표시한다. admin_debt_list.php 의 SQL 배너 카운트와 반드시
+     * 같은 값을 써야 하므로 상수를 참조해 쓴다(§LOGIC.md 2026-08-08).
+     */
+    public const GAP_WARNING_DAYS = 7;
+
     public static function tableReady(): bool
     {
         return db_table_exists('rider_debts') && db_table_exists('rider_debt_entries');
@@ -371,6 +380,51 @@ final class RiderDebt
             }
             throw $e;
         }
+    }
+
+    /**
+     * 리스 차감 공백 상태 — 계약기간은 흐르는데 정산 반영이 뜸해서 차감이 밀린 경우를
+     * 관리자·라이더 화면에 동일하게 보여주기 위한 공용 계산. 실제 차감은 여전히
+     * applyLeaseForPeriod()(정산 반영 시점)에서만 일어나며, 이 메서드는 판단만 한다.
+     *
+     * @param array<string,mixed> $debt rider_debts 행(kind 무관하게 넘겨도 안전)
+     * @return array{missing_end_date: bool, overdue: bool, gap_days: int}|null
+     *         active 상태의 리스가 아니면 null(대여금/선지급/비활성/완료는 해당 없음)
+     */
+    public static function leaseAccrualGap(array $debt, ?string $today = null): ?array
+    {
+        if ((string) ($debt['kind'] ?? '') !== 'lease' || (string) ($debt['status'] ?? '') !== 'active') {
+            return null;
+        }
+        $today      = self::normDate($today) ?? date('Y-m-d');
+        $opened     = self::normDate($debt['opened_on'] ?? null);
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+
+        if ($opened === null || $plannedEnd === null) {
+            return ['missing_end_date' => true, 'overdue' => false, 'gap_days' => 0];
+        }
+        if ($opened > $today) {
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0]; // 계약 시작 전
+        }
+
+        $coverageEnd = min($today, $plannedEnd); // 오늘 또는 계약 종료일 중 이른 쪽까지는 반영돼 있어야 함
+        $lastCovered = self::normDate($debt['due_updated_on'] ?? null) ?? self::addDays($opened, -1);
+        if ($lastCovered >= $coverageEnd) {
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0];
+        }
+
+        $gapDays = (int) (new DateTime($lastCovered))->diff(new DateTime($coverageEnd))->days;
+
+        return [
+            'missing_end_date' => false,
+            'overdue'          => $gapDays >= self::GAP_WARNING_DAYS,
+            'gap_days'         => $gapDays,
+        ];
+    }
+
+    private static function addDays(string $date, int $days): string
+    {
+        return (new DateTime($date))->modify(($days >= 0 ? '+' : '') . $days . ' days')->format('Y-m-d');
     }
 
     private static function normDate(mixed $v): ?string
