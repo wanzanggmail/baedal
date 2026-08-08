@@ -191,7 +191,7 @@ PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_f
 정산 반영 시 해당 `applied_date`의 항목이 자동으로 `settlement_fee_items`에 합산됨.
 
 ### `rider_debts` — 🆕(2026-07-24) 라이더 부채 원장(대여금/리스/선지급)
-PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일) · `planned_end_on`(🆕 2026-07-30, 계약 종료 예정일 — 리스 전용. `opened_on`과 함께 계약기간을 이뤄 자동 일수계산의 기준이 됨). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
+PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일) · `planned_end_on`(2026-07-30 컬럼 추가, 2026-08-08 등록/수정 화면·API에 실제로 연결 — 그 전엔 컬럼만 있고 입력할 곳이 없어 리스 자동계산이 항상 스킵되는 상태였음. 계약 종료 예정일 — 리스 전용. `opened_on`과 함께 계약기간을 이뤄 자동 일수계산의 기준이 됨). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
 
 ### `rider_debt_entries` — 🆕(2026-07-24) 부채 차감 이력
 차감 1회 = 1행. `applied_date`(차감 귀속일) · `days`(차감일수) · `amount`(차감액=일납×일수 또는 수동) · `balance_after`(차감후잔액) · `deduction_entry_id`(생성한 `deduction_entries` 연결). **핵심 연동**: 차감 실행 시 `deduction_entries` 행을 만들어 기존 `SettlementLedger::buildFeeItems` 흐름이 그대로 차감(중복 로직 없음). 이력 취소 시 연결된 `deduction_entries`도 삭제되고 상각형 잔액이 복구됨.

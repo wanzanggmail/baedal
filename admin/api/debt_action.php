@@ -92,6 +92,7 @@ try {
             'daily_amount'     => (int) ($body['daily_amount'] ?? 0),
             'creditor'         => (string) ($body['creditor'] ?? ''),
             'opened_on'        => (string) ($body['opened_on'] ?? ''),
+            'planned_end_on'   => (string) ($body['planned_end_on'] ?? ''),
             'note'             => (string) ($body['note'] ?? ''),
         ]);
         AuditLog::record('rider.debt.create', (string) $rider['rider_code'], RiderDebt::kindLabel((string) $body['kind']) . ' 등록 #' . $id);
@@ -109,7 +110,7 @@ try {
 
     if ($action === 'update') {
         $fields = array_intersect_key($body, array_flip([
-            'title', 'daily_amount', 'creditor', 'note', 'opened_on', 'status', 'balance_amount', 'principal_amount',
+            'title', 'daily_amount', 'creditor', 'note', 'opened_on', 'planned_end_on', 'status', 'balance_amount', 'principal_amount',
         ]));
         RiderDebt::update($debtId, $fields);
         AuditLog::record('rider.debt.update', (string) $rider['rider_code'], '미수금 #' . $debtId . ' 수정');

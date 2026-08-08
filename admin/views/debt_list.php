@@ -14,7 +14,7 @@ $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $filterQ      = trim((string) ($_GET['q']      ?? ''));
 
 $rows = [];
-$kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0];
+$kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0];
 
 if (!$needsMigrate) {
     [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
@@ -53,16 +53,18 @@ if (!$needsMigrate) {
             SUM(CASE WHEN d.status = 'active' THEN 1 ELSE 0 END) AS active_cnt,
             SUM(CASE WHEN d.status = 'active' AND d.kind IN ('loan','advance') THEN d.balance_amount ELSE 0 END) AS balance_sum,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' THEN d.daily_amount ELSE 0 END) AS lease_daily,
-            SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt
+            SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt,
+            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND (d.opened_on IS NULL OR d.planned_end_on IS NULL) THEN 1 ELSE 0 END) AS lease_no_end
            FROM rider_debts d INNER JOIN riders r ON r.id = d.rider_id
           WHERE 1=1 {$kWhere}",
         $scopeParams
     ) ?: [];
     $kpi = [
-        'active'      => (int) ($k['active_cnt']  ?? 0),
-        'balance'     => (int) ($k['balance_sum'] ?? 0),
-        'lease_daily' => (int) ($k['lease_daily'] ?? 0),
-        'closed'      => (int) ($k['closed_cnt']  ?? 0),
+        'active'       => (int) ($k['active_cnt']  ?? 0),
+        'balance'      => (int) ($k['balance_sum'] ?? 0),
+        'lease_daily'  => (int) ($k['lease_daily'] ?? 0),
+        'closed'       => (int) ($k['closed_cnt']  ?? 0),
+        'lease_no_end' => (int) ($k['lease_no_end'] ?? 0),
     ];
 }
 
@@ -78,7 +80,7 @@ $currentUrl = admin_url('deduction/debts');
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
 	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
-			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">대여금 · 리스 원장</h1>
+				<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">미수금 원장</h1>
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
@@ -102,6 +104,17 @@ $currentUrl = admin_url('deduction/debts');
 	<?php else: ?>
 
 	<div id="debt_toast" class="alert alert-dismissible d-none mb-6"><span id="debt_toast_msg"></span></div>
+
+	<?php if ($kpi['lease_no_end'] > 0) : ?>
+	<div class="alert alert-warning d-flex align-items-center p-5 mb-6">
+		<i class="ki-duotone ki-information-5 fs-2hx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+		<div>
+			<strong><?= number_format($kpi['lease_no_end']) ?>건</strong>의 진행 중 리스/렌탈에 개시일 또는 계약 종료 예정일이 없습니다.
+			계약기간이 없으면 정산 반영 시 <strong>자동 차감이 되지 않으며</strong>, 「차감」 버튼으로 직접 차감해야 합니다.
+			아래 목록의 「계약기간(리스)」 열에서 확인 후 수정 버튼으로 채워 주세요.
+		</div>
+	</div>
+	<?php endif; ?>
 
 	<!--begin::KPI-->
 	<div class="row g-5 g-xl-8 mb-8">
@@ -190,6 +203,7 @@ $currentUrl = admin_url('deduction/debts');
 							<th class="text-end min-w-90px">남은 잔액</th>
 							<th class="text-end min-w-80px">일납</th>
 							<th class="min-w-90px">채권자</th>
+							<th class="min-w-140px">계약기간(리스)</th>
 							<th class="min-w-90px">미납갱신</th>
 							<th class="min-w-80px">상태</th>
 							<th class="text-end min-w-140px">관리</th>
@@ -213,6 +227,15 @@ $currentUrl = admin_url('deduction/debts');
 							<td class="text-end fw-bold <?= $isAmort && (int) $d['balance_amount'] > 0 ? 'text-danger' : 'text-gray-500' ?>"><?= $isAmort ? $won($d['balance_amount']) : '—' ?></td>
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $won($d['daily_amount']) : '—' ?></td>
 							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-600 fs-8">
+								<?php if ($dk === 'lease' && (string) ($d['opened_on'] ?? '') !== '' && (string) ($d['planned_end_on'] ?? '') !== ''): ?>
+								<?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?>
+								<?php elseif ($dk === 'lease'): ?>
+								<span class="badge badge-light-warning fs-9">종료일 미설정 · 자동차감 안됨</span>
+								<?php else: ?>
+								—
+								<?php endif; ?>
+							</td>
 							<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) ($d['due_updated_on'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td><span class="badge badge-light-<?= $d['status'] === 'active' ? 'success' : ($d['status'] === 'closed' ? 'dark' : 'warning') ?> fs-8"><?= htmlspecialchars($statusLabel[$d['status']] ?? $d['status'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="text-end text-nowrap">
@@ -227,7 +250,8 @@ $currentUrl = admin_url('deduction/debts');
 									data-id="<?= (int) $d['id'] ?>" data-title="<?= htmlspecialchars((string) $d['title'], ENT_QUOTES, 'UTF-8') ?>"
 									data-daily="<?= (int) $d['daily_amount'] ?>" data-creditor="<?= htmlspecialchars((string) $d['creditor'], ENT_QUOTES, 'UTF-8') ?>"
 									data-balance="<?= (int) $d['balance_amount'] ?>" data-status="<?= htmlspecialchars((string) $d['status'], ENT_QUOTES, 'UTF-8') ?>"
-									data-amort="<?= $isAmort ? 1 : 0 ?>" title="수정">
+									data-amort="<?= $isAmort ? 1 : 0 ?>" data-kind="<?= htmlspecialchars($dk, ENT_QUOTES, 'UTF-8') ?>"
+									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" title="수정">
 									<i class="ki-duotone ki-pencil fs-5"><span class="path1"></span><span class="path2"></span></i>
 								</button>
 								<?php endif; ?>
@@ -239,7 +263,12 @@ $currentUrl = admin_url('deduction/debts');
 				</table>
 			</div>
 			<?php endif; ?>
-			<div class="text-muted fs-8 mt-3">차감을 실행하면 해당 귀속일의 정산 반영 시 자동으로 차감됩니다. 리스/렌탈은 일납×일수만큼 매 정산 부과되며 잔액은 줄지 않습니다. 차감 이력·취소는 라이더 상세의 「미수금」 카드에서 확인합니다.</div>
+			<div class="text-muted fs-8 mt-3">
+				모든 차감은 <strong>정산 엑셀을 업로드·반영할 때</strong> 처리됩니다 — 매일 자동으로 도는 별도 배치는 없습니다.
+				리스/렌탈은 개시일~계약 종료 예정일이 설정되어 있으면, 업로드된 정산기간과 겹치는 일수만큼 자동 계산되어 차감됩니다(같은 기간 재업로드해도 중복 차감되지 않습니다).
+				대여금·선지급금은 자동 계산이 없어 「차감」 버튼으로 직접 실행해야 합니다.
+				차감 이력·취소는 라이더 상세의 「미수금」 카드에서 확인합니다.
+			</div>
 		</div>
 	</div>
 
@@ -290,6 +319,11 @@ $currentUrl = admin_url('deduction/debts');
 					<div class="col-md-6">
 						<label class="form-label fs-7 fw-semibold">개시일/출고일</label>
 						<input type="date" class="form-control form-control-sm form-control-solid" id="dn_opened" />
+					</div>
+					<div class="col-md-6 d-none" id="dn_planned_end_wrap">
+						<label class="form-label fs-7 fw-semibold">계약 종료 예정일</label>
+						<input type="date" class="form-control form-control-sm form-control-solid" id="dn_planned_end" />
+						<div class="form-text fs-8">개시일과 함께 계약기간을 이뤄, 정산 반영 시 이 기간과 겹치는 일수만큼 자동 차감됩니다. 비워두면 자동 차감이 되지 않아 수동으로 차감해야 합니다.</div>
 					</div>
 					<div class="col-12">
 						<label class="form-label fs-7 fw-semibold">메모</label>
@@ -355,6 +389,10 @@ $currentUrl = admin_url('deduction/debts');
 						<label class="form-label fs-7 fw-semibold">남은 잔액 보정</label>
 						<input type="number" class="form-control form-control-sm form-control-solid" id="de_balance" min="0" step="1000" />
 					</div>
+					<div class="col-md-6" id="de_planned_end_wrap">
+						<label class="form-label fs-7 fw-semibold">계약 종료 예정일(리스)</label>
+						<input type="date" class="form-control form-control-sm form-control-solid" id="de_planned_end" />
+					</div>
 					<div class="col-md-6">
 						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
 						<input type="text" class="form-control form-control-sm form-control-solid" id="de_creditor" maxlength="120" />
@@ -396,11 +434,15 @@ $currentUrl = admin_url('deduction/debts');
 
 		// ── 등록 ──
 		var kindEl = document.getElementById('dn_kind');
-		function syncPrincipal() { document.getElementById('dn_principal_wrap').style.display = (kindEl.value === 'lease') ? 'none' : ''; }
+		function syncPrincipal() {
+			var isLease = (kindEl.value === 'lease');
+			document.getElementById('dn_principal_wrap').style.display = isLease ? 'none' : '';
+			document.getElementById('dn_planned_end_wrap').classList.toggle('d-none', !isLease);
+		}
 		kindEl.addEventListener('change', syncPrincipal);
 
 		document.getElementById('btn_debt_new').addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_note', 'dn_rider_q', 'dn_rider_id'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_q', 'dn_rider_id'].forEach(function (i) { document.getElementById(i).value = ''; });
 			document.getElementById('dn_rider_picked').textContent = '';
 			document.getElementById('dn_rider_sel').classList.add('d-none');
 			kindEl.value = 'loan'; syncPrincipal();
@@ -438,6 +480,7 @@ $currentUrl = admin_url('deduction/debts');
 				daily_amount: Number(document.getElementById('dn_daily').value) || 0,
 				creditor: document.getElementById('dn_creditor').value.trim(),
 				opened_on: document.getElementById('dn_opened').value,
+				planned_end_on: document.getElementById('dn_planned_end').value,
 				note: document.getElementById('dn_note').value.trim()
 			}).then(function (d) {
 				if (d.ok) { location.reload(); } else { setAlert('debt_new_alert', d.message || '오류'); btn.disabled = false; }
@@ -491,6 +534,8 @@ $currentUrl = admin_url('deduction/debts');
 				document.getElementById('de_status').value = b.dataset.status || 'active';
 				document.getElementById('de_balance').value = b.dataset.balance || 0;
 				document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
+				document.getElementById('de_planned_end').value = b.dataset.plannedEnd || '';
+				document.getElementById('de_planned_end_wrap').classList.toggle('d-none', b.dataset.kind !== 'lease');
 				document.getElementById('debt_edit_alert').className = 'd-none';
 				modal('kt_debt_edit_modal').show();
 			});
@@ -506,6 +551,9 @@ $currentUrl = admin_url('deduction/debts');
 			};
 			if (document.getElementById('de_balance_wrap').style.display !== 'none') {
 				payload.balance_amount = Number(document.getElementById('de_balance').value) || 0;
+			}
+			if (!document.getElementById('de_planned_end_wrap').classList.contains('d-none')) {
+				payload.planned_end_on = document.getElementById('de_planned_end').value;
 			}
 			post(payload).then(function (d) {
 				if (d.ok) { location.reload(); } else { setAlert('debt_edit_alert', d.message || '오류'); btn.disabled = false; }

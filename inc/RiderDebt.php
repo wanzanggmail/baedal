@@ -115,11 +115,17 @@ final class RiderDebt
         // 리스는 원금 개념이 없어 잔액 0에서 시작, 대여금/선지급은 잔액=원금
         $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
 
+        $openedOn  = self::normDate($in['opened_on'] ?? null);
+        $plannedEnd = $kind === 'lease' ? self::normDate($in['planned_end_on'] ?? null) : null;
+        if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
+            throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
+        }
+
         return db_insert(
             'INSERT INTO rider_debts
                 (rider_id, kind, title, principal_amount, balance_amount, daily_amount,
-                 creditor, status, opened_on, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 creditor, status, opened_on, planned_end_on, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderId,
                 $kind,
@@ -129,7 +135,8 @@ final class RiderDebt
                 $daily,
                 trim((string) ($in['creditor'] ?? '')),
                 'active',
-                self::normDate($in['opened_on'] ?? null),
+                $openedOn,
+                $plannedEnd,
                 trim((string) ($in['note'] ?? '')),
             ]
         );
@@ -153,6 +160,15 @@ final class RiderDebt
         if (array_key_exists('creditor', $in)) { $sets[] = 'creditor = ?'; $params[] = trim((string) $in['creditor']); }
         if (array_key_exists('note', $in))     { $sets[] = 'note = ?';     $params[] = trim((string) $in['note']); }
         if (array_key_exists('opened_on', $in)){ $sets[] = 'opened_on = ?';$params[] = self::normDate($in['opened_on']); }
+        if (array_key_exists('planned_end_on', $in) && (string) $debt['kind'] === 'lease') {
+            $plannedEnd = self::normDate($in['planned_end_on']);
+            $openedOn   = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
+            if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
+                throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
+            }
+            $sets[]   = 'planned_end_on = ?';
+            $params[] = $plannedEnd;
+        }
         if (array_key_exists('status', $in)) {
             $status = (string) $in['status'];
             if (!in_array($status, ['active', 'paused', 'closed'], true)) {
