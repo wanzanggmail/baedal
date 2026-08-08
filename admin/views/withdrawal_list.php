@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/Withdrawal.php';
+require_once INC_PATH . '/FirmBankingGateway.php';
 
 $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $filterKind   = trim((string) ($_GET['kind'] ?? ''));
@@ -126,6 +127,7 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 						<option value="pending"<?= $filterStatus === 'pending' ? ' selected' : '' ?>>대기</option>
 						<option value="downloaded"<?= $filterStatus === 'downloaded' ? ' selected' : '' ?>>다운로드 완료</option>
 						<option value="completed"<?= $filterStatus === 'completed' ? ' selected' : '' ?>>처리 완료</option>
+						<option value="failed"<?= $filterStatus === 'failed' ? ' selected' : '' ?>>이체 실패</option>
 						<option value="rejected"<?= $filterStatus === 'rejected' ? ' selected' : '' ?>>반려</option>
 					</select>
 				</div>
@@ -148,21 +150,42 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 		</div>
 	</div>
 
+	<?php if (FirmBankingGatewayFactory::isMock()) : ?>
+	<div class="alert alert-warning d-flex align-items-center p-5 mb-6">
+		<i class="ki-duotone ki-information-5 fs-2hx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+		<div class="fs-7">
+			<strong>펌뱅킹 모의 모드</strong> — 쿠콘·하이픈 실 API가 아직 연동되지 않아
+			「출금 확정」을 눌러도 <strong>실제 송금은 일어나지 않습니다</strong>(시스템 상태만 완료로 바뀝니다).
+			실 연동 후에는 이 문구가 사라지고 진짜 이체가 실행됩니다.
+		</div>
+	</div>
+	<?php endif; ?>
+
 	<div id="wd_action_alert" class="alert d-none mb-6" role="alert"></div>
 
 	<div class="card card-flush">
 		<div class="card-header align-items-center py-5 gap-2 gap-md-5">
 			<div class="card-title">
 				<h3 class="fw-bold m-0">신청 내역</h3>
-				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">대기 → 은행 파일 다운로드 → 다운로드 완료 → 입금 완료</span>
+				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">
+					대기 → <strong>출금 확정(펌뱅킹 즉시 이체)</strong> → 처리 완료
+					<span class="text-gray-400">· 백업: 은행 파일 다운로드 → 입금 완료</span>
+				</span>
 			</div>
 			<div class="card-toolbar gap-2 flex-wrap justify-content-end">
+				<button type="button" class="btn btn-sm btn-primary" id="wd_bulk_transfer_selected">
+					<i class="ki-duotone ki-send fs-5"><span class="path1"></span><span class="path2"></span></i>
+					선택 출금 확정
+				</button>
+				<button type="button" class="btn btn-sm btn-light-primary" id="wd_bulk_transfer_all">
+					대기 전체 출금 확정
+				</button>
+				<span class="border-start mx-1"></span>
 				<button type="button" class="btn btn-sm btn-light-success" id="wd_bulk_complete_selected">
 					<i class="ki-duotone ki-check fs-5"><span class="path1"></span><span class="path2"></span></i>
 					선택 입금 완료
 				</button>
-				<button type="button" class="btn btn-sm btn-success" id="wd_bulk_complete_all">
-					<i class="ki-duotone ki-check-circle fs-5"><span class="path1"></span><span class="path2"></span></i>
+				<button type="button" class="btn btn-sm btn-light" id="wd_bulk_complete_all">
 					다운로드 완료 일괄 입금
 				</button>
 			</div>
@@ -201,11 +224,16 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 							<?= $row['tip'] !== '' ? ' title="' . htmlspecialchars($row['tip'], ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
 							<td class="ps-0">
 								<div class="form-check form-check-sm form-check-custom form-check-solid me-1">
-									<input class="form-check-input wd-bulk-pick <?= $row['status'] === 'downloaded' ? '' : 'd-none' ?>"
-										type="checkbox"
-										value="<?= (int) $row['db_id'] ?>"
-										aria-label="선택"
-										<?= $row['status'] !== 'downloaded' ? 'disabled' : '' ?> />
+								<?php
+								// 이체 가능(대기·다운로드완료·이체실패) 건은 모두 선택 가능.
+								// 각 일괄 버튼이 자기가 처리할 수 있는 상태만 다시 걸러낸다.
+								$wdSelectable = in_array($row['status'], ['pending', 'downloaded', 'failed'], true);
+								?>
+								<input class="form-check-input wd-bulk-pick <?= $wdSelectable ? '' : 'd-none' ?>"
+									type="checkbox"
+									value="<?= (int) $row['db_id'] ?>"
+									aria-label="선택"
+									<?= $wdSelectable ? '' : 'disabled' ?> />
 								</div>
 							</td>
 							<td class="text-gray-800 fw-semibold"><?= htmlspecialchars($row['id'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -230,13 +258,21 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 								<span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>">
 									<?= htmlspecialchars($row['status_label'], ENT_QUOTES, 'UTF-8') ?>
 								</span>
+								<?php $wdReason = $row['status'] === 'rejected' ? $row['rejected_reason'] : $row['fail_reason']; ?>
+								<?php if ($wdReason !== '') : ?>
+								<div class="text-danger fs-8 mt-1" style="max-width:200px;"><?= htmlspecialchars($wdReason, ENT_QUOTES, 'UTF-8') ?></div>
+								<?php endif; ?>
 							</td>
-							<td class="text-end">
+							<td class="text-end text-nowrap">
+								<?php if ($wdSelectable) : ?>
+								<button type="button" class="btn btn-sm btn-primary" data-wd-transfer-btn>
+									<?= $row['status'] === 'failed' ? '재시도' : '출금 확정' ?>
+								</button>
+								<?php endif; ?>
 								<?php if ($row['status'] === 'downloaded') : ?>
 								<button type="button" class="btn btn-sm btn-light-success" data-wd-complete-btn>입금 완료</button>
-								<?php elseif ($row['status'] === 'pending') : ?>
-								<a href="<?= htmlspecialchars(admin_url('withdrawal/download'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">다운로드</a>
-								<?php else : ?>
+								<?php endif; ?>
+								<?php if (!$wdSelectable) : ?>
 								<span class="text-muted fs-7">—</span>
 								<?php endif; ?>
 							</td>
@@ -275,15 +311,44 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 			});
 		}
 
-		function collectDownloadedIds(onlyChecked) {
+		/** 지정한 상태들에 해당하는 행의 id 수집. onlyChecked=true면 체크된 것만. */
+		function collectIds(statuses, onlyChecked) {
 			var ids = [];
 			document.querySelectorAll('#wd_table tbody tr[data-wd-db-id]').forEach(function (tr) {
-				if (tr.getAttribute('data-wd-status') !== 'downloaded') return;
+				if (statuses.indexOf(tr.getAttribute('data-wd-status')) === -1) return;
 				var cb = tr.querySelector('.wd-bulk-pick');
 				if (onlyChecked && (!cb || !cb.checked)) return;
 				ids.push(parseInt(tr.getAttribute('data-wd-db-id'), 10));
 			});
 			return ids;
+		}
+
+		var TRANSFERABLE = ['pending', 'downloaded', 'failed'];
+
+		function collectDownloadedIds(onlyChecked) {
+			return collectIds(['downloaded'], onlyChecked);
+		}
+
+		/** 「출금 확정」 — 펌뱅킹 건별 즉시 이체. 실패해도 나머지는 계속 진행된다. */
+		function transferIds(ids) {
+			if (!ids.length) {
+				window.alert('이체할 건을 선택하세요. (대기 · 다운로드 완료 · 이체 실패 상태만 가능)');
+				return;
+			}
+			if (!window.confirm(
+				ids.length + '건을 지금 이체할까요?\n\n'
+				+ '실제 송금이 실행되며 되돌릴 수 없습니다.\n'
+				+ '중간에 실패한 건이 있어도 나머지는 계속 이체되고, 성공한 건만 완료 처리됩니다.'
+			)) return;
+
+			apiPost({ action: 'execute_transfer', ids: ids })
+				.then(function (j) {
+					showAlert(j.message || '이체했습니다.', j.failed > 0 ? 'warning' : 'success');
+					setTimeout(function () { window.location.reload(); }, 1200);
+				})
+				.catch(function (e) {
+					showAlert(e.message || String(e), 'danger');
+				});
 		}
 
 		function completeIds(ids) {
@@ -317,12 +382,26 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 			completeIds(collectDownloadedIds(true));
 		});
 
+		document.getElementById('wd_bulk_transfer_all').addEventListener('click', function () {
+			transferIds(collectIds(TRANSFERABLE, false));
+		});
+
+		document.getElementById('wd_bulk_transfer_selected').addEventListener('click', function () {
+			transferIds(collectIds(TRANSFERABLE, true));
+		});
+
 		document.getElementById('wd_table').addEventListener('click', function (ev) {
-			var btn = ev.target.closest('[data-wd-complete-btn]');
-			if (!btn) return;
-			var tr = btn.closest('tr[data-wd-db-id]');
+			var tr = ev.target.closest('tr[data-wd-db-id]');
 			if (!tr) return;
-			completeIds([parseInt(tr.getAttribute('data-wd-db-id'), 10)]);
+			var id = parseInt(tr.getAttribute('data-wd-db-id'), 10);
+
+			if (ev.target.closest('[data-wd-transfer-btn]')) {
+				transferIds([id]);
+				return;
+			}
+			if (ev.target.closest('[data-wd-complete-btn]')) {
+				completeIds([id]);
+			}
 		});
 	})();
 	</script>

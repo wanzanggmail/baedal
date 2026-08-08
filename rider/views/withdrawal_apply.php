@@ -156,6 +156,18 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 		<p class="text-muted fs-8 mt-3 mb-0">
 			처리 중인 출금 신청이 있습니다. <a href="<?= htmlspecialchars(rider_url('withdrawal/history'), ENT_QUOTES, 'UTF-8') ?>">내역 확인</a>
 		</p>
+		<?php elseif (!$canApply && (bool) ($preview['blocked_by_policy'] ?? false)) : ?>
+		<?php // 출금은 정산 건 단위로만 나가므로, 출금가능액(잔액−보증금)이 다음 정산 건보다
+		      // 적으면 이번 회차엔 신청할 수 없다. 정산이 더 쌓이면 자동으로 풀린다. ?>
+		<div class="alert bg-light-warning fs-8 mt-3 mb-0">
+			출금은 <strong>정산 건 단위</strong>로 나가고 보증금 ₩ <?= number_format((int) ($preview['reserve_amount'] ?? 0)) ?>은 지갑에 남겨둡니다.
+			<?php $sf = (int) ($preview['blocked_shortfall'] ?? 0); ?>
+			<?php if ($sf > 0) : ?>
+			지금은 다음 정산 건을 통째로 출금하기에 <strong>₩ <?= number_format($sf) ?></strong>이 부족합니다 — 정산이 그만큼 더 쌓이면 신청할 수 있습니다.
+			<?php else : ?>
+			지금은 다음 정산 건을 통째로 출금할 만큼 잔액이 쌓이지 않았습니다. 정산이 더 반영되면 신청할 수 있습니다.
+			<?php endif; ?>
+		</div>
 		<?php elseif (!$canApply && $flashOk === '') : ?>
 		<p class="text-muted fs-8 mt-3 mb-0">출금 가능 금액이 없거나 계좌·상태를 확인해 주세요.</p>
 		<?php endif; ?>

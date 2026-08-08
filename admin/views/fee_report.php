@@ -181,7 +181,9 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 			라이더별 공제를 <strong>발생 시점 2가지</strong>로 나눠 집계합니다 —
 			<strong>출금 시점</strong>(정산수수료, 출금 신청일 기준)과 <strong>정산 반영 시점</strong>(대행수수료·원천세·보험료, 정산일 기준).
 			<span class="d-block mt-1 text-gray-700">
-				⚠️ <strong>미수금(대여금·리스·선지급)</strong>은 수수료가 아니라 <strong>원금 상환 차감</strong>이라 수수료 합계와 분리해 표시합니다(현재 미수금에 부과되는 수수료 항목은 없습니다).
+				⚠️ <strong>미수금(대여금·리스·선지급)</strong>은 수수료가 아니라 <strong>원금 상환 차감</strong>이라 수수료 합계와 분리해 표시합니다.
+				<br>리스는 걷은 금액을 본사·총판·대리점이 나눠 갖는데, 그 배분 실적은
+				<a href="<?= htmlspecialchars(admin_url('deduction/lease-fees'), ENT_QUOTES, 'UTF-8') ?>" class="fw-bold">「리스 수수료 배분」</a> 화면에서 봅니다.
 			</span>
 		</div>
 	</div>

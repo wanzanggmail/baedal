@@ -114,6 +114,29 @@ if ($method === 'POST') {
             exit;
         }
 
+        // 「출금 확정」 — 펌뱅킹으로 건별 즉시 이체. 실패해도 멈추지 않고 다음 건을 계속하며,
+        // 실제로 이체된 건만 완료 처리된다(LOGIC §5.4).
+        if ($action === 'execute_transfer') {
+            $r = Withdrawal::executeTransfers($ids);
+            if ($r['completed'] === 0 && $r['failed'] === 0) {
+                $err('이체할 수 있는 건이 없습니다. (대기·다운로드 완료·이체 실패 상태만 가능)');
+            }
+
+            $msg = "{$r['completed']}건 이체 완료";
+            if ($r['failed'] > 0) {
+                $msg .= " · {$r['failed']}건 실패(재시도 가능)";
+            }
+            AuditLog::record('withdrawal.transfer', implode(',', $ids), $msg);
+            echo json_encode([
+                'ok'        => true,
+                'completed' => $r['completed'],
+                'failed'    => $r['failed'],
+                'results'   => $r['results'],
+                'message'   => $msg,
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
         if ($action === 'reject') {
             $reason = trim((string) ($body['reason'] ?? ''));
             $n      = Withdrawal::markRejected($ids, $reason);

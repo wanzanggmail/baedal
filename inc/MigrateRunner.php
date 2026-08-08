@@ -54,6 +54,7 @@ final class MigrateRunner
         self::migratePlatformFeeSplit();
         self::migrateAdminManagerRole();
         self::migratePgPaymentFeeSplit();
+        self::migrateLeaseProviderAndVin();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1136,6 +1137,62 @@ final class MigrateRunner
      * 이전엔 분배 비율(org_fee_config)이 바뀌면 과거 결제건의 "몫"도 재계산돼
      * 실제 그 시점에 나눈 금액과 달라지는 문제가 있었다 — 결제 시점 요율·금액을 그대로 저장한다.
      */
+    /**
+     * 리스 제공주체·차대번호·수수료 배분(일 단위 정액) — 2026-08-08.
+     *
+     * 리스를 누가 제공하느냐(본사/총판/대리점)에 따라 걷은 리스료를 나눠 갖는 구조.
+     * 배분액은 **일 단위 정액(원)**으로 계약 건마다 직접 입력하며, 합계는 일납을 넘을 수 없다.
+     * 오토바이 리스라 차대번호(VIN)도 함께 보관한다.
+     */
+    private static function migrateLeaseProviderAndVin(): void
+    {
+        echo "== 리스 제공주체·차대번호·수수료 배분 ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM rider_debts'), 'Field');
+        $adds = [];
+        if (!in_array('lease_provider', $cols, true)) {
+            $adds[] = "ADD COLUMN lease_provider ENUM('hq','distributor','agency') NULL COMMENT '리스 제공 주체(리스 전용)'";
+        }
+        if (!in_array('vin', $cols, true)) {
+            $adds[] = "ADD COLUMN vin VARCHAR(30) NOT NULL DEFAULT '' COMMENT '차대번호(오토바이 리스)'";
+        }
+        foreach (['fee_hq' => '본사', 'fee_distributor' => '총판', 'fee_agency' => '대리점'] as $c => $label) {
+            if (!in_array($c, $cols, true)) {
+                $adds[] = "ADD COLUMN {$c} INT NOT NULL DEFAULT 0 COMMENT '리스 수수료 {$label} 몫(일 단위, 원)'";
+            }
+        }
+
+        if ($adds === []) {
+            echo "SKIP  리스 배분 컬럼 (이미 있음)\n";
+        } else {
+            db_execute('ALTER TABLE rider_debts ' . implode(', ', $adds));
+            echo 'OK    rider_debts ' . count($adds) . "개 컬럼 추가\n";
+        }
+
+        // 차감 이력에도 그 시점 배분액 스냅샷을 남긴다(설정이 바뀌어도 과거 정산은 보존).
+        if (db_table_exists('rider_debt_entries')) {
+            $ecols = array_column(db_rows('SHOW COLUMNS FROM rider_debt_entries'), 'Field');
+            $eadds = [];
+            foreach (['fee_hq' => '본사', 'fee_distributor' => '총판', 'fee_agency' => '대리점'] as $c => $label) {
+                if (!in_array($c, $ecols, true)) {
+                    $eadds[] = "ADD COLUMN {$c} INT NOT NULL DEFAULT 0 COMMENT '이 차감 건의 {$label} 몫(원)'";
+                }
+            }
+            if ($eadds === []) {
+                echo "SKIP  rider_debt_entries 배분 컬럼 (이미 있음)\n";
+            } else {
+                db_execute('ALTER TABLE rider_debt_entries ' . implode(', ', $eadds));
+                echo 'OK    rider_debt_entries ' . count($eadds) . "개 컬럼 추가\n";
+            }
+        }
+    }
+
     private static function migratePgPaymentFeeSplit(): void
     {
         echo "== pg_payments 수수료 분배 스냅샷 ==\n";

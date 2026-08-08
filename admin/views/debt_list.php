@@ -236,7 +236,24 @@ $currentUrl = admin_url('deduction/debts');
 							</td>
 							<td>
 								<span class="badge badge-light-<?= $kindBadge[$dk] ?? 'secondary' ?> mb-1"><?= htmlspecialchars(RiderDebt::kindLabel($dk), ENT_QUOTES, 'UTF-8') ?></span>
+								<?php if ($dk === 'lease' && (string) ($d['lease_provider'] ?? '') !== '') : ?>
+								<span class="badge badge-light-dark fs-9 mb-1"><?= htmlspecialchars(RiderDebt::providerLabel((string) $d['lease_provider']), ENT_QUOTES, 'UTF-8') ?> 제공</span>
+								<?php endif; ?>
 								<div class="text-gray-800 fs-7"><?= htmlspecialchars((string) ($d['title'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></div>
+								<?php if ($dk === 'lease') : ?>
+								<?php if ((string) ($d['vin'] ?? '') !== '') : ?>
+								<div class="text-muted fs-8 font-monospace">VIN <?= htmlspecialchars((string) $d['vin'], ENT_QUOTES, 'UTF-8') ?></div>
+								<?php endif; ?>
+								<?php
+								$feeParts = [];
+								foreach (['fee_hq' => '본사', 'fee_distributor' => '총판', 'fee_agency' => '대리점'] as $fk => $fl) {
+								    if ((int) ($d[$fk] ?? 0) > 0) { $feeParts[] = $fl . ' ' . number_format((int) $d[$fk]); }
+								}
+								?>
+								<?php if ($feeParts !== []) : ?>
+								<div class="text-gray-600 fs-8">배분(일) <?= htmlspecialchars(implode(' · ', $feeParts), ENT_QUOTES, 'UTF-8') ?>원</div>
+								<?php endif; ?>
+								<?php endif; ?>
 							</td>
 							<td class="text-end text-gray-700"><?= $isAmort ? $won($d['principal_amount']) : '—' ?></td>
 							<td class="text-end fw-bold <?= $isAmort && (int) $d['balance_amount'] > 0 ? 'text-danger' : 'text-gray-500' ?>"><?= $isAmort ? $won($d['balance_amount']) : '—' ?></td>
@@ -271,7 +288,12 @@ $currentUrl = admin_url('deduction/debts');
 									data-daily="<?= (int) $d['daily_amount'] ?>" data-creditor="<?= htmlspecialchars((string) $d['creditor'], ENT_QUOTES, 'UTF-8') ?>"
 									data-balance="<?= (int) $d['balance_amount'] ?>" data-status="<?= htmlspecialchars((string) $d['status'], ENT_QUOTES, 'UTF-8') ?>"
 									data-amort="<?= $isAmort ? 1 : 0 ?>" data-kind="<?= htmlspecialchars($dk, ENT_QUOTES, 'UTF-8') ?>"
-									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" title="수정">
+									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+									data-provider="<?= htmlspecialchars((string) ($d['lease_provider'] ?? 'hq'), ENT_QUOTES, 'UTF-8') ?>"
+									data-vin="<?= htmlspecialchars((string) ($d['vin'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+									data-fee-hq="<?= (int) ($d['fee_hq'] ?? 0) ?>"
+									data-fee-dist="<?= (int) ($d['fee_distributor'] ?? 0) ?>"
+									data-fee-ag="<?= (int) ($d['fee_agency'] ?? 0) ?>" title="수정">
 									<i class="ki-duotone ki-pencil fs-5"><span class="path1"></span><span class="path2"></span></i>
 								</button>
 								<?php endif; ?>
@@ -345,6 +367,51 @@ $currentUrl = admin_url('deduction/debts');
 						<input type="date" class="form-control form-control-sm form-control-solid" id="dn_planned_end" />
 						<div class="form-text fs-8">개시일과 함께 계약기간을 이뤄, 정산 반영 시 이 기간과 겹치는 일수만큼 자동 차감됩니다. 비워두면 자동 차감이 되지 않아 수동으로 차감해야 합니다.</div>
 					</div>
+					<div class="col-12 d-none" id="dn_lease_wrap">
+						<div class="separator separator-dashed my-2"></div>
+						<div class="row g-4">
+							<div class="col-md-5">
+								<label class="form-label fs-7 fw-semibold required">리스 제공 주체</label>
+								<select class="form-select form-select-sm form-select-solid" id="dn_lease_provider">
+									<?php foreach (RiderDebt::LEASE_PROVIDERS as $pv => $pl) : ?>
+									<option value="<?= htmlspecialchars($pv, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($pl, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+								<div class="form-text fs-8">제공 주체와 그 하위 조직만 수수료를 나눠 갖습니다.</div>
+							</div>
+							<div class="col-md-7">
+								<label class="form-label fs-7 fw-semibold">차대번호(VIN)</label>
+								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="dn_vin" maxlength="30" placeholder="예: KMYJZ123456789012" />
+							</div>
+							<div class="col-12">
+								<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액 · 합계는 일납을 넘을 수 없음)</span></label>
+								<div class="row g-3">
+									<div class="col-md-4 d-none" id="dn_fee_hq_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">본사</span>
+											<input type="number" class="form-control form-control-solid dn-fee" id="dn_fee_hq" min="0" step="10" value="0" />
+											<span class="input-group-text">원</span>
+										</div>
+									</div>
+									<div class="col-md-4 d-none" id="dn_fee_dist_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">총판</span>
+											<input type="number" class="form-control form-control-solid dn-fee" id="dn_fee_distributor" min="0" step="10" value="0" />
+											<span class="input-group-text">원</span>
+										</div>
+									</div>
+									<div class="col-md-4" id="dn_fee_ag_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">대리점</span>
+											<input type="number" class="form-control form-control-solid dn-fee" id="dn_fee_agency" min="0" step="10" value="0" />
+											<span class="input-group-text">원</span>
+										</div>
+									</div>
+								</div>
+								<div class="form-text fs-8" id="dn_fee_hint"></div>
+							</div>
+						</div>
+					</div>
 					<div class="col-12">
 						<label class="form-label fs-7 fw-semibold">메모</label>
 						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_note" maxlength="255" />
@@ -413,6 +480,47 @@ $currentUrl = admin_url('deduction/debts');
 						<label class="form-label fs-7 fw-semibold">계약 종료 예정일(리스)</label>
 						<input type="date" class="form-control form-control-sm form-control-solid" id="de_planned_end" />
 					</div>
+					<div class="col-12 d-none" id="de_lease_wrap">
+						<div class="separator separator-dashed my-1"></div>
+						<div class="row g-4">
+							<div class="col-md-5">
+								<label class="form-label fs-7 fw-semibold">리스 제공 주체</label>
+								<select class="form-select form-select-sm form-select-solid" id="de_lease_provider">
+									<?php foreach (RiderDebt::LEASE_PROVIDERS as $pv => $pl) : ?>
+									<option value="<?= htmlspecialchars($pv, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($pl, ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+							<div class="col-md-7">
+								<label class="form-label fs-7 fw-semibold">차대번호(VIN)</label>
+								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="de_vin" maxlength="30" />
+							</div>
+							<div class="col-12">
+								<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액)</span></label>
+								<div class="row g-3">
+									<div class="col-md-4 d-none" id="de_fee_hq_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">본사</span>
+											<input type="number" class="form-control form-control-solid de-fee" id="de_fee_hq" min="0" step="10" value="0" />
+										</div>
+									</div>
+									<div class="col-md-4 d-none" id="de_fee_dist_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">총판</span>
+											<input type="number" class="form-control form-control-solid de-fee" id="de_fee_distributor" min="0" step="10" value="0" />
+										</div>
+									</div>
+									<div class="col-md-4" id="de_fee_ag_wrap">
+										<div class="input-group input-group-sm">
+											<span class="input-group-text">대리점</span>
+											<input type="number" class="form-control form-control-solid de-fee" id="de_fee_agency" min="0" step="10" value="0" />
+										</div>
+									</div>
+								</div>
+								<div class="form-text fs-8" id="de_fee_hint"></div>
+							</div>
+						</div>
+					</div>
 					<div class="col-md-6">
 						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
 						<input type="text" class="form-control form-control-sm form-control-solid" id="de_creditor" maxlength="120" />
@@ -454,15 +562,61 @@ $currentUrl = admin_url('deduction/debts');
 
 		// ── 등록 ──
 		var kindEl = document.getElementById('dn_kind');
+
+		/**
+		 * 제공 주체별로 배분 입력칸을 보였다/숨겼다 한다.
+		 * 숨긴 칸은 값을 0으로 리셋 — 안 그러면 화면엔 안 보이는데 값이 전송돼 혼란스럽다.
+		 * (서버도 같은 규칙으로 한 번 더 걸러내므로 화면을 우회해도 안전하다)
+		 */
+		function syncFeeFields(prefix) {
+			var provider = document.getElementById(prefix + '_lease_provider').value;
+			var showHq   = (provider === 'hq');
+			var showDist = (provider === 'hq' || provider === 'distributor');
+			document.getElementById(prefix + '_fee_hq_wrap').classList.toggle('d-none', !showHq);
+			document.getElementById(prefix + '_fee_dist_wrap').classList.toggle('d-none', !showDist);
+			if (!showHq)   { document.getElementById(prefix + '_fee_hq').value = 0; }
+			if (!showDist) { document.getElementById(prefix + '_fee_distributor').value = 0; }
+			syncFeeHint(prefix);
+		}
+
+		/** 배분 합계 vs 일납 안내 — 서버가 거부하기 전에 화면에서 먼저 알려준다. */
+		function syncFeeHint(prefix) {
+			var daily = Number(document.getElementById(prefix === 'dn' ? 'dn_daily' : 'de_daily').value) || 0;
+			var sum = ['_fee_hq', '_fee_distributor', '_fee_agency'].reduce(function (a, s) {
+				return a + (Number(document.getElementById(prefix + s).value) || 0);
+			}, 0);
+			var el = document.getElementById(prefix + '_fee_hint');
+			if (sum > daily) {
+				el.className = 'form-text fs-8 text-danger';
+				el.textContent = '배분 합계 ' + sum.toLocaleString() + '원이 일납 ' + daily.toLocaleString() + '원보다 큽니다. 저장할 수 없습니다.';
+			} else {
+				el.className = 'form-text fs-8 text-muted';
+				el.textContent = '배분 합계 ' + sum.toLocaleString() + '원 / 일납 ' + daily.toLocaleString() + '원'
+					+ (daily > 0 ? ' · 남는 ' + (daily - sum).toLocaleString() + '원은 리스사 등 외부 지급분' : '');
+			}
+		}
+
 		function syncPrincipal() {
 			var isLease = (kindEl.value === 'lease');
 			document.getElementById('dn_principal_wrap').style.display = isLease ? 'none' : '';
 			document.getElementById('dn_planned_end_wrap').classList.toggle('d-none', !isLease);
+			document.getElementById('dn_lease_wrap').classList.toggle('d-none', !isLease);
+			if (isLease) { syncFeeFields('dn'); }
 		}
 		kindEl.addEventListener('change', syncPrincipal);
+		document.getElementById('dn_lease_provider').addEventListener('change', function () { syncFeeFields('dn'); });
+		document.getElementById('de_lease_provider').addEventListener('change', function () { syncFeeFields('de'); });
+		['dn_daily', 'dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) {
+			document.getElementById(i).addEventListener('input', function () { syncFeeHint('dn'); });
+		});
+		['de_daily', 'de_fee_hq', 'de_fee_distributor', 'de_fee_agency'].forEach(function (i) {
+			document.getElementById(i).addEventListener('input', function () { syncFeeHint('de'); });
+		});
 
 		document.getElementById('btn_debt_new').addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_q', 'dn_rider_id'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_q', 'dn_rider_id', 'dn_vin'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) { document.getElementById(i).value = 0; });
+			document.getElementById('dn_lease_provider').value = 'hq';
 			document.getElementById('dn_rider_picked').textContent = '';
 			document.getElementById('dn_rider_sel').classList.add('d-none');
 			kindEl.value = 'loan'; syncPrincipal();
@@ -501,6 +655,11 @@ $currentUrl = admin_url('deduction/debts');
 				creditor: document.getElementById('dn_creditor').value.trim(),
 				opened_on: document.getElementById('dn_opened').value,
 				planned_end_on: document.getElementById('dn_planned_end').value,
+				lease_provider: document.getElementById('dn_lease_provider').value,
+				vin: document.getElementById('dn_vin').value.trim(),
+				fee_hq: Number(document.getElementById('dn_fee_hq').value) || 0,
+				fee_distributor: Number(document.getElementById('dn_fee_distributor').value) || 0,
+				fee_agency: Number(document.getElementById('dn_fee_agency').value) || 0,
 				note: document.getElementById('dn_note').value.trim()
 			}).then(function (d) {
 				if (d.ok) { location.reload(); } else { setAlert('debt_new_alert', d.message || '오류'); btn.disabled = false; }
@@ -555,7 +714,17 @@ $currentUrl = admin_url('deduction/debts');
 				document.getElementById('de_balance').value = b.dataset.balance || 0;
 				document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
 				document.getElementById('de_planned_end').value = b.dataset.plannedEnd || '';
-				document.getElementById('de_planned_end_wrap').classList.toggle('d-none', b.dataset.kind !== 'lease');
+				var isLease = (b.dataset.kind === 'lease');
+				document.getElementById('de_planned_end_wrap').classList.toggle('d-none', !isLease);
+				document.getElementById('de_lease_wrap').classList.toggle('d-none', !isLease);
+				if (isLease) {
+					document.getElementById('de_lease_provider').value = b.dataset.provider || 'hq';
+					document.getElementById('de_vin').value = b.dataset.vin || '';
+					document.getElementById('de_fee_hq').value = b.dataset.feeHq || 0;
+					document.getElementById('de_fee_distributor').value = b.dataset.feeDist || 0;
+					document.getElementById('de_fee_agency').value = b.dataset.feeAg || 0;
+					syncFeeFields('de');
+				}
 				document.getElementById('debt_edit_alert').className = 'd-none';
 				modal('kt_debt_edit_modal').show();
 			});
@@ -574,6 +743,13 @@ $currentUrl = admin_url('deduction/debts');
 			}
 			if (!document.getElementById('de_planned_end_wrap').classList.contains('d-none')) {
 				payload.planned_end_on = document.getElementById('de_planned_end').value;
+			}
+			if (!document.getElementById('de_lease_wrap').classList.contains('d-none')) {
+				payload.lease_provider  = document.getElementById('de_lease_provider').value;
+				payload.vin             = document.getElementById('de_vin').value.trim();
+				payload.fee_hq          = Number(document.getElementById('de_fee_hq').value) || 0;
+				payload.fee_distributor = Number(document.getElementById('de_fee_distributor').value) || 0;
+				payload.fee_agency      = Number(document.getElementById('de_fee_agency').value) || 0;
 			}
 			post(payload).then(function (d) {
 				if (d.ok) { location.reload(); } else { setAlert('debt_edit_alert', d.message || '오류'); btn.disabled = false; }

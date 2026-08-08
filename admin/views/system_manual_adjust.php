@@ -59,9 +59,9 @@ $agencies = $needsMigrate ? [] : db_rows(
 							<?php endforeach; ?>
 						</select>
 					</div>
-					<div class="input-group mb-4">
+					<div class="mb-4">
 						<select class="form-select form-select-solid" id="ma_wallet_rider_sel" disabled></select>
-						<button class="btn btn-light-primary" type="button" id="ma_rider_lookup" disabled>조회</button>
+						<button class="btn btn-light-primary mt-3 w-100" type="button" id="ma_rider_lookup" disabled>조회</button>
 					</div>
 					<div id="ma_rider_panel" class="d-none">
 						<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">

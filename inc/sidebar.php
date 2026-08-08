@@ -158,6 +158,21 @@ $route = $route ?? '';
 										<?php endif; ?>
 										<!--end:Menu item-->
 										<!--begin:Menu item-->
+										<?php if (admin_can_access_route('deduction/lease-fees')) : ?>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('deduction/lease-fees') ?>" href="<?= htmlspecialchars(admin_url('deduction/lease-fees'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-chart-pie-simple fs-2">
+														<span class="path1"></span>
+														<span class="path2"></span>
+													</i>
+												</span>
+												<span class="menu-title">리스 수수료 배분</span>
+											</a>
+										</div>
+										<?php endif; ?>
+										<!--end:Menu item-->
+										<!--begin:Menu item-->
 										<?php if (admin_can_access_route('promotion')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= (($route ?? '') === 'promotion' || ($route ?? '') === 'promotion/detail') ? ' active' : '' ?>" href="<?= htmlspecialchars(admin_url('promotion'), ENT_QUOTES, 'UTF-8') ?>">

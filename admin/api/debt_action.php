@@ -94,6 +94,12 @@ try {
             'opened_on'        => (string) ($body['opened_on'] ?? ''),
             'planned_end_on'   => (string) ($body['planned_end_on'] ?? ''),
             'note'             => (string) ($body['note'] ?? ''),
+            // 리스 전용 — 제공 주체·차대번호·수수료 배분(일 단위 정액)
+            'lease_provider'   => (string) ($body['lease_provider'] ?? ''),
+            'vin'              => (string) ($body['vin'] ?? ''),
+            'fee_hq'           => (int) ($body['fee_hq'] ?? 0),
+            'fee_distributor'  => (int) ($body['fee_distributor'] ?? 0),
+            'fee_agency'       => (int) ($body['fee_agency'] ?? 0),
         ]);
         AuditLog::record('rider.debt.create', (string) $rider['rider_code'], RiderDebt::kindLabel((string) $body['kind']) . ' 등록 #' . $id);
         echo json_encode(['ok' => true, 'id' => $id, 'message' => '미수금이 등록되었습니다.'], JSON_UNESCAPED_UNICODE);
@@ -111,6 +117,7 @@ try {
     if ($action === 'update') {
         $fields = array_intersect_key($body, array_flip([
             'title', 'daily_amount', 'creditor', 'note', 'opened_on', 'planned_end_on', 'status', 'balance_amount', 'principal_amount',
+            'lease_provider', 'vin', 'fee_hq', 'fee_distributor', 'fee_agency',
         ]));
         RiderDebt::update($debtId, $fields);
         AuditLog::record('rider.debt.update', (string) $rider['rider_code'], '미수금 #' . $debtId . ' 수정');

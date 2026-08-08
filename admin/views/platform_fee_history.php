@@ -255,6 +255,12 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 				</table>
 			</div>
 			<?php endif; ?>
+			<div class="text-muted fs-8 mt-3">
+				결제가 성공하면 <strong>라이더 지급분(net)은 대리점 지갑에 충전</strong>되고,
+				<strong>영업대행수수료는 본사·총판·대리점 지갑에 각자 몫만큼 적립</strong>됩니다(2026-08-08부터 실제 이체).
+				세 몫의 합계는 항상 수수료 총액과 같습니다(반올림 잔차는 대리점 몫이 흡수).
+				총판이 없는 본사 직속 대리점이면 총판 몫은 본사에 합산되며, 그 내역은 지갑 원장 메모에 남습니다.
+			</div>
 		</div>
 	</div>
 	<?php endif; ?>

@@ -193,6 +193,8 @@ PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_f
 ### `rider_debts` — 🆕(2026-07-24) 라이더 부채 원장(대여금/리스/선지급)
 PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일) · `planned_end_on`(2026-07-30 컬럼 추가, 2026-08-08 등록/수정 화면·API에 실제로 연결 — 그 전엔 컬럼만 있고 입력할 곳이 없어 리스 자동계산이 항상 스킵되는 상태였음. 계약 종료 예정일 — 리스 전용. `opened_on`과 함께 계약기간을 이뤄 자동 일수계산의 기준이 됨). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
 
+🆕 **(2026-08-08) 리스 전용 컬럼** — `lease_provider` enum(`hq`/`distributor`/`agency`, 리스 제공 주체) · `vin`(차대번호, 오토바이 리스) · `fee_hq`/`fee_distributor`/`fee_agency`(수수료 배분, **일 단위 정액 원**). 제공 주체와 그 하위 조직만 배분에 참여하며(본사 제공=3자, 총판 제공=2자, 대리점 제공=단독), 상위 조직 몫은 서버에서 0으로 강제. **배분 합계 > `daily_amount`면 저장 거부.** 차감 시점의 실제 배분액은 `rider_debt_entries.fee_hq/fee_distributor/fee_agency`에 스냅샷으로 남는다(설정 변경과 무관하게 과거 정산 근거 보존).
+
 ### `rider_debt_entries` — 🆕(2026-07-24) 부채 차감 이력
 차감 1회 = 1행. `applied_date`(차감 귀속일) · `days`(차감일수) · `amount`(차감액=일납×일수 또는 수동) · `balance_after`(차감후잔액) · `deduction_entry_id`(생성한 `deduction_entries` 연결). **핵심 연동**: 차감 실행 시 `deduction_entries` 행을 만들어 기존 `SettlementLedger::buildFeeItems` 흐름이 그대로 차감(중복 로직 없음). 이력 취소 시 연결된 `deduction_entries`도 삭제되고 상각형 잔액이 복구됨.
 UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: 같은 부채에 같은 귀속일로 두 번 차감되지 않음(정산 업로드를 재반영해도 리스 이중 차감 방지, `RiderDebt::applyLeaseForPeriod`가 이 제약을 이용해 조용히 skip).

@@ -33,6 +33,145 @@ final class RiderDebt
     private const AMORTIZING = ['loan', 'advance'];
 
     /**
+     * 리스 제공 주체 → 걷은 리스료를 나눠 갖는 조직들(2026-08-08 갑 확정).
+     * 제공 주체 자신과 그 아래 계층만 배분에 참여한다.
+     *   본사 제공   → 본사·총판·대리점 3자
+     *   총판 제공   → 총판·대리점 2자
+     *   대리점 제공 → 대리점 단독
+     * 배분액은 **일 단위 정액(원)**이며 계약 건마다 직접 입력한다(요율 아님).
+     */
+    public const LEASE_PROVIDERS = [
+        'hq'          => '본사',
+        'distributor' => '총판',
+        'agency'      => '대리점',
+    ];
+
+    /** 제공 주체별로 금액을 넣을 수 있는 배분 필드 */
+    private const PROVIDER_FEE_FIELDS = [
+        'hq'          => ['fee_hq', 'fee_distributor', 'fee_agency'],
+        'distributor' => ['fee_distributor', 'fee_agency'],
+        'agency'      => ['fee_agency'],
+    ];
+
+    public static function providerLabel(?string $p): string
+    {
+        return self::LEASE_PROVIDERS[(string) $p] ?? '—';
+    }
+
+    /**
+     * 라이더 소속 대리점 기준 조직 체인 — 리스 수수료를 실제로 받을 조직들.
+     * 대리점 위에 총판이 없는(본사 직속) 구조도 있으므로 각 레벨의 존재 여부를 함께 알려준다.
+     *
+     * @return array{agency:int, distributor:int, hq:int}
+     */
+    public static function orgChainForRider(int $riderId): array
+    {
+        require_once __DIR__ . '/Org.php';
+        $out = ['agency' => 0, 'distributor' => 0, 'hq' => 0];
+        if ($riderId < 1) {
+            return $out;
+        }
+        $agencyId = (int) (db_row('SELECT agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId])['agency_id'] ?? 0);
+
+        return $agencyId > 0 ? Org::chainForAgency($agencyId) : $out;
+    }
+
+    /**
+     * 리스 배분 금액 정규화 — 제공 주체가 가질 수 없는 몫은 0으로 떨어뜨리고,
+     * 합계가 일납을 넘으면 거부한다(걷는 돈보다 많이 나눠 가질 수 없다).
+     *
+     * $chain 이 주어지면 **받을 조직이 실제로 존재하는지**도 확인한다
+     * (예: 본사 직속 대리점이라 총판이 없는데 총판 몫을 넣으면 그 돈은 갈 곳이 없다).
+     *
+     * @param array<string,mixed> $in
+     * @param array{agency:int, distributor:int, hq:int}|null $chain
+     * @return array{lease_provider:?string, fee_hq:int, fee_distributor:int, fee_agency:int}
+     */
+    private static function normalizeLeaseFees(array $in, int $dailyAmount, ?array $chain = null): array
+    {
+        $provider = trim((string) ($in['lease_provider'] ?? ''));
+        if ($provider === '' || !isset(self::LEASE_PROVIDERS[$provider])) {
+            throw new InvalidArgumentException('리스 제공 주체(본사/총판/대리점)를 선택하세요.');
+        }
+
+        $allowed = self::PROVIDER_FEE_FIELDS[$provider];
+        $out     = ['lease_provider' => $provider, 'fee_hq' => 0, 'fee_distributor' => 0, 'fee_agency' => 0];
+        $sum     = 0;
+        foreach (['fee_hq', 'fee_distributor', 'fee_agency'] as $f) {
+            if (!in_array($f, $allowed, true)) {
+                continue; // 제공 주체보다 상위 조직은 배분 대상이 아니다 → 0 유지
+            }
+            $v = max(0, (int) ($in[$f] ?? 0));
+            $out[$f] = $v;
+            $sum += $v;
+        }
+
+        if ($sum > $dailyAmount) {
+            throw new InvalidArgumentException(sprintf(
+                '수수료 배분 합계(%s원)가 일납 리스료(%s원)보다 큽니다.',
+                number_format($sum),
+                number_format($dailyAmount)
+            ));
+        }
+
+        // 받을 조직이 없는 몫은 갈 곳이 없다 — 지갑 이동 단계에서 돈이 증발하므로 미리 막는다.
+        if ($chain !== null) {
+            if ($out['fee_hq'] > 0 && $chain['hq'] < 1) {
+                throw new InvalidArgumentException('본사 조직을 찾을 수 없어 본사 몫을 배분할 수 없습니다.');
+            }
+            if ($out['fee_distributor'] > 0 && $chain['distributor'] < 1) {
+                throw new InvalidArgumentException('이 라이더의 대리점은 총판 소속이 아니라 총판 몫을 배분할 수 없습니다. (본사 직속)');
+            }
+            if ($out['fee_agency'] > 0 && $chain['agency'] < 1) {
+                throw new InvalidArgumentException('라이더의 소속 대리점을 찾을 수 없습니다.');
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * 리스 수수료 상위 배분 실행 — **대리점 지갑에서 빼서 본사·총판 지갑으로 옮긴다.**
+     *
+     * 왜 대리점에서 빼는가: 리스료를 라이더 정산에서 차감하면 그만큼 라이더에게 덜 나가므로
+     * 그 돈은 **자동으로 대리점 지갑에 남는다**(대리점 인출가능액 = 잔액 − 라이더채무 − 예수금).
+     * 따라서 대리점 몫은 이동이 필요 없고, 상위 조직 몫만 실제로 올려보내면 된다.
+     *
+     * @param array{fee_hq:int, fee_distributor:int, fee_agency:int} $split
+     * @param array{agency:int, distributor:int, hq:int} $chain
+     * @param int $sign  1=배분 실행, -1=차감 취소 시 되돌리기
+     */
+    private static function moveLeaseFees(array $split, array $chain, int $sign, int $entryId, string $note): void
+    {
+        require_once __DIR__ . '/AgencyWallet.php';
+
+        $hq   = (int) $split['fee_hq'];
+        $dist = (int) $split['fee_distributor'];
+        $up   = $hq + $dist;
+        if ($up <= 0 || $chain['agency'] < 1) {
+            return;
+        }
+
+        // 대리점 ← 상위 몫 회수(취소 시엔 반대로 되돌려줌)
+        if ($sign > 0) {
+            AgencyWallet::debit($chain['agency'], $up, 'lease_fee_up', $entryId, $note);
+        } else {
+            AgencyWallet::credit($chain['agency'], $up, 'lease_fee_up_rev', $entryId, $note . ' 취소');
+        }
+
+        foreach ([['hq', $hq], ['distributor', $dist]] as [$key, $amt]) {
+            if ($amt <= 0 || $chain[$key] < 1) {
+                continue;
+            }
+            if ($sign > 0) {
+                AgencyWallet::credit($chain[$key], $amt, 'lease_fee_in', $entryId, $note);
+            } else {
+                AgencyWallet::debit($chain[$key], $amt, 'lease_fee_in_rev', $entryId, $note . ' 취소');
+            }
+        }
+    }
+
+    /**
      * 리스 차감 공백 경고 기준일수. 이 시스템엔 매일 도는 배치가 없어 리스 차감은
      * 정산 반영(엑셀 업로드) 시점에만 일어난다 — 그 사이 업로드가 뜸하면 계약기간은
      * 흘러가는데 차감은 안 되는 공백이 생길 수 있어, 최근 차감일이 이 일수 이상
@@ -130,11 +269,18 @@ final class RiderDebt
             throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
         }
 
+        // 리스 전용 — 제공 주체·배분액·차대번호. 대여금/선지급은 해당 없음.
+        $lease = $kind === 'lease'
+            ? self::normalizeLeaseFees($in, $daily, self::orgChainForRider($riderId))
+            : ['lease_provider' => null, 'fee_hq' => 0, 'fee_distributor' => 0, 'fee_agency' => 0];
+        $vin = $kind === 'lease' ? mb_substr(trim((string) ($in['vin'] ?? '')), 0, 30) : '';
+
         return db_insert(
             'INSERT INTO rider_debts
                 (rider_id, kind, title, principal_amount, balance_amount, daily_amount,
-                 creditor, status, opened_on, planned_end_on, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 creditor, status, opened_on, planned_end_on, note,
+                 lease_provider, vin, fee_hq, fee_distributor, fee_agency)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderId,
                 $kind,
@@ -147,6 +293,11 @@ final class RiderDebt
                 $openedOn,
                 $plannedEnd,
                 trim((string) ($in['note'] ?? '')),
+                $lease['lease_provider'],
+                $vin,
+                $lease['fee_hq'],
+                $lease['fee_distributor'],
+                $lease['fee_agency'],
             ]
         );
     }
@@ -169,6 +320,28 @@ final class RiderDebt
         if (array_key_exists('creditor', $in)) { $sets[] = 'creditor = ?'; $params[] = trim((string) $in['creditor']); }
         if (array_key_exists('note', $in))     { $sets[] = 'note = ?';     $params[] = trim((string) $in['note']); }
         if (array_key_exists('opened_on', $in)){ $sets[] = 'opened_on = ?';$params[] = self::normDate($in['opened_on']); }
+        // 리스 제공주체·배분액 — 셋 중 하나라도 오면 함께 재검증한다(합계 ≤ 일납).
+        $leaseKeys = ['lease_provider', 'fee_hq', 'fee_distributor', 'fee_agency'];
+        if ((string) $debt['kind'] === 'lease' && array_intersect($leaseKeys, array_keys($in)) !== []) {
+            $daily = array_key_exists('daily_amount', $in)
+                ? max(0, (int) $in['daily_amount'])
+                : (int) $debt['daily_amount'];
+            $merged = [
+                'lease_provider'  => $in['lease_provider']  ?? $debt['lease_provider'],
+                'fee_hq'          => $in['fee_hq']          ?? $debt['fee_hq'],
+                'fee_distributor' => $in['fee_distributor'] ?? $debt['fee_distributor'],
+                'fee_agency'      => $in['fee_agency']      ?? $debt['fee_agency'],
+            ];
+            $lease = self::normalizeLeaseFees($merged, $daily, self::orgChainForRider((int) $debt['rider_id']));
+            foreach (['lease_provider', 'fee_hq', 'fee_distributor', 'fee_agency'] as $f) {
+                $sets[]   = "{$f} = ?";
+                $params[] = $lease[$f];
+            }
+        }
+        if (array_key_exists('vin', $in) && (string) $debt['kind'] === 'lease') {
+            $sets[]   = 'vin = ?';
+            $params[] = mb_substr(trim((string) $in['vin']), 0, 30);
+        }
         if (array_key_exists('planned_end_on', $in) && (string) $debt['kind'] === 'lease') {
             $plannedEnd = self::normDate($in['planned_end_on']);
             $openedOn   = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
@@ -250,8 +423,30 @@ final class RiderDebt
         $dedKind = self::DEDUCTION_KIND[$kind] ?? 'manual';
         $note    = trim(($debt['title'] !== '' ? $debt['title'] : self::kindLabel($kind)) . ($memo !== '' ? ' · ' . $memo : ''));
 
+        // 리스 수수료 배분 스냅샷 — 설정은 "일 단위 정액"이므로 실제 차감일수를 곱한다.
+        // 이력에 그대로 박아둬야 나중에 설정이 바뀌어도 과거 정산 근거가 보존된다.
+        // 부분 차감(금액 직접 입력 등)으로 일납×일수보다 적게 걷혔으면 그 비율만큼 줄여
+        // "걷은 돈보다 많이 나눠 갖는" 상황을 막는다.
+        $split = ['fee_hq' => 0, 'fee_distributor' => 0, 'fee_agency' => 0];
+        if ($kind === 'lease') {
+            $expected = (int) $debt['daily_amount'] * $days;
+            $ratio    = ($expected > 0 && $charge < $expected) ? ($charge / $expected) : 1.0;
+            foreach ($split as $f => $_) {
+                $split[$f] = (int) floor((int) ($debt[$f] ?? 0) * $days * $ratio);
+            }
+            $sum = array_sum($split);
+            if ($sum > $charge) {
+                // 반올림으로 넘치면 가장 큰 몫에서 깎아 총액을 맞춘다.
+                arsort($split);
+                $top = array_key_first($split);
+                $split[$top] -= ($sum - $charge);
+            }
+        }
+
+        $chain = $kind === 'lease' ? self::orgChainForRider((int) $debt['rider_id']) : ['agency' => 0, 'distributor' => 0, 'hq' => 0];
+
         return db_transaction(static function () use (
-            $debtId, $debt, $appliedDate, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo
+            $debtId, $debt, $appliedDate, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
         ): array {
             // 1) 정산 반영이 소비할 deduction_entries
             $dedId = db_insert(
@@ -261,9 +456,14 @@ final class RiderDebt
             // 2) 이력
             $entryId = db_insert(
                 'INSERT INTO rider_debt_entries
-                    (debt_id, rider_id, applied_date, days, amount, balance_after, deduction_entry_id, memo)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [$debtId, (int) $debt['rider_id'], $appliedDate, $days, $charge, $balanceAfter, $dedId, mb_substr($memo, 0, 255)]
+                    (debt_id, rider_id, applied_date, days, amount, balance_after, deduction_entry_id, memo,
+                     fee_hq, fee_distributor, fee_agency)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $debtId, (int) $debt['rider_id'], $appliedDate, $days, $charge, $balanceAfter, $dedId,
+                    mb_substr($memo, 0, 255),
+                    $split['fee_hq'], $split['fee_distributor'], $split['fee_agency'],
+                ]
             );
             // 3) 잔액·미납갱신일 갱신
             if ($isAmortizing) {
@@ -275,6 +475,9 @@ final class RiderDebt
             } else {
                 db_execute('UPDATE rider_debts SET due_updated_on = ? WHERE id = ?', [$appliedDate, $debtId]);
             }
+
+            // 4) 리스 수수료 상위 배분 — 대리점 지갑 → 본사·총판 지갑(같은 트랜잭션)
+            self::moveLeaseFees($split, $chain, 1, $entryId, '리스 수수료 배분 · ' . $note);
 
             return [
                 'amount'             => $charge,
@@ -300,11 +503,24 @@ final class RiderDebt
         }
         $isAmortizing = in_array((string) $debt['kind'], self::AMORTIZING, true);
 
-        db_transaction(static function () use ($entry, $debt, $isAmortizing): void {
+        // 이 차감 건이 실제로 옮긴 배분액(스냅샷)을 그대로 되돌린다.
+        // 설정이 그 사이 바뀌었어도 "그때 옮긴 금액"으로 복구해야 지갑이 어긋나지 않는다.
+        $split = [
+            'fee_hq'          => (int) ($entry['fee_hq'] ?? 0),
+            'fee_distributor' => (int) ($entry['fee_distributor'] ?? 0),
+            'fee_agency'      => (int) ($entry['fee_agency'] ?? 0),
+        ];
+        $chain = (string) $debt['kind'] === 'lease'
+            ? self::orgChainForRider((int) $debt['rider_id'])
+            : ['agency' => 0, 'distributor' => 0, 'hq' => 0];
+
+        db_transaction(static function () use ($entry, $debt, $isAmortizing, $split, $chain): void {
             // 연결된 deduction_entries 제거(정산 반영 전이라면 실제 차감도 취소됨)
             if (!empty($entry['deduction_entry_id'])) {
                 db_execute('DELETE FROM deduction_entries WHERE id = ?', [(int) $entry['deduction_entry_id']]);
             }
+            // 상위로 올려보낸 리스 수수료를 대리점에 되돌려준다.
+            self::moveLeaseFees($split, $chain, -1, (int) $entry['id'], '리스 수수료 배분');
             db_execute('DELETE FROM rider_debt_entries WHERE id = ?', [(int) $entry['id']]);
             if ($isAmortizing) {
                 // 잔액 복구 + 완납이었다면 active 로 되돌림
@@ -380,6 +596,106 @@ final class RiderDebt
             }
             throw $e;
         }
+    }
+
+    /**
+     * 리스 수수료 배분 리포트 — 기간 내 실제로 배분된 금액을 조직별로 집계.
+     * 현재 로그인 계정의 스코프(본사=전체 / 총판=하위 / 대리점=자기)를 자동 적용한다.
+     *
+     * @param array{from?:string, to?:string, agency_id?:int} $f
+     * @return array{total:int, hq:int, distributor:int, agency:int, count:int, days:int}
+     */
+    public static function feeSummary(array $f = []): array
+    {
+        $zero = ['total' => 0, 'hq' => 0, 'distributor' => 0, 'agency' => 0, 'count' => 0, 'days' => 0];
+        if (!self::tableReady()) {
+            return $zero;
+        }
+        [$where, $params] = self::feeReportWhere($f);
+        $row = db_row(
+            "SELECT COUNT(*) cnt, COALESCE(SUM(e.days),0) d,
+                    COALESCE(SUM(e.amount),0) amt,
+                    COALESCE(SUM(e.fee_hq),0) hq,
+                    COALESCE(SUM(e.fee_distributor),0) dist,
+                    COALESCE(SUM(e.fee_agency),0) agy
+               FROM rider_debt_entries e
+               INNER JOIN rider_debts d ON d.id = e.debt_id
+               INNER JOIN riders r ON r.id = e.rider_id
+              WHERE {$where}",
+            $params
+        ) ?: [];
+
+        return [
+            'total'       => (int) ($row['amt'] ?? 0),
+            'hq'          => (int) ($row['hq'] ?? 0),
+            'distributor' => (int) ($row['dist'] ?? 0),
+            'agency'      => (int) ($row['agy'] ?? 0),
+            'count'       => (int) ($row['cnt'] ?? 0),
+            'days'        => (int) ($row['d'] ?? 0),
+        ];
+    }
+
+    /**
+     * 리스 수수료 배분 상세 — 차감 건별 목록(라이더·대리점·계약·배분액).
+     *
+     * @param array{from?:string, to?:string, agency_id?:int} $f
+     * @return list<array<string,mixed>>
+     */
+    public static function feeRows(array $f = [], int $limit = 500): array
+    {
+        if (!self::tableReady()) {
+            return [];
+        }
+        [$where, $params] = self::feeReportWhere($f);
+        $limit = max(1, min(2000, $limit));
+
+        return db_rows(
+            "SELECT e.id, e.applied_date, e.days, e.amount,
+                    e.fee_hq, e.fee_distributor, e.fee_agency,
+                    d.title, d.vin, d.lease_provider, d.daily_amount,
+                    r.name AS rider_name, r.rider_code,
+                    o.name AS agency_name
+               FROM rider_debt_entries e
+               INNER JOIN rider_debts d ON d.id = e.debt_id
+               INNER JOIN riders r ON r.id = e.rider_id
+               LEFT JOIN organizations o ON o.id = r.agency_id
+              WHERE {$where}
+              ORDER BY e.applied_date DESC, e.id DESC
+              LIMIT {$limit}",
+            $params
+        );
+    }
+
+    /**
+     * 리포트 공통 WHERE — 리스 건만, 기간·대리점 필터 + 멀티테넌시 스코프.
+     *
+     * @param array{from?:string, to?:string, agency_id?:int} $f
+     * @return array{0:string, 1:list<mixed>}
+     */
+    private static function feeReportWhere(array $f): array
+    {
+        require_once __DIR__ . '/Org.php';
+        $conds  = ["d.kind = 'lease'"];
+        $params = [];
+
+        $from = trim((string) ($f['from'] ?? ''));
+        $to   = trim((string) ($f['to'] ?? ''));
+        if ($from !== '') { $conds[] = 'e.applied_date >= ?'; $params[] = $from; }
+        if ($to !== '')   { $conds[] = 'e.applied_date <= ?'; $params[] = $to; }
+
+        $agencyId = (int) ($f['agency_id'] ?? 0);
+        if ($agencyId > 0 && Org::canAccessAgency($agencyId)) {
+            $conds[]  = 'r.agency_id = ?';
+            $params[] = $agencyId;
+        }
+
+        [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
+        if ($scope !== '') {
+            $conds[] = $scope;
+            $params  = array_merge($params, $scopeParams);
+        }
+
+        return [implode(' AND ', $conds), $params];
     }
 
     /**

@@ -69,6 +69,21 @@ final class SettlementLedger
         $skipped = 0;
         $errors  = [];
 
+        // ⚠️ 리스/렌탈 자동 일수계산은 **반드시 사이클 생성보다 먼저** 실행해야 한다.
+        // 계약기간∩정산기간 일수만큼 `deduction_entries`(applied_date = 정산기간 종료일)를 만드는데,
+        // 그 행을 소비하는 쪽이 아래 createCycleFromDailyRow → buildFeeItems(applied_date = settlement_date
+        // 로 조회)이기 때문이다.
+        //
+        // 🐛 2026-08-08 수정: 예전엔 이 호출이 트랜잭션 **뒤**에 있어서, 리스 차감 행이 만들어질 때는
+        //    이미 그 날짜의 사이클이 확정된 뒤였다. 결과적으로 **원장(rider_debts)에는 "받았다"고
+        //    기록되는데 실제 정산에서는 한 푼도 안 걷히는** 상태였다(재반영해도 사이클 중복 체크로
+        //    스킵되어 영영 회수 불가, 우연히 같은 날짜의 다른 팀지역 정산이 들어올 때만 뒤늦게 걷힘).
+        //    순서를 앞으로 옮겨 정상적으로 해당 사이클에서 차감되게 했다.
+        //
+        // 트랜잭션 밖인 것은 유지 — 개별 리스 데이터 이상이 정산 반영 전체를 막지 않게 하기 위함이며,
+        // 재실행 시 이중 차감은 rider_debt_entries UNIQUE(debt_id, applied_date)가 막는다.
+        self::applyActiveLeasesForUpload($rows);
+
         db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, $teamRegion, &$applied, &$skipped, &$errors): void {
             foreach ($rows as $row) {
                 $riderId = (int) $row['rider_id'];
@@ -106,11 +121,6 @@ final class SettlementLedger
                 );
             }
         });
-
-        // 리스/렌탈 자동 일수계산(§7 격차) — 업로드의 정산기간(min~max)과 계약기간이
-        // 겹치는 일수만큼, 매칭된 라이더의 활성 리스마다 1회 부과한다. 정산 사이클 생성과
-        // 별개 관심사라 트랜잭션 밖에서 처리하고, 개별 실패는 정산 반영 자체를 막지 않는다.
-        self::applyActiveLeasesForUpload($rows);
 
         return ['applied' => $applied, 'skipped' => $skipped, 'errors' => $errors];
     }
@@ -575,7 +585,11 @@ final class SettlementLedger
         $withholdRider = (int) ($rider['withholding_tax_enabled'] ?? 0) === 1;
 
         // #7 선정산수수료(대행수수료) — 선정산(일일지급, is_daily_settlement=1) 라이더만 반영 시점에 부과.
-        // 주정산(후정산) 라이더는 출금 신청 시점에 부과 → 라이더 출금 플로우 단계에서 처리(현재 이연).
+        //
+        // 주정산 라이더는 **여기서도, 출금 시점에도 대행수수료를 내지 않는다**(2026-08-08 갑 확정:
+        // "출금 신청 시 건당 수수료만 적용하면 된다"). 예전엔 "주정산은 출금 시점에 부과하도록
+        // 이연"으로 적혀 있었으나 그 계획 자체가 취소됐다 — 주정산 라이더가 부담하는 건
+        // 출금 시 건당 정산수수료(WithdrawalCycles/WithdrawalConfig::feeForCycles)뿐이다.
         if ($isDaily) {
             $wallet  = RiderWallet::get($riderId);
             $accrued = (int) $wallet['accrued_days'];

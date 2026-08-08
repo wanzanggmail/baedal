@@ -418,7 +418,12 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 									data-daily="<?= (int) $d['daily_amount'] ?>" data-creditor="<?= htmlspecialchars((string) $d['creditor'], ENT_QUOTES, 'UTF-8') ?>"
 									data-balance="<?= (int) $d['balance_amount'] ?>" data-status="<?= htmlspecialchars((string) $d['status'], ENT_QUOTES, 'UTF-8') ?>"
 									data-amort="<?= $isAmort ? 1 : 0 ?>" data-kind="<?= htmlspecialchars($dk, ENT_QUOTES, 'UTF-8') ?>"
-									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" title="수정">
+									data-planned-end="<?= htmlspecialchars((string) ($d['planned_end_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+									data-provider="<?= htmlspecialchars((string) ($d['lease_provider'] ?? 'hq'), ENT_QUOTES, 'UTF-8') ?>"
+									data-vin="<?= htmlspecialchars((string) ($d['vin'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+									data-fee-hq="<?= (int) ($d['fee_hq'] ?? 0) ?>"
+									data-fee-dist="<?= (int) ($d['fee_distributor'] ?? 0) ?>"
+									data-fee-ag="<?= (int) ($d['fee_agency'] ?? 0) ?>" title="수정">
 									<i class="ki-duotone ki-pencil fs-5"><span class="path1"></span><span class="path2"></span></i>
 								</button>
 							</td>
@@ -638,6 +643,42 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							<input type="date" class="form-control form-control-sm form-control-solid" id="dn_planned_end" />
 							<div class="form-text fs-8">비워두면 정산 반영 시 자동 차감이 되지 않아 「차감」 버튼으로 직접 처리해야 합니다.</div>
 						</div>
+						<div class="col-12 d-none" id="dn_lease_wrap">
+							<div class="separator separator-dashed my-2"></div>
+							<div class="row g-4">
+								<div class="col-md-5">
+									<label class="form-label fs-7 fw-semibold required">리스 제공 주체</label>
+									<select class="form-select form-select-sm form-select-solid" id="dn_lease_provider">
+										<?php foreach (RiderDebt::LEASE_PROVIDERS as $pv => $pl) : ?>
+										<option value="<?= htmlspecialchars($pv, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($pl, ENT_QUOTES, 'UTF-8') ?></option>
+										<?php endforeach; ?>
+									</select>
+									<div class="form-text fs-8">제공 주체와 그 하위 조직만 나눠 갖습니다.</div>
+								</div>
+								<div class="col-md-7">
+									<label class="form-label fs-7 fw-semibold">차대번호(VIN)</label>
+									<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="dn_vin" maxlength="30" placeholder="예: KMYJZ123456789012" />
+								</div>
+								<div class="col-12">
+									<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액 · 합계는 일납 이하)</span></label>
+									<div class="row g-3">
+										<div class="col-md-4 d-none" id="dn_fee_hq_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">본사</span>
+												<input type="number" class="form-control form-control-solid" id="dn_fee_hq" min="0" step="10" value="0" /></div>
+										</div>
+										<div class="col-md-4 d-none" id="dn_fee_dist_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">총판</span>
+												<input type="number" class="form-control form-control-solid" id="dn_fee_distributor" min="0" step="10" value="0" /></div>
+										</div>
+										<div class="col-md-4" id="dn_fee_ag_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">대리점</span>
+												<input type="number" class="form-control form-control-solid" id="dn_fee_agency" min="0" step="10" value="0" /></div>
+										</div>
+									</div>
+									<div class="form-text fs-8" id="dn_fee_hint"></div>
+								</div>
+							</div>
+						</div>
 						<div class="col-12">
 							<label class="form-label fs-7 fw-semibold">메모</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="dn_note" maxlength="255" />
@@ -709,6 +750,41 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 						<div class="col-md-6" id="de_planned_end_wrap">
 							<label class="form-label fs-7 fw-semibold">계약 종료 예정일(리스)</label>
 							<input type="date" class="form-control form-control-sm form-control-solid" id="de_planned_end" />
+						</div>
+						<div class="col-12 d-none" id="de_lease_wrap">
+							<div class="separator separator-dashed my-1"></div>
+							<div class="row g-4">
+								<div class="col-md-5">
+									<label class="form-label fs-7 fw-semibold">리스 제공 주체</label>
+									<select class="form-select form-select-sm form-select-solid" id="de_lease_provider">
+										<?php foreach (RiderDebt::LEASE_PROVIDERS as $pv => $pl) : ?>
+										<option value="<?= htmlspecialchars($pv, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($pl, ENT_QUOTES, 'UTF-8') ?></option>
+										<?php endforeach; ?>
+									</select>
+								</div>
+								<div class="col-md-7">
+									<label class="form-label fs-7 fw-semibold">차대번호(VIN)</label>
+									<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="de_vin" maxlength="30" />
+								</div>
+								<div class="col-12">
+									<label class="form-label fs-7 fw-semibold">수수료 배분 <span class="text-muted fs-8">(일 단위 금액)</span></label>
+									<div class="row g-3">
+										<div class="col-md-4 d-none" id="de_fee_hq_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">본사</span>
+												<input type="number" class="form-control form-control-solid" id="de_fee_hq" min="0" step="10" value="0" /></div>
+										</div>
+										<div class="col-md-4 d-none" id="de_fee_dist_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">총판</span>
+												<input type="number" class="form-control form-control-solid" id="de_fee_distributor" min="0" step="10" value="0" /></div>
+										</div>
+										<div class="col-md-4" id="de_fee_ag_wrap">
+											<div class="input-group input-group-sm"><span class="input-group-text">대리점</span>
+												<input type="number" class="form-control form-control-solid" id="de_fee_agency" min="0" step="10" value="0" /></div>
+										</div>
+									</div>
+									<div class="form-text fs-8" id="de_fee_hint"></div>
+								</div>
+							</div>
 						</div>
 						<div class="col-md-6">
 							<label class="form-label fs-7 fw-semibold">채권자/구분</label>
@@ -947,16 +1023,56 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 
 	// ── 신규 등록 ──
 	var kindEl = document.getElementById('dn_kind');
+
+	/** 제공 주체별 배분 입력칸 표시/숨김 — 숨긴 칸은 0으로 리셋(서버도 동일 규칙으로 재검증). */
+	function syncFeeFields(prefix) {
+		var provider = document.getElementById(prefix + '_lease_provider').value;
+		var showHq   = (provider === 'hq');
+		var showDist = (provider === 'hq' || provider === 'distributor');
+		document.getElementById(prefix + '_fee_hq_wrap').classList.toggle('d-none', !showHq);
+		document.getElementById(prefix + '_fee_dist_wrap').classList.toggle('d-none', !showDist);
+		if (!showHq)   { document.getElementById(prefix + '_fee_hq').value = 0; }
+		if (!showDist) { document.getElementById(prefix + '_fee_distributor').value = 0; }
+		syncFeeHint(prefix);
+	}
+
+	function syncFeeHint(prefix) {
+		var daily = Number(document.getElementById(prefix + '_daily').value) || 0;
+		var sum = ['_fee_hq', '_fee_distributor', '_fee_agency'].reduce(function (a, s) {
+			return a + (Number(document.getElementById(prefix + s).value) || 0);
+		}, 0);
+		var el = document.getElementById(prefix + '_fee_hint');
+		if (sum > daily) {
+			el.className = 'form-text fs-8 text-danger';
+			el.textContent = '배분 합계 ' + sum.toLocaleString() + '원이 일납 ' + daily.toLocaleString() + '원보다 큽니다. 저장할 수 없습니다.';
+		} else {
+			el.className = 'form-text fs-8 text-muted';
+			el.textContent = '배분 합계 ' + sum.toLocaleString() + '원 / 일납 ' + daily.toLocaleString() + '원';
+		}
+	}
+
 	function syncPrincipal() {
 		var isLease = (kindEl.value === 'lease');
 		document.getElementById('dn_principal_wrap').style.display = isLease ? 'none' : '';
 		document.getElementById('dn_planned_end_wrap').classList.toggle('d-none', !isLease);
+		document.getElementById('dn_lease_wrap').classList.toggle('d-none', !isLease);
+		if (isLease) { syncFeeFields('dn'); }
 	}
 	if (kindEl) { kindEl.addEventListener('change', syncPrincipal); }
+	document.getElementById('dn_lease_provider').addEventListener('change', function () { syncFeeFields('dn'); });
+	document.getElementById('de_lease_provider').addEventListener('change', function () { syncFeeFields('de'); });
+	['dn_daily', 'dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) {
+		document.getElementById(i).addEventListener('input', function () { syncFeeHint('dn'); });
+	});
+	['de_daily', 'de_fee_hq', 'de_fee_distributor', 'de_fee_agency'].forEach(function (i) {
+		document.getElementById(i).addEventListener('input', function () { syncFeeHint('de'); });
+	});
 	var btnNew = document.getElementById('btn_debt_new');
 	if (btnNew) {
 		btnNew.addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_vin'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) { document.getElementById(i).value = 0; });
+			document.getElementById('dn_lease_provider').value = 'hq';
 			kindEl.value = 'loan'; syncPrincipal();
 			document.getElementById('debt_new_alert').className = 'd-none';
 			modal('kt_debt_new_modal').show();
@@ -972,6 +1088,11 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			creditor: document.getElementById('dn_creditor').value.trim(),
 			opened_on: document.getElementById('dn_opened').value,
 			planned_end_on: document.getElementById('dn_planned_end').value,
+			lease_provider: document.getElementById('dn_lease_provider').value,
+			vin: document.getElementById('dn_vin').value.trim(),
+			fee_hq: Number(document.getElementById('dn_fee_hq').value) || 0,
+			fee_distributor: Number(document.getElementById('dn_fee_distributor').value) || 0,
+			fee_agency: Number(document.getElementById('dn_fee_agency').value) || 0,
 			note: document.getElementById('dn_note').value.trim()
 		}).then(function (d) {
 			if (d.ok) { window.location.reload(); }
@@ -1027,7 +1148,17 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 			document.getElementById('de_balance').value = b.dataset.balance || 0;
 			document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
 			document.getElementById('de_planned_end').value = b.dataset.plannedEnd || '';
-			document.getElementById('de_planned_end_wrap').classList.toggle('d-none', b.dataset.kind !== 'lease');
+			var isLeaseEdit = (b.dataset.kind === 'lease');
+			document.getElementById('de_planned_end_wrap').classList.toggle('d-none', !isLeaseEdit);
+			document.getElementById('de_lease_wrap').classList.toggle('d-none', !isLeaseEdit);
+			if (isLeaseEdit) {
+				document.getElementById('de_lease_provider').value = b.dataset.provider || 'hq';
+				document.getElementById('de_vin').value = b.dataset.vin || '';
+				document.getElementById('de_fee_hq').value = b.dataset.feeHq || 0;
+				document.getElementById('de_fee_distributor').value = b.dataset.feeDist || 0;
+				document.getElementById('de_fee_agency').value = b.dataset.feeAg || 0;
+				syncFeeFields('de');
+			}
 			document.getElementById('debt_edit_alert').className = 'd-none';
 			modal('kt_debt_edit_modal').show();
 		});
@@ -1046,6 +1177,13 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 		}
 		if (!document.getElementById('de_planned_end_wrap').classList.contains('d-none')) {
 			payload.planned_end_on = document.getElementById('de_planned_end').value;
+		}
+		if (!document.getElementById('de_lease_wrap').classList.contains('d-none')) {
+			payload.lease_provider  = document.getElementById('de_lease_provider').value;
+			payload.vin             = document.getElementById('de_vin').value.trim();
+			payload.fee_hq          = Number(document.getElementById('de_fee_hq').value) || 0;
+			payload.fee_distributor = Number(document.getElementById('de_fee_distributor').value) || 0;
+			payload.fee_agency      = Number(document.getElementById('de_fee_agency').value) || 0;
 		}
 		post(payload).then(function (d) {
 			if (d.ok) { window.location.reload(); }

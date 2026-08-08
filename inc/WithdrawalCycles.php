@@ -14,8 +14,7 @@ require_once __DIR__ . '/WithdrawalConfig.php';
  * 마킹 시점은 **출금 신청(pending)** — 신청 즉시 사이클을 점유해 이중 출금을 막고,
  * 반려(rejected) 시 되돌린다(release). 완료(completed)에는 이미 마킹돼 있어 할 일이 없다.
  *
- * ⚠️ 보증금 경계 정책(POLICY_*)은 **갑 확인 대기 중**(LOGIC.md §8-A #1).
- *    두 방식 모두 구현해 두었고 self::BOUNDARY_POLICY 상수 하나로 전환된다.
+ * 보증금 경계 정책은 2026-08-08 갑 확정 — **POLICY_WHOLE**(건 단위로만 출금).
  */
 final class WithdrawalCycles
 {
@@ -26,24 +25,27 @@ final class WithdrawalCycles
     public const POLICY_WHOLE = 'whole';
 
     /**
-     * ⚠️⚠️ TODO(갑확인): 보증금 경계 사이클 처리 정책 — **미확정, 잠정값** ⚠️⚠️
+     * 보증금 경계 사이클 처리 정책 — **2026-08-08 갑 확정: POLICY_WHOLE**
      *
-     * 출금은 오래된 사이클부터 가져가고 보증금(기본 50,000원)은 남겨야 하는데,
-     * 사이클 하나가 그 경계를 넘칠 때 어떻게 할지가 아직 정해지지 않았다.
-     *   (가) POLICY_WHOLE   — 통째로만. 수수료 건수 정확·단순. 단 사이클 1개가 보증금보다
-     *                         크면 출금이 전면 차단됨(신규·소액 라이더).
-     *   (나) POLICY_PARTIAL — 보증금 선까지 쪼갬. 항상 출금 가능. 단 부과 건수를 금액
-     *                         비율로 안분해 원 단위 반올림 오차 발생.
+     * 출금은 오래된 사이클부터 가져가고 보증금(기본 50,000원)은 지갑에 남겨야 하는데,
+     * 사이클 하나가 그 경계를 넘칠 때 쪼갤지 말지가 쟁점이었다.
      *
-     * **두 방식 모두 구현돼 있어 이 상수 한 줄만 바꾸면 전환된다.**
-     * 스키마(`settlement_rider_cycles.withdrawn_amount`)도 두 정책을 모두 수용하므로
-     * 재마이그레이션이 필요 없다.
+     * 갑 확인 결과 **정산 1건이 보증금(50,000원)을 넘는 경우는 실무상 없고**, 출금은
+     * 건 단위로 나가되 보증금이 항상 남아야 한다 — 그래서 WHOLE 로 확정했다.
+     * PARTIAL 을 잠정값으로 뒀던 이유(사이클 1개가 보증금보다 커서 출금이 영구 차단됨)는
+     * 위 전제 하에서는 발생하지 않는다.
      *
-     * 잠정 기본값을 PARTIAL 로 둔 이유: WHOLE 은 위 차단 문제로 기능적 퇴행이 되기 때문.
+     * ⚠️ 다만 **일시적 차단은 정상 동작**이다 — 출금가능액(잔액−보증금)이 다음 사이클
+     * 금액보다 작으면 그 사이클을 통째로 못 가져가므로 이번 회차엔 출금이 안 된다.
+     * 정산이 더 쌓이면 자동으로 풀리며, 라이더에게는 select() 가 돌려주는
+     * `blocked_shortfall`(얼마가 더 쌓여야 하는지)로 안내한다.
      *
-     * 참고: LOGIC.md §8-A #1 · §7 #18. 확정되면 이 상수만 교체할 것.
+     * PARTIAL 구현은 제거하지 않고 남겨둔다 — 정책이 다시 뒤집힐 때 상수 한 줄로
+     * 되돌릴 수 있고, 스키마(`withdrawn_amount`)도 두 정책을 모두 수용한다.
+     *
+     * 참고: LOGIC.md §7 #18.
      */
-    public const BOUNDARY_POLICY = self::POLICY_PARTIAL;
+    public const BOUNDARY_POLICY = self::POLICY_WHOLE;
 
     public static function tableReady(): bool
     {
@@ -98,7 +100,7 @@ final class WithdrawalCycles
      *   지갑에서 빠지는 총액 = 실지급액 + 수수료 = withdrawable (고른 사이클 합)
      *
      * @param int $withdrawable 이번에 소진할 금액(원). 잔액 − 보증금.
-     * @return array{picked:list<array{cycle_id:int, settlement_date:string, amount:int, order_count:int, partial:bool}>, taken:int, blocked_by_policy:bool}
+     * @return array{picked:list<array{cycle_id:int, settlement_date:string, amount:int, order_count:int, partial:bool}>, taken:int, blocked_by_policy:bool, blocked_shortfall:int, had_candidates:bool}
      */
     public static function select(int $riderId, int $withdrawable, ?string $policy = null, ?string $toDate = null): array
     {
@@ -107,11 +109,17 @@ final class WithdrawalCycles
         $taken  = 0;
 
         if ($withdrawable <= 0) {
-            return ['picked' => [], 'taken' => 0, 'blocked_by_policy' => false];
+            return [
+                'picked' => [], 'taken' => 0, 'blocked_by_policy' => false,
+                'blocked_shortfall' => 0, 'had_candidates' => false,
+            ];
         }
 
         $cycles          = self::unwithdrawn($riderId);
         $blockedByPolicy = false;
+        // WHOLE 정책에서 "통째로 못 가져가 건너뛴" 사이클들의 잔여액.
+        // 라이더에게 "얼마가 더 쌓이면 출금되는지" 안내하는 데 쓴다.
+        $skipped = [];
 
         // 기간 지정 출금(§7 #18-b) — 라이더가 달력에서 고른 날짜까지만 소진한다.
         // 사이클 소비는 항상 "가장 오래된 미출금분부터"여야 age-bucket 요율과 잔액 정합성이
@@ -144,10 +152,17 @@ final class WithdrawalCycles
 
             // 여기서부터 보증금 경계 — 정책 분기
             if ($policy === self::POLICY_WHOLE) {
-                // 통째로만 허용 → 이 사이클은 못 가져감. 뒤 사이클은 더 최근이라 더 크거나
-                // 같은 경계에 걸릴 가능성이 높지만, 작은 사이클이 있으면 가져갈 수 있으므로 계속 진행.
+                // 통째로만 허용 → 이 사이클은 이번에 못 가져간다.
+                //
+                // ⚠️ 여기서 **멈춘다(break)**. 뒤에 더 작은 사이클이 있으면 그건 가져갈 수도
+                // 있지만, 그러면 오래된 사이클을 건너뛰고 최신 사이클을 먼저 소진하게 된다.
+                // 그건 두 가지를 깬다:
+                //   ① 화면 문구 "출금은 오래된 정산분부터 순서대로 나갑니다"
+                //   ② 달력의 "그 날짜까지 출금" 의미 — 중간에 구멍이 뚫려 버린다
+                // age-bucket 요율도 오래된 분이 싸므로(40원) 순서를 지키는 쪽이 라이더에게 유리.
                 $blockedByPolicy = true;
-                continue;
+                $skipped[]       = $c['remaining'];
+                break;
             }
 
             // PARTIAL — 남은 만큼만 쪼개서 소진
@@ -162,7 +177,25 @@ final class WithdrawalCycles
             break;
         }
 
-        return ['picked' => $picked, 'taken' => $taken, 'blocked_by_policy' => $blockedByPolicy && $taken < $withdrawable];
+        $blocked = $blockedByPolicy && $taken < $withdrawable;
+
+        // 건너뛴 사이클 중 가장 작은 것을 가져가려면 지갑에 얼마가 더 있어야 하는지.
+        // (가장 작은 것 기준 = 가장 빨리 풀리는 조건)
+        $shortfall = 0;
+        if ($blocked && $skipped !== []) {
+            $shortfall = max(0, min($skipped) - ($withdrawable - $taken));
+        }
+
+        return [
+            'picked'            => $picked,
+            'taken'             => $taken,
+            'blocked_by_policy' => $blocked,
+            'blocked_shortfall' => $shortfall,
+            // 이 라이더에게 (기간 필터 적용 후) 소진 대상 사이클이 하나라도 있었는지.
+            // 호출자가 "정책상 못 가져감"과 "사이클 데이터 자체가 없음(구 데이터)"을
+            // 구분해야 한다 — 전자는 출금 0원이어야 하고, 후자만 구 모델로 폴백한다.
+            'had_candidates'    => $cycles !== [],
+        ];
     }
 
     /**

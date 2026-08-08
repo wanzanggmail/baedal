@@ -227,6 +227,38 @@ final class Org
         return $out;
     }
 
+    /**
+     * 대리점 기준 조직 체인 — 수수료를 나눠 갖는 조직들의 id.
+     *
+     * 대리점 위에 총판이 없는(본사 직속) 구조도 있으므로, 없는 레벨은 0으로 돌려준다.
+     * 수수료 배분(리스·영업대행)에서 "그 몫을 받을 조직이 실제로 있는지" 판단하는 데 쓴다.
+     *
+     * @return array{agency:int, distributor:int, hq:int}
+     */
+    public static function chainForAgency(int $agencyId): array
+    {
+        $out = ['agency' => 0, 'distributor' => 0, 'hq' => 0];
+        if ($agencyId < 1) {
+            return $out;
+        }
+        foreach (self::ancestorOrgIds($agencyId) as $oid) {
+            $org = self::find($oid);
+            if ($org === null) {
+                continue;
+            }
+            $lvl = (string) $org['level'];
+            if ($lvl === self::LEVEL_AGENCY && $out['agency'] === 0) {
+                $out['agency'] = $oid;
+            } elseif ($lvl === self::LEVEL_DISTRIBUTOR && $out['distributor'] === 0) {
+                $out['distributor'] = $oid;
+            } elseif ($lvl === self::LEVEL_ADMIN && $out['hq'] === 0) {
+                $out['hq'] = $oid;
+            }
+        }
+
+        return $out;
+    }
+
     /** 현재 계정이 해당 대리점 데이터에 접근(읽기/쓰기) 가능한지 — 스코프 내 여부 */
     public static function canAccessAgency(int $agencyId): bool
     {

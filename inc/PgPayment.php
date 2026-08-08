@@ -61,6 +61,8 @@ final class PgPayment
                     $id = self::record($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, 'success', $res->tid, '', $attempts, $adminId);
                     // 조달된 자금(net)을 대리점 잔액에 충전
                     AgencyWallet::credit($agencyId, $netAmount, 'pg_fund', $id, 'PG 카드결제 충전', $adminId);
+                    // 영업대행수수료(카드 청구액 − net)를 본사·총판·대리점 지갑에 배분 적립
+                    self::creditFeeSplit($agencyId, $fee, $id, $adminId);
 
                     return $id;
                 });
@@ -240,14 +242,80 @@ final class PgPayment
         );
     }
 
+    /**
+     * 영업대행수수료 3분할 금액 — 요율(%)을 금액으로 환산한다.
+     * 반올림 잔차는 대리점 몫이 흡수해 **세 금액의 합이 정확히 fee와 같다**(자금 증발/증가 없음).
+     *
+     * @return array{hq:int, distributor:int, agency:int, pct:array{hq:float, distributor:float, agency:float, total:float}}
+     */
+    public static function feeSplit(int $fee, int $agencyId): array
+    {
+        $bd   = PgFeeConfig::breakdownForAgency($agencyId);
+        $hq   = $bd['total'] > 0 ? (int) round($fee * $bd['hq'] / $bd['total']) : 0;
+        $dist = $bd['total'] > 0 ? (int) round($fee * $bd['distributor'] / $bd['total']) : 0;
+
+        return [
+            'hq'          => $hq,
+            'distributor' => $dist,
+            'agency'      => $fee - $hq - $dist,
+            'pct'         => $bd,
+        ];
+    }
+
+    /**
+     * 영업대행수수료를 본사·총판·대리점 지갑에 각각 적립한다(결제 성공 시).
+     *
+     * ⚠️ 리스 수수료 배분과 **자금 출처가 다르다** — 리스료는 라이더 정산에서 걷어 이미 대리점
+     * 지갑에 남아 있는 돈이라 "대리점 → 상위" 이동이었지만, 영업대행수수료는 **대리점이 카드로
+     * 결제한 금액 중 net을 넘는 부분**이라 어느 지갑에도 없던 돈이다. 따라서 어디서도 빼지 않고
+     * 세 조직에 각각 credit 한다(합계 = service_fee).
+     *
+     * 총판이 없는(본사 직속) 대리점이면 총판 몫은 갈 곳이 없으므로 **본사로 합친다** — 돈이
+     * 증발하지 않게 하되 어디로 갔는지 원장 메모에 남긴다.
+     */
+    private static function creditFeeSplit(int $agencyId, int $fee, int $pgId, ?int $adminId): void
+    {
+        if ($fee <= 0) {
+            return;
+        }
+        require_once __DIR__ . '/Org.php';
+
+        $sp    = self::feeSplit($fee, $agencyId);
+        $chain = Org::chainForAgency($agencyId);
+
+        $hq   = (int) $sp['hq'];
+        $dist = (int) $sp['distributor'];
+        $agy  = (int) $sp['agency'];
+        $note = 'PG 영업대행수수료 배분';
+
+        // 받을 조직이 없는 몫은 본사로 흡수(본사는 항상 존재)
+        $foldedNote = '';
+        if ($dist > 0 && $chain['distributor'] < 1) {
+            $hq  += $dist;
+            $dist = 0;
+            $foldedNote = ' · 총판 없음(본사 직속)이라 총판 몫을 본사에 합산';
+        }
+
+        if ($hq > 0 && $chain['hq'] > 0) {
+            AgencyWallet::credit($chain['hq'], $hq, 'pg_fee_in', $pgId, $note . ' · 본사 몫' . $foldedNote, $adminId);
+        }
+        if ($dist > 0 && $chain['distributor'] > 0) {
+            AgencyWallet::credit($chain['distributor'], $dist, 'pg_fee_in', $pgId, $note . ' · 총판 몫', $adminId);
+        }
+        if ($agy > 0 && $chain['agency'] > 0) {
+            AgencyWallet::credit($chain['agency'], $agy, 'pg_fee_in', $pgId, $note . ' · 대리점 몫', $adminId);
+        }
+    }
+
     private static function record(int $agencyId, ?int $riderId, ?int $uploadId, ?int $cardId, int $net, int $fee, int $total, string $status, string $tid, string $failReason, int $attempts, ?int $adminId): int
     {
         // 결제 시점 본사/총판/대리점 분배를 스냅샷으로 남긴다 — 나중에 org_fee_config
         // 요율이 바뀌어도 이 건의 실제 분배 내역은 그대로 보존된다.
-        $bd = PgFeeConfig::breakdownForAgency($agencyId);
-        $hqAmount   = $bd['total'] > 0 ? (int) round($fee * $bd['hq'] / $bd['total']) : 0;
-        $distAmount = $bd['total'] > 0 ? (int) round($fee * $bd['distributor'] / $bd['total']) : 0;
-        $agyAmount  = $fee - $hqAmount - $distAmount;
+        $sp         = self::feeSplit($fee, $agencyId);
+        $bd         = $sp['pct'];
+        $hqAmount   = (int) $sp['hq'];
+        $distAmount = (int) $sp['distributor'];
+        $agyAmount  = (int) $sp['agency'];
 
         $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
         $hasSplit = in_array('hq_amount', $cols, true);

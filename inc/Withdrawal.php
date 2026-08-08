@@ -16,6 +16,7 @@ final class Withdrawal
         'downloaded' => ['다운로드 완료', 'primary'],
         'completed'  => ['처리 완료', 'success'],
         'rejected'   => ['반려', 'danger'],
+        'failed'     => ['이체 실패', 'danger'],
     ];
 
     /** @var array<string, string> */
@@ -269,6 +270,9 @@ final class Withdrawal
             'status_label'     => $statusLabel,
             'status_class'     => $statusClass,
             'note'             => (string) ($w['note'] ?? ''),
+            // 이체 실패 사유 — 관리자가 원인을 알아야 계좌를 고치고 재시도할 수 있다.
+            'fail_reason'      => (string) ($w['fail_reason'] ?? ''),
+            'rejected_reason'  => (string) ($w['rejected_reason'] ?? ''),
             'tip'              => $tip,
         ];
     }
@@ -353,6 +357,125 @@ final class Withdrawal
     }
 
     /**
+     * 「출금 확정」 — 펌뱅킹(쿠콘·하이픈)으로 **건별 이체를 즉시 실행**한다.
+     *
+     * 기존 `markDownloaded`+`markCompleted`(파일 다운로드 후 수동 입금) 경로는 백업용으로
+     * 그대로 남아 있고, 이 메서드가 새 기본 경로다.
+     *
+     * 설계 원칙 — **건 단위 독립 처리(갑 확정 2026-08-08)**:
+     *  - 한 건씩 순서대로 이체하고, **실패해도 멈추지 않고 다음 건을 계속** 진행한다.
+     *  - 성공한 건만 `completed` + 지갑 차감, 실패한 건은 `failed` + `fail_reason` 기록.
+     *  - 즉 **실제로 돈이 나간 건까지만 완료 처리**된다(예전처럼 일괄 완료 도장을 찍지 않음).
+     *
+     * ⚠️ **건별로 커밋한다(전체를 한 트랜잭션으로 묶지 않음).** 이체는 외부 송금이라
+     * 되돌릴 수 없으므로, 뒷건이 실패했다고 앞건의 완료 기록을 롤백하면
+     * "돈은 나갔는데 시스템은 미완료"인 최악의 불일치가 생긴다.
+     *
+     * **이체 실패 시 사이클 점유는 유지한다 — 2026-08-08 갑 확정.**
+     * 실패해도 그 정산 건들은 여전히 이 요청 몫으로 잡아둔다. 이유: 이체 실패는 대부분
+     * 계좌 오류 같은 일시적 문제라 요청 자체는 유효하고, 점유를 곧바로 풀면 원인 파악 전에
+     * 라이더가 재신청해 **같은 정산 건을 두고 실패한 옛 요청과 새 요청이 공존**할 수 있다.
+     * 따라서 관리자가 계좌를 고쳐 이 메서드를 다시 호출(재시도)하거나, 포기할 거면
+     * `markRejected()`로 반려해야만 점유가 풀린다. 그 사이 라이더는 재신청할 수 없다
+     * (`hasOpenRiderRequest()`가 'failed'도 진행중으로 취급).
+     *
+     * @param list<int> $ids
+     * @return array{completed:int, failed:int, skipped:int, results:list<array{id:int, ok:bool, message:string}>}
+     */
+    public static function executeTransfers(array $ids): array
+    {
+        require_once INC_PATH . '/FirmBankingGateway.php';
+
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+        $out = ['completed' => 0, 'failed' => 0, 'skipped' => 0, 'results' => []];
+        if ($ids === []) {
+            return $out;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        // 이체 대상 = 아직 돈이 안 나간 건. 실패 건도 포함해 **재시도**를 지원한다.
+        $rows = db_rows(
+            "SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.withhold_other,
+                    wr.bank_code, wr.bank_account, wr.account_holder, wr.status,
+                    r.rider_code, r.agency_id AS rider_agency_id
+               FROM withdrawal_requests wr
+               LEFT JOIN riders r ON r.id = wr.rider_id
+              WHERE wr.id IN ({$placeholders})
+                AND wr.status IN ('pending', 'downloaded', 'failed')
+              ORDER BY wr.id ASC",
+            $ids
+        );
+        if ($rows === []) {
+            $out['skipped'] = count($ids);
+
+            return $out;
+        }
+
+        $gateway = FirmBankingGatewayFactory::make();
+
+        foreach ($rows as $row) {
+            $id       = (int) $row['id'];
+            $amount   = (int) ($row['amount'] ?? 0);
+            $agencyId = (int) ($row['agency_id'] ?: $row['rider_agency_id'] ?: 0);
+
+            try {
+                $res = $gateway->transfer(
+                    $agencyId,
+                    (string) ($row['bank_code'] ?? ''),
+                    (string) ($row['bank_account'] ?? ''),
+                    (string) ($row['account_holder'] ?? ''),
+                    $amount,
+                    ['request_id' => $id, 'rider_code' => (string) ($row['rider_code'] ?? '')]
+                );
+            } catch (Throwable $e) {
+                // 게이트웨이 자체가 터진 경우도 "이 건 실패"로만 처리하고 다음 건을 계속한다.
+                $res = TransferResult::fail('이체 요청 오류: ' . $e->getMessage());
+            }
+
+            if (!$res->success) {
+                db_execute(
+                    "UPDATE withdrawal_requests
+                        SET status = 'failed', fail_reason = ?
+                      WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+                    [mb_substr($res->failReason, 0, 300), $id]
+                );
+                $out['failed']++;
+                $out['results'][] = ['id' => $id, 'ok' => false, 'message' => $res->failReason];
+                continue;
+            }
+
+            // 성공 — 이 건만 단독으로 커밋한다(위 ⚠️ 참고).
+            $note = '펌뱅킹 이체 완료 · ' . $gateway->providerLabel() . ' · 거래번호 ' . $res->txId;
+            db_transaction(static function () use ($id, $row, $note): void {
+                $n = db_execute(
+                    // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
+                    "UPDATE withdrawal_requests
+                        SET status = 'completed', completed_at = NOW(), fail_reason = '',
+                            note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
+                      WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+                    [$note, $id]
+                );
+                if ($n < 1) {
+                    return; // 동시 처리로 이미 상태가 바뀌었으면 지갑을 건드리지 않는다.
+                }
+                if ((string) ($row['kind'] ?? '') === 'rider_manual') {
+                    // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료. 보증금은 남는 몫이라 제외.
+                    RiderWallet::deductAfterWithdrawal(
+                        (int) $row['rider_id'],
+                        (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
+                    );
+                }
+            });
+            $out['completed']++;
+            $out['results'][] = ['id' => $id, 'ok' => true, 'message' => $res->txId];
+        }
+
+        $out['skipped'] = max(0, count($ids) - count($rows));
+
+        return $out;
+    }
+
+    /**
      * @param list<int> $ids
      */
     public static function markRejected(array $ids, string $reason = ''): int
@@ -371,7 +494,7 @@ final class Withdrawal
             // 실제로 반려된 건만 대상으로 사이클 점유를 해제한다.
             $rejected = db_rows(
                 "SELECT id FROM withdrawal_requests
-                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded')",
+                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded', 'failed')",
                 $ids
             );
             $rejectedIds = array_map(static fn (array $r): int => (int) $r['id'], $rejected);
@@ -379,7 +502,7 @@ final class Withdrawal
             $n = db_execute(
                 "UPDATE withdrawal_requests
                     SET status = 'rejected', rejected_reason = ?
-                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded')",
+                  WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded', 'failed')",
                 array_merge([$reason], $ids)
             );
 
@@ -441,10 +564,13 @@ final class Withdrawal
             return true;
         }
 
+        // 'failed'(이체 실패)도 **진행 중으로 본다** — 실패해도 그 요청이 점유한 정산 사이클은
+        // 그대로 남아 있으므로(재시도 대상), 라이더가 새로 신청해 봐야 고를 사이클이 없다.
+        // 관리자가 재시도하거나 반려(→ 점유 해제)해야 다음 신청이 가능해진다.
         $row = db_row(
             "SELECT id FROM withdrawal_requests
               WHERE rider_id = ? AND kind = 'rider_manual'
-                AND status IN ('pending', 'downloaded')
+                AND status IN ('pending', 'downloaded', 'failed')
               LIMIT 1",
             [$riderId]
         );

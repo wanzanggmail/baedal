@@ -66,6 +66,7 @@ final class RiderWallet
         $picked      = [];
         $taken       = 0;
         $blocked     = false;
+        $shortfall   = 0;
         $cycleBased  = false;
 
         if ($afterReserve > 0 && WithdrawalCycles::tableReady()) {
@@ -73,7 +74,12 @@ final class RiderWallet
             $picked  = $sel['picked'];
             $taken   = (int) $sel['taken'];
             $blocked = (bool) $sel['blocked_by_policy'];
-            $cycleBased = $picked !== [];
+            $shortfall = (int) ($sel['blocked_shortfall'] ?? 0);
+            // ⚠️ 사이클 후보가 하나라도 있었으면 **고른 게 없어도** 사이클 모델로 간주한다.
+            // 예전엔 `$picked !== []` 만 봤는데, 건 단위(WHOLE) 정책에서 "출금가능액이 다음
+            // 사이클보다 작아 아무것도 못 고른" 정상 상황이 구 단일요율 폴백으로 새어 들어가
+            // **사이클을 하나도 마킹하지 않은 채 잔액−보증금 전액이 지급**되는 문제가 있었다.
+            $cycleBased = $picked !== [] || (bool) ($sel['had_candidates'] ?? false);
         }
 
         if ($cycleBased) {
@@ -120,6 +126,8 @@ final class RiderWallet
             'consume_amount'    => $consume,      // 지갑에서 빠지는 총액(지급+수수료)
             'picked_cycles'     => $picked,
             'blocked_by_policy' => $blocked,
+            // 건 단위 출금 정책상 이번엔 못 가져가는 경우, 얼마가 더 쌓이면 풀리는지
+            'blocked_shortfall' => $shortfall,
         ];
     }
 
