@@ -185,6 +185,15 @@ if ($method === 'GET') {
 
     // 멀티테넌시: 소속 대리점 스코프
     require_once INC_PATH . '/Org.php';
+
+    // 특정 대리점으로 명시적 필터(대리점 먼저 선택 → 그 안에서 라이더 검색하는 화면용).
+    // 접근 권한 밖 대리점을 넘기면 무시(스코프 조건만 적용) — 결과가 0건이 되므로 정보 노출 없음.
+    $agencyFilter = (int) ($_GET['agency'] ?? 0);
+    if ($agencyFilter > 0 && Org::canAccessAgency($agencyFilter)) {
+        $where[] = 'r.agency_id = ?';
+        $params[] = $agencyFilter;
+    }
+
     [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
     if ($scopeSql !== '') {
         $where[] = $scopeSql;

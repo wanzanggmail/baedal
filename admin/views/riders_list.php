@@ -141,7 +141,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				<?php if (!empty($agencyOptions)): ?>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">대리점</label>
-					<select class="form-select form-select-solid" name="agency">
+					<select class="form-select form-select-solid" name="agency" data-control="select2" data-placeholder="전체">
 						<option value="">전체</option>
 						<?php foreach ($agencyOptions as $ao): ?>
 						<option value="<?= (int) $ao['id'] ?>"
@@ -305,8 +305,9 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<div class="row g-6 mb-6">
 							<div class="col-md-12">
 								<label class="form-label required">소속 대리점</label>
-								<select class="form-select form-select-solid" id="reg_agency_id" required>
-									<option value="">대리점 선택</option>
+								<select class="form-select form-select-solid" id="reg_agency_id" required
+									data-control="select2" data-placeholder="대리점 선택" data-dropdown-parent="#kt_rider_register_modal">
+									<option value=""></option>
 									<?php foreach ($agencyOptions as $ag): ?>
 									<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
 									<?php endforeach; ?>
@@ -497,6 +498,8 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 
 	document.getElementById('kt_rider_register_modal').addEventListener('show.bs.modal', function () {
 		document.getElementById('rider_register_form').reset();
+		var resetAgencyEl = document.getElementById('reg_agency_id');
+		if (resetAgencyEl && window.jQuery) { jQuery(resetAgencyEl).val('').trigger('change'); }
 		var al = document.getElementById('reg_alert');
 		al.className = 'd-none mb-6';
 		al.textContent = '';

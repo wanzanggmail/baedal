@@ -50,9 +50,18 @@ $agencies = $needsMigrate ? [] : db_rows(
 			<div class="card card-flush h-100">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">라이더 지갑 조정</h3></div>
 				<div class="card-body pt-2 fs-7">
+					<div class="mb-3">
+						<label class="form-label required">대리점</label>
+						<select class="form-select form-select-solid" id="ma_wallet_agency_sel" data-control="select2" data-placeholder="대리점을 먼저 선택하세요">
+							<option value=""></option>
+							<?php foreach ($agencies as $a) : ?>
+							<option value="<?= (int) $a['id'] ?>"><?= htmlspecialchars($a['name'] . ' (' . $a['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
 					<div class="input-group mb-4">
-						<input type="text" class="form-control form-control-solid" id="ma_rider_key" placeholder="라이더 코드 또는 ID" />
-						<button class="btn btn-light-primary" type="button" id="ma_rider_lookup">조회</button>
+						<select class="form-select form-select-solid" id="ma_wallet_rider_sel" disabled></select>
+						<button class="btn btn-light-primary" type="button" id="ma_rider_lookup" disabled>조회</button>
 					</div>
 					<div id="ma_rider_panel" class="d-none">
 						<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
@@ -81,14 +90,14 @@ $agencies = $needsMigrate ? [] : db_rows(
 			<div class="card card-flush h-100">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">대리점 지갑 조정</h3></div>
 				<div class="card-body pt-2 fs-7">
-					<div class="input-group mb-4">
-						<select class="form-select form-select-solid" id="ma_agency_sel">
-							<option value="">대리점 선택…</option>
+					<div class="mb-4">
+						<select class="form-select form-select-solid" id="ma_agency_sel" data-control="select2" data-placeholder="대리점 선택…">
+							<option value=""></option>
 							<?php foreach ($agencies as $a) : ?>
 							<option value="<?= (int) $a['id'] ?>"><?= htmlspecialchars($a['name'] . ' (' . $a['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
 							<?php endforeach; ?>
 						</select>
-						<button class="btn btn-light-primary" type="button" id="ma_agency_lookup">조회</button>
+						<button class="btn btn-light-primary mt-3 w-100" type="button" id="ma_agency_lookup">조회</button>
 					</div>
 					<div id="ma_agency_panel" class="d-none">
 						<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
@@ -146,11 +155,58 @@ $agencies = $needsMigrate ? [] : db_rows(
 			}).then(function (r) { return r.json(); });
 		}
 
-		// 라이더
-		document.getElementById('ma_rider_lookup').addEventListener('click', function () {
-			var key = document.getElementById('ma_rider_key').value.trim();
-			if (!key) { showToast('라이더 코드/ID를 입력하세요.', false); return; }
-			fetch(API + '?type=rider&rider=' + encodeURIComponent(key), { credentials: 'same-origin' })
+		// 라이더 — 대리점 먼저 선택 → 그 대리점 소속 라이더만 검색(select2 ajax)
+		// jQuery/select2는 plugins.bundle.js에서 오는데 그 스크립트가 이 뷰의 아래(inc/shell_close.php)에
+		// 위치해 아직 로드 전이다 — DOMContentLoaded(모든 동기 스크립트 실행 후 발생) 이후로 초기화를 미룬다.
+		var RIDERS_API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/riders.php', JSON_UNESCAPED_UNICODE) ?>;
+		var lookupBtn = document.getElementById('ma_rider_lookup');
+
+		function initWalletRiderCascade() {
+			var walletAgencySel = jQuery('#ma_wallet_agency_sel');
+			var walletRiderSel = jQuery('#ma_wallet_rider_sel');
+
+			walletRiderSel.select2({
+				placeholder: '라이더 선택',
+				allowClear: false,
+				ajax: {
+					url: RIDERS_API,
+					dataType: 'json',
+					delay: 250,
+					data: function (params) {
+						return { q: params.term || '', agency: walletAgencySel.val() || 0, limit: 30 };
+					},
+					processResults: function (data) {
+						return {
+							results: (data.items || []).map(function (r) {
+								return { id: r.id, text: r.name + ' (' + r.rider_code + ')' };
+							}),
+						};
+					},
+				},
+			});
+
+			walletAgencySel.on('change', function () {
+				var agencyId = walletAgencySel.val();
+				walletRiderSel.val(null).trigger('change');
+				walletRiderSel.prop('disabled', !agencyId);
+				lookupBtn.disabled = true;
+				document.getElementById('ma_rider_panel').classList.add('d-none');
+			});
+			walletRiderSel.on('change', function () {
+				lookupBtn.disabled = !walletRiderSel.val();
+			});
+		}
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', initWalletRiderCascade);
+		} else {
+			initWalletRiderCascade();
+		}
+
+		lookupBtn.addEventListener('click', function () {
+			var walletRiderSel = jQuery('#ma_wallet_rider_sel');
+			var riderId = parseInt(walletRiderSel.val(), 10) || 0;
+			if (!riderId) { showToast('라이더를 선택하세요.', false); return; }
+			fetch(API + '?type=rider&rider=' + riderId, { credentials: 'same-origin' })
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '조회 실패');
