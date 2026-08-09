@@ -406,6 +406,46 @@ final class Promotion
         );
     }
 
+    /**
+     * 라이더 본인이 받은(또는 받을 예정인) 프로모션 내역 — 정산 화면의 「프로모션」 섹션용.
+     * `listForRider()`와 달리 기간(pay_date) 필터를 받고, 대기(pending)·실패(failed)까지
+     * 함께 보여준다(라이더가 "왜 안 들어왔지"를 스스로 확인할 수 있게).
+     *
+     * @param array{from?:string, to?:string} $filters
+     * @return list<array<string,mixed>>
+     */
+    public static function listForRiderPeriod(int $riderId, array $filters = [], int $limit = 100): array
+    {
+        if ($riderId < 1 || !self::tableReady()) {
+            return [];
+        }
+        $limit = max(1, min(200, $limit));
+
+        $where  = ['e.rider_id = ?', "e.status IN ('paid', 'pending', 'failed')"];
+        $params = [$riderId];
+
+        $from = trim((string) ($filters['from'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $where[]  = 'b.pay_date >= ?';
+            $params[] = $from;
+        }
+        $to = trim((string) ($filters['to'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $where[]  = 'b.pay_date <= ?';
+            $params[] = $to;
+        }
+
+        return db_rows(
+            'SELECT e.promo1_amount, e.promo2_amount, e.total_amount, e.status, e.fail_reason, e.paid_at, b.pay_date
+               FROM promotion_entries e
+               INNER JOIN promotion_batches b ON b.id = e.batch_id
+              WHERE ' . implode(' AND ', $where) . '
+              ORDER BY b.pay_date DESC, e.id DESC
+              LIMIT ' . $limit,
+            $params
+        );
+    }
+
     /** 배치 삭제 (draft·전건 실패만 — 지급된 건이 있으면 금지) */
     public static function deleteBatch(int $batchId): void
     {

@@ -533,13 +533,17 @@ final class Withdrawal
     /**
      * @return list<array<string, mixed>>
      */
-    public static function listForRider(int $riderId, int $limit = 50): array
+    /**
+     * @param array{from?:string, to?:string} $filters from/to는 신청일(requested_at) 기준, 'YYYY-MM-DD'
+     */
+    public static function listForRider(int $riderId, int $limit = 50, array $filters = []): array
     {
         if ($riderId < 1) {
             return [];
         }
 
-        $limit = max(1, min(100, $limit));
+        [$dateWhere, $dateParams] = self::riderDateWhere($filters);
+        $limit = max(1, min(200, $limit));
         $rows  = db_rows(
             "SELECT wr.*,
                     r.name AS rider_name,
@@ -549,13 +553,88 @@ final class Withdrawal
                INNER JOIN riders r ON r.id = wr.rider_id
                LEFT JOIN system_codes sc
                       ON sc.category = 'bank' AND sc.code = wr.bank_code
-              WHERE wr.rider_id = ?
+              WHERE wr.rider_id = ? {$dateWhere}
               ORDER BY wr.requested_at DESC, wr.id DESC
               LIMIT {$limit}",
-            [$riderId]
+            array_merge([$riderId], $dateParams)
         );
 
         return array_map([self::class, 'mapRow'], $rows);
+    }
+
+    /**
+     * 기간 내 출금 신청 합계(라이더 화면 상단 요약용) — 화면 표시 상한(limit)과 무관하게
+     * 항상 필터 전체를 집계한다.
+     *
+     * @param array{from?:string, to?:string} $filters
+     * @return array{count:int, gross:int, reserve:int, fee:int, amount:int,
+     *               completed_count:int, completed_amount:int,
+     *               pending_count:int, pending_amount:int}
+     */
+    public static function sumForRider(int $riderId, array $filters = []): array
+    {
+        $empty = [
+            'count' => 0, 'gross' => 0, 'reserve' => 0, 'fee' => 0, 'amount' => 0,
+            'completed_count' => 0, 'completed_amount' => 0,
+            'pending_count' => 0, 'pending_amount' => 0,
+        ];
+        if ($riderId < 1 || !db_table_exists('withdrawal_requests')) {
+            return $empty;
+        }
+
+        [$dateWhere, $dateParams] = self::riderDateWhere($filters);
+        $row = db_row(
+            "SELECT COUNT(*) AS cnt,
+                    COALESCE(SUM(gross_amount), 0) AS gross,
+                    COALESCE(SUM(withhold_min_retain), 0) AS reserve,
+                    COALESCE(SUM(withhold_other), 0) AS fee,
+                    COALESCE(SUM(amount), 0) AS amount,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count,
+                    COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS completed_amount,
+                    SUM(CASE WHEN status IN ('pending','downloaded','failed') THEN 1 ELSE 0 END) AS pending_count,
+                    COALESCE(SUM(CASE WHEN status IN ('pending','downloaded','failed') THEN amount ELSE 0 END), 0) AS pending_amount
+               FROM withdrawal_requests wr
+              WHERE wr.rider_id = ? {$dateWhere}",
+            array_merge([$riderId], $dateParams)
+        );
+
+        if ($row === null) {
+            return $empty;
+        }
+
+        return [
+            'count'             => (int) $row['cnt'],
+            'gross'             => (int) $row['gross'],
+            'reserve'           => (int) $row['reserve'],
+            'fee'               => (int) $row['fee'],
+            'amount'            => (int) $row['amount'],
+            'completed_count'   => (int) $row['completed_count'],
+            'completed_amount'  => (int) $row['completed_amount'],
+            'pending_count'     => (int) $row['pending_count'],
+            'pending_amount'    => (int) $row['pending_amount'],
+        ];
+    }
+
+    /**
+     * @param array{from?:string, to?:string} $filters
+     * @return array{0:string, 1:list<string>}
+     */
+    private static function riderDateWhere(array $filters): array
+    {
+        $from = trim((string) ($filters['from'] ?? ''));
+        $to   = trim((string) ($filters['to'] ?? ''));
+        $sql  = '';
+        $params = [];
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $sql .= ' AND wr.requested_at >= ?';
+            $params[] = $from . ' 00:00:00';
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $sql .= ' AND wr.requested_at <= ?';
+            $params[] = $to . ' 23:59:59';
+        }
+
+        return [$sql, $params];
     }
 
     public static function hasOpenRiderRequest(int $riderId): bool

@@ -400,6 +400,17 @@ final class SettlementLedger
     }
 
     /**
+     * 라이더 화면에 표시할 공제 요율(원천세·고용보험·산재보험). `globalDeductionConfig()`의
+     * 공개 래퍼 — 대리점(org) 설정이 있으면 그 값, 없으면 전역 기본값.
+     *
+     * @return array{withholding_tax_pct:float, employment_ins_pct:float, industrial_accident_ins_pct:float}
+     */
+    public static function deductionRates(?int $orgId = null): array
+    {
+        return self::globalDeductionConfig($orgId);
+    }
+
+    /**
      * listForRider()와 동일한 필터로 라이더 1명의 항목별(fee_code) 합계를 낸다.
      *
      * @param array<string, mixed> $filters
