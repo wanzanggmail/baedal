@@ -132,7 +132,8 @@ php scripts/seed_riders_from_settlement.php --upload-id=3 --sql-only > seed_ride
 
 - **복사**: admin, rider, assets, inc, … (Git 추적 파일)
 - **삭제 동기화**: Git에서 지운 파일은 서버에서도 삭제 (`uploads` 제외)
-- **제외**: `.git`, `.env`, `uploads/`, 마이그레이션·시드 스크립트
+- **제외**: `.git`, `.env`, `uploads/`, `vendor/`, 마이그레이션·시드 스크립트
+- **composer install**: `vendor/`는 rsync로 옮기지 않고, rsync 직후 서버에 SSH로 접속해 `composer.lock` 기준으로 직접 설치한다(서버에 `composer` 명령이 없으면 파이프라인이 자동으로 설치기를 내려받아 씀). `composer.json`에 패키지를 추가/변경했으면 **반드시 `composer.lock`도 커밋**해야 서버에 똑같이 반영된다 — `composer.lock`이 안 바뀌면 서버는 예전 의존성 그대로다.
 
 ---
 
@@ -143,6 +144,7 @@ php scripts/seed_riders_from_settlement.php --upload-id=3 --sql-only > seed_ride
 | `Permission denied (publickey)` | `DEPLOY_USER`=`ec2-user`, PEM 전체가 Secret에 들어갔는지 |
 | `No such file or directory` | `DEPLOY_PATH`가 admin/rider가 있는 **정확한** 경로인지 |
 | 배포 후 500 에러 | 서버 `.env` 존재·DB 접속, `uploads` 권한 |
+| `Class "Parsedown" not found` 등 `Class ... not found` | `vendor/`가 서버에 없거나 옛날 상태. Actions 로그의 **"Install composer dependencies on server"** 단계가 성공했는지 확인. 그 단계가 없던 옛 커밋으로 배포된 서버라면 한 번 수동으로 `cd DEPLOY_PATH && composer install --no-dev`(또는 위 자동설치 스크립트) 실행 |
 | Actions만 실패, SSH는 됨 | PEM 줄바꿈 깨짐 → Secret 다시 붙여넣기 |
 
 Lightsail 방화벽: **SSH 22** 포트가 열려 있어야 합니다 (기본 허용).

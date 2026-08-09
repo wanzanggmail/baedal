@@ -73,6 +73,31 @@ jobs:
             --exclude 'seed.sql' \
             ./ "$DEST"
 
+      - name: Install composer dependencies on server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          # vendor/ 는 위 rsync에서 --exclude 되므로(용량·권한 문제 회피), PHP 의존성(Parsedown,
+          # PhpSpreadsheet 등)은 서버에서 composer.lock 기준으로 직접 설치한다. 이 단계가 없으면
+          # 코드는 배포돼도 vendor/가 서버에 전혀 존재하지 않아 "Class ... not found"로 즉시 죽는다
+          # (실제로 겪은 장애: ManualDocs.php의 Parsedown).
+          PORT="${DEPLOY_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key -p "$PORT" -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "set -e; cd '${DEPLOY_PATH}'; \
+             if command -v composer >/dev/null 2>&1; then \
+               composer install --no-dev --optimize-autoloader --no-interaction; \
+             else \
+               php -r \"copy('https://getcomposer.org/installer', 'composer-setup.php');\"; \
+               php composer-setup.php --quiet; \
+               rm -f composer-setup.php; \
+               php composer.phar install --no-dev --optimize-autoloader --no-interaction; \
+               rm -f composer.phar; \
+             fi"
+
       - name: Fix permissions (optional)
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
