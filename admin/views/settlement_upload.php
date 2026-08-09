@@ -457,6 +457,12 @@ $platformLabels = [
 	const previewApiUrl = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload_preview.php', ENT_QUOTES, 'UTF-8') ?>';
 	const uploadApiUrl  = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload.php', ENT_QUOTES, 'UTF-8') ?>';
 	const registerApiUrl = '<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_register_rider.php', ENT_QUOTES, 'UTF-8') ?>';
+	// 업로드 확정 후 곧바로 이동할 상세 화면(?id= 는 아래에서 붙인다)
+	const detailBaseUrl = <?php
+		$upDetailUrl = admin_url('settlement/upload-detail');
+		$upDetailUrl .= (str_contains($upDetailUrl, '?') ? '&' : '?') . 'id=';
+		echo json_encode($upDetailUrl, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
+	?>;
 
 	let lastDetected = null;
 	let lastConfidence = 'none';
@@ -858,9 +864,16 @@ $platformLabels = [
 				if (data.warnings && data.warnings.length > 0) {
 					html += `<div class="alert alert-warning mt-3 mb-0 p-3 fs-8">${data.warnings.map(escHtml).join('<br>')}</div>`;
 				}
+				html += `<div class="text-gray-600 fs-8 mt-3">잠시 후 업로드 상세 화면으로 이동합니다…</div>`;
 				html += `</div>`;
 				showResult('', html, true);
-				setTimeout(() => location.reload(), 2200);
+				// 업로드 직후 바로 상세로 — 매칭 확인·정산 반영을 이어서 하기 위함.
+				// upload_id가 없으면(구 응답 등) 기존처럼 목록만 갱신한다.
+				if (data.upload_id) {
+					setTimeout(() => { window.location.href = detailBaseUrl + encodeURIComponent(data.upload_id); }, 1200);
+				} else {
+					setTimeout(() => location.reload(), 2200);
+				}
 			} else if (data.code === 'platform_mismatch') {
 				bootstrap.Modal.getInstance(previewModalEl).hide();
 				handleMismatch(data);

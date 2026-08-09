@@ -82,13 +82,30 @@ final class PgPayment
     /**
      * 정산 반영된 업로드의 미충전 라이더들을 라이더별 건건히 결제(자금 조달).
      *
-     * @return array{charged:int, funded:int, failed:list<string>}
+     * 정산 반영(`SettlementLedger::applyUpload`) 직후 호출된다 — 플랫폼 수수료는 이 결제에서
+     * 발생하므로, 정산이 반영되는 시점에 곧바로 잡혀야 「플랫폼 수수료 내역」에 나타난다.
+     *
+     * 재실행해도 안전하다 — 이미 `success`로 결제된 (upload_id, rider_id)는 조회에서 빠지므로
+     * 재반영 시 이중 청구가 되지 않는다.
+     *
+     * @return array{charged:int, funded:int, fee:int, failed:list<string>, skipped_reason:string}
      */
     public static function fundAppliedUpload(int $uploadId, int $agencyId, ?int $adminId = null): array
     {
         $charged = 0;
         $funded  = 0;
+        $feeSum  = 0;
         $failed  = [];
+
+        if (!self::tableExists()) {
+            return ['charged' => 0, 'funded' => 0, 'fee' => 0, 'failed' => [], 'skipped_reason' => 'pg_payments 테이블이 없습니다. php migrate.php 를 실행하세요.'];
+        }
+
+        // 카드가 없으면 라이더 수만큼 "카드 없음" 실패 기록이 쌓이므로, 여기서 한 번에 막고
+        // 사유만 돌려준다(관리자에겐 실패 25건보다 "카드를 등록하세요" 한 줄이 훨씬 유용하다).
+        if (AgencyCard::activeForAgency($agencyId) === []) {
+            return ['charged' => 0, 'funded' => 0, 'fee' => 0, 'failed' => [], 'skipped_reason' => '등록된 결제 카드가 없어 자금 조달을 건너뛰었습니다. 「결제수단 관리」에서 카드를 등록하세요.'];
+        }
 
         $cycles = db_rows(
             'SELECT c.rider_id, c.net_amount, r.name
@@ -109,6 +126,7 @@ final class PgPayment
                 $charged++;
                 if ($r['success']) {
                     $funded += (int) $r['net'];
+                    $feeSum += (int) $r['fee'];
                 } else {
                     $failed[] = (string) $c['name'] . ': ' . $r['fail_reason'];
                 }
@@ -117,7 +135,7 @@ final class PgPayment
             }
         }
 
-        return ['charged' => $charged, 'funded' => $funded, 'failed' => $failed];
+        return ['charged' => $charged, 'funded' => $funded, 'fee' => $feeSum, 'failed' => $failed, 'skipped_reason' => ''];
     }
 
     /**

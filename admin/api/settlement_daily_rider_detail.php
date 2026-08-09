@@ -55,6 +55,41 @@ $platformLabels = ['baemin' => '배달의민족', 'coupang' => '쿠팡이츠', '
 $statusLabels   = ['active' => '활동 중', 'suspended' => '일시 정지', 'leave_request' => '탈퇴 요청', 'offboarded' => '계약 종료'];
 $matched        = $row['matched_rider_id'] !== null;
 
+$earn = (int) $row['fee_pickup'] + (int) $row['fee_delivery'] + (int) $row['fee_area']
+    + (int) $row['fee_dist_surge'] + (int) $row['fee_pickup_surge'] + (int) $row['fee_dest_surge']
+    + (int) $row['fee_weather'] + (int) $row['fee_promo1'] + (int) $row['fee_promo2']
+    + (int) $row['fee_promo3'] + (int) $row['fee_promo4'];
+$gross  = (int) $row['gross_amount'];
+$payout = (int) $row['payout_amount'];
+$hourly = (int) ($row['hourly_insurance'] ?? 0);
+$vatGuess = (int) round($earn * 0.1);
+$vat = ($earn > 0 && $gross > 0 && abs($gross - $earn - $vatGuess) <= 2)
+    ? ($gross - $earn)
+    : 0;
+$feeTotal = $gross > 0 ? max(0, $gross - $payout) : 0;
+$other    = max(0, $feeTotal - $vat - $hourly);
+
+$weekly = [];
+if (db_table_exists('settlement_weekly_deductions')) {
+    $wSql = 'SELECT deduction_type, store_name, amount, order_date
+               FROM settlement_weekly_deductions
+              WHERE upload_id = ? AND (rider_name_raw = ?';
+    $wParams = [(int) $row['upload_id'], (string) $row['rider_name_raw']];
+    if (!empty($row['rider_id'])) {
+        $wSql .= ' OR rider_id = ?';
+        $wParams[] = (int) $row['rider_id'];
+    }
+    $wSql .= ') ORDER BY id ASC';
+    foreach (db_rows($wSql, $wParams) as $w) {
+        $weekly[] = [
+            'type'       => (string) $w['deduction_type'],
+            'store_name' => (string) ($w['store_name'] ?? ''),
+            'amount'     => abs((int) $w['amount']),
+            'order_date' => (string) ($w['order_date'] ?? ''),
+        ];
+    }
+}
+
 echo json_encode([
     'ok'   => true,
     'row'  => [
@@ -67,8 +102,13 @@ echo json_encode([
         'license_id'       => (string) $row['license_id'],
         'rider_name_raw'   => (string) $row['rider_name_raw'],
         'order_count'      => (int) $row['order_count'],
-        'gross_amount'     => (int) $row['gross_amount'],
-        'payout_amount'    => (int) $row['payout_amount'],
+        'gross_amount'     => $gross,
+        'payout_amount'    => $payout,
+        'earn_amount'      => $earn,
+        'vat_amount'       => $vat,
+        'fee_hourly'       => $hourly,
+        'fee_other'        => $other,
+        'fee_total'        => $feeTotal,
         'fee_pickup'       => (int) $row['fee_pickup'],
         'fee_delivery'     => (int) $row['fee_delivery'],
         'fee_area'         => (int) $row['fee_area'],
@@ -84,8 +124,9 @@ echo json_encode([
         'fee_promo2'       => (int) $row['fee_promo2'],
         'fee_promo3'       => (int) $row['fee_promo3'],
         'fee_promo4'       => (int) $row['fee_promo4'],
-        'hourly_insurance' => (int) ($row['hourly_insurance'] ?? 0),
+        'hourly_insurance' => $hourly,
         'support_amount'   => (int) ($row['support_amount'] ?? 0),
+        'weekly_deductions'=> $weekly,
         'created_at'       => substr((string) $row['created_at'], 0, 19),
         'matched'          => $matched,
         'rider'            => $matched ? [

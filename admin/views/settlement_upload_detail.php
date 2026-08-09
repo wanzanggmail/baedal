@@ -56,13 +56,23 @@ $whereStr = implode(' AND ', $where);
 
 $riders = db_rows(
     "SELECT dr.*,
-            r.rider_code, r.name AS rider_name, r.team_code, r.phone, r.status AS rider_status
+            r.rider_code, r.name AS rider_name, r.team_code, r.phone, r.status AS rider_status,
+            r.is_daily_settlement
        FROM settlement_daily_riders dr
        LEFT JOIN riders r ON r.id = dr.rider_id
       WHERE {$whereStr}
       ORDER BY dr.payout_amount DESC, dr.rider_name_raw ASC",
     $params
 );
+
+// 이 업로드에서 매칭된 라이더 중 일일정산(선정산) 대상자 수 — 정산 반영 시 자동 출금될 인원.
+$dailyCount = (int) (db_row(
+    'SELECT COUNT(*) AS cnt
+       FROM settlement_daily_riders dr
+       INNER JOIN riders r ON r.id = dr.rider_id
+      WHERE dr.upload_id = ? AND r.is_daily_settlement = 1',
+    [$uploadId]
+)['cnt'] ?? 0);
 
 $totals = db_row(
     'SELECT COUNT(*) AS cnt,
@@ -132,6 +142,7 @@ $st = $statusLabels[$upload['status']] ?? ['label' => (string) $upload['status']
 $uploadListUrl  = admin_url('settlement/upload');
 $historyUrl     = admin_url('settlement/history');
 $riderDetailUrl = admin_url('riders/detail');
+$riderDetailUrl .= str_contains($riderDetailUrl, '?') ? '&id=' : '?id=';
 
 $detailBaseUrl = admin_url('settlement/upload-detail');
 $detailBaseUrl .= str_contains($detailBaseUrl, '?') ? '&' : '?';
@@ -183,6 +194,21 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		<div class="fs-7 text-gray-800">
 			<strong>건단위(오더상세) 데이터가 없습니다.</strong> 라이더 요약은 정상 저장됐지만, 원본 파일에서 "오더별" 상세 탭을 찾지 못한 것으로 보입니다.
 			탭 이름·헤더가 바뀌었는지 원본 파일을 확인한 뒤 다시 업로드해 주세요.
+		</div>
+	</div>
+	<?php endif; ?>
+
+	<?php if ($dailyCount > 0 && in_array(($upload['status'] ?? ''), ['parsed', 'applied'], true)) : ?>
+	<div class="alert bg-light-success d-flex align-items-center p-5 mb-6">
+		<i class="ki-duotone ki-wallet fs-2hx text-success me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
+		<div class="fs-7 text-gray-800">
+			<strong>일일정산 대상 <?= number_format($dailyCount) ?>명</strong>이 포함되어 있습니다.
+			「<?= ($upload['status'] ?? '') === 'applied' ? '정산 재반영' : '정산 반영 · 수수료·지갑' ?>」을 누르면 이 라이더들은 <strong>보증금을 제외한 금액이 곧바로 출금(실제 이체)</strong>됩니다.
+			계좌 미등록·출금보류이거나 보증금이 아직 안 찬 라이더는 자동으로 건너뛰며, 반영 후 사유가 표시됩니다.
+			<?php if (($upload['status'] ?? '') === 'applied') : ?>
+			<span class="d-block mt-1">계좌를 뒤늦게 등록했다면 <strong>「정산 재반영」을 다시 누르면 자동출금이 재시도</strong>됩니다
+			(이미 지급된 정산분은 중복 출금되지 않습니다).</span>
+			<?php endif; ?>
 		</div>
 	</div>
 	<?php endif; ?>
@@ -289,6 +315,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<th class="min-w-40px">#</th>
 							<th class="min-w-120px">엑셀 이름</th>
 							<th class="min-w-100px">라이더</th>
+							<th class="min-w-80px">정산유형</th>
 							<th class="min-w-110px">라이선스 ID</th>
 							<th class="min-w-60px text-end">오더</th>
 							<th class="min-w-100px text-end">정산예정</th>
@@ -303,7 +330,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<tbody>
 					<?php if ($riders === []) : ?>
 						<tr>
-							<td colspan="12" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
+							<td colspan="13" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
 						</tr>
 					<?php else :
 					    $i = 0;
@@ -320,7 +347,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							</td>
 							<td>
 								<?php if ($matched) : ?>
-									<a href="<?= htmlspecialchars($riderDetailUrl . '?id=' . (int) $row['rider_id'], ENT_QUOTES, 'UTF-8') ?>"
+									<a href="<?= htmlspecialchars($riderDetailUrl . (int) $row['rider_id'], ENT_QUOTES, 'UTF-8') ?>"
 									   class="text-gray-900 text-hover-primary fw-bold">
 										<?= htmlspecialchars((string) ($row['rider_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
 									</a>
@@ -329,6 +356,15 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 									<?php endif; ?>
 								<?php else : ?>
 									<span class="text-muted">—</span>
+								<?php endif; ?>
+							</td>
+							<td>
+								<?php if (!$matched) : ?>
+									<span class="text-muted">—</span>
+								<?php elseif (!empty($row['is_daily_settlement'])) : ?>
+									<span class="badge badge-light-success" title="정산 반영 시 보증금을 제외한 금액이 자동으로 출금됩니다.">일일정산</span>
+								<?php else : ?>
+									<span class="badge badge-light-secondary">주정산</span>
 								<?php endif; ?>
 							</td>
 							<td class="font-monospace fs-7"><?= htmlspecialchars((string) $row['license_id'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -359,7 +395,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 								<?php endif; ?>
 							</td>
 							<td>
-								<button type="button" class="btn btn-sm btn-light-primary dr-detail-btn" data-id="<?= (int) $row['id'] ?>">상세</button>
+								<button type="button" class="btn btn-sm btn-light-primary dr-detail-btn"
+									data-id="<?= (int) $row['id'] ?>"
+									data-name="<?= htmlspecialchars((string) $row['rider_name_raw'], ENT_QUOTES, 'UTF-8') ?>">상세</button>
 							</td>
 						</tr>
 						<?php endforeach; ?>
@@ -436,10 +474,10 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 
 	<!--begin::원본 데이터 상세 모달-->
 	<div class="modal fade" id="kt_dr_detail_modal" tabindex="-1" aria-hidden="true">
-		<div class="modal-dialog modal-dialog-centered modal-lg">
+		<div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
 			<div class="modal-content">
 				<div class="modal-header">
-					<h3 class="modal-title">정산 원본 데이터 상세</h3>
+					<h3 class="modal-title" id="dr_detail_title">정산 원본 데이터 상세</h3>
 					<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
 				</div>
 				<div class="modal-body fs-7" id="dr_detail_body">
@@ -687,75 +725,158 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		var API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/settlement_daily_rider_detail.php', JSON_UNESCAPED_UNICODE) ?>;
 		var RIDER_DETAIL_URL = <?= json_encode($riderDetailUrl, JSON_UNESCAPED_UNICODE) ?>;
 		var modalEl = document.getElementById('kt_dr_detail_modal');
+		var titleEl = document.getElementById('dr_detail_title');
 		var body = document.getElementById('dr_detail_body');
 		var riderLink = document.getElementById('dr_detail_rider_link');
 
-		function won(n) { return (n || 0).toLocaleString('ko-KR') + '원'; }
+		function won(n) { return (Number(n) || 0).toLocaleString('ko-KR') + '원'; }
 		function esc(s) {
 			return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
 				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
 			});
 		}
-		function row(label, value) {
-			return '<div class="d-flex justify-content-between py-1 border-bottom border-gray-200">' +
-				'<span class="text-muted">' + esc(label) + '</span><span class="fw-semibold">' + value + '</span></div>';
+		function plusWon(n) { return '+ ' + won(n); }
+		function minusWon(n) { return '− ' + won(Math.abs(Number(n) || 0)); }
+		function moneyRow(label, valueHtml, opts) {
+			opts = opts || {};
+			var wrap = opts.wrapClass || 'd-flex justify-content-between align-items-start py-2';
+			if (opts.border) wrap += ' border-bottom';
+			var note = opts.note ? '<span class="d-block text-muted fs-8 fw-normal">' + esc(opts.note) + '</span>' : '';
+			return '<div class="' + wrap + '"><span>' + esc(label) + note + '</span>' +
+				'<span class="fw-semibold text-nowrap ms-4">' + valueHtml + '</span></div>';
 		}
-
+		function itemTable(title, items, sign, footerLabel) {
+			var active = [];
+			items.forEach(function (it) {
+				if ((Number(it.amt) || 0) !== 0 || (it.cnt || 0) > 0) active.push(it);
+			});
+			if (!active.length) return '';
+			var sum = 0;
+			var html = '<div class="fw-bold text-gray-800 mb-2">' + esc(title) + '</div>';
+			html += '<table class="table table-row-bordered align-middle gy-2 mb-5">';
+			html += '<thead><tr class="fw-bold text-muted fs-8"><th>항목</th><th class="text-end">건수</th><th class="text-end">금액</th></tr></thead><tbody>';
+			active.forEach(function (it) {
+				var amt = Number(it.amt) || 0;
+				sum += amt;
+				var amtClass = sign === '-' ? 'text-danger' : 'text-gray-900';
+				var amtText = sign === '-' ? minusWon(amt) : plusWon(amt);
+				html += '<tr><td class="text-gray-800">' + esc(it.label);
+				if (it.note) html += '<span class="d-block text-muted fs-8 fw-normal">' + esc(it.note) + '</span>';
+				html += '</td>' +
+					'<td class="text-end text-muted">' + (it.cnt == null ? '—' : Number(it.cnt).toLocaleString('ko-KR') + '건') + '</td>' +
+					'<td class="text-end fw-semibold ' + amtClass + '">' + amtText + '</td></tr>';
+			});
+			html += '</tbody><tfoot><tr class="fw-bold bg-light"><td>' + esc(footerLabel || '소계') + '</td><td></td>' +
+				'<td class="text-end ' + (sign === '-' ? 'text-danger' : '') + '">' +
+				(sign === '-' ? minusWon(sum) : plusWon(sum)) + '</td></tr></tfoot></table>';
+			return html;
+		}
 		function render(d) {
-			var html = '';
-			html += '<div class="mb-4">';
-			html += row('귀속일 · 플랫폼', esc(d.settlement_date) + ' · ' + esc(d.platform_label));
-			html += row('원본 파일', esc(d.original_filename));
-			html += row('엑셀 이름 / 라이선스ID', esc(d.rider_name_raw) + ' / ' + esc(d.license_id));
-			html += '</div>';
+			var matchBadge = d.matched
+				? '<span class="badge badge-light-success">매칭</span>'
+				: '<span class="badge badge-light-warning">미매칭</span>';
+			var gross = Number(d.gross_amount) || 0;
+			var payout = Number(d.payout_amount) || 0;
+			var earn = Number(d.earn_amount) || 0;
+			var vat = Number(d.vat_amount) || 0;
+			var hourly = Number(d.fee_hourly != null ? d.fee_hourly : d.hourly_insurance) || 0;
+			var other = Number(d.fee_other) || 0;
+			var feeTotal = Number(d.fee_total);
+			if (isNaN(feeTotal)) feeTotal = Math.max(0, (gross || payout) - payout);
+			var support = Number(d.support_amount) || 0;
+			var credit = gross > 0 ? gross : payout;
 
-			html += '<div class="separator separator-dashed mb-4"></div>';
-			html += '<div class="mb-4">';
-			html += row('오더 건수', esc(d.order_count) + '건');
-			html += row('정산예정(gross)', won(d.gross_amount));
-			if (d.support_amount > 0) {
-				html += row('지원금(+추가지원금)', '+' + won(d.support_amount));
+			var html = '<div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-5 pb-4 border-bottom">';
+			html += '<div>';
+			html += '<div class="fs-4 fw-bold text-gray-900 mb-1">' + esc(d.rider_name_raw || '이름 없음') + '</div>';
+			html += '<div class="text-muted fs-8">' + esc(d.settlement_date) + ' · ' + esc(d.platform_label);
+			if (d.license_id) html += ' · 라이선스 ' + esc(d.license_id);
+			html += ' · 오더 ' + (Number(d.order_count) || 0).toLocaleString('ko-KR') + '건';
+			html += '</div></div><div class="text-end">' + matchBadge;
+			if (d.matched && d.rider) {
+				html += '<div class="fs-7 fw-semibold text-gray-800 mt-1">' + esc(d.rider.name) + '</div>';
+				html += '<div class="text-muted fs-8">' + esc(d.rider.rider_code);
+				if (d.rider.phone) html += ' · ' + esc(d.rider.phone);
+				html += '</div>';
+				html += '<div class="text-muted fs-8">' + esc(d.rider.status_label) + '</div>';
+			} else {
+				html += '<div class="text-muted fs-8 mt-1">연결된 라이더 없음</div>';
 			}
-			html += row('실지급(payout)', won(d.payout_amount));
+			html += '</div></div>';
+
+			html += '<div class="bg-light rounded p-5 mb-6">';
+			html += moneyRow('정산예정', '<span class="text-gray-900">' + plusWon(credit) + '</span>', {
+				border: true, note: vat > 0 ? '배달 구성 + 부가세 10%' : '엑셀 총 정산 금액',
+			});
+			html += moneyRow('수수료·공제', '<span class="text-danger">' + minusWon(feeTotal) + '</span>', {
+				border: true, note: '정산예정 − 실지급',
+			});
+			html += moneyRow('실지급', '<span class="fs-2 fw-bold ' + (payout < 0 ? 'text-danger' : 'text-primary') + '">' + won(payout) + '</span>', {
+				wrapClass: 'd-flex justify-content-between align-items-center pt-3',
+			});
+			html += '<div class="text-muted fs-8 mt-3">정산예정 ' + won(credit) + ' − 공제 ' + won(feeTotal) + ' = 실지급 ' + won(payout) + '</div>';
+			if (support > 0) {
+				html += '<div class="text-success fs-8 mt-2">+ 지원금 ' + won(support) + ' · 정산 반영 시 실지급에 가산됩니다</div>';
+			}
 			html += '</div>';
 
-			html += '<div class="separator separator-dashed mb-4"></div>';
-			html += '<div class="fw-bold text-gray-800 mb-2">수수료 상세</div>';
-			html += '<div class="row g-0 mb-4">';
-			html += '<div class="col-6 pe-8">' + row('픽업', won(d.fee_pickup)) + '</div>';
-			html += '<div class="col-6 ">' + row('배달', won(d.fee_delivery)) + '</div>';
-			html += '<div class="col-6 pe-8">' + row('지역단가', won(d.fee_area)) + '</div>';
-			html += '<div class="col-6 ">' + row('거리구간(건수/할증)', d.fee_dist_cnt + '건 / ' + won(d.fee_dist_surge)) + '</div>';
-			html += '<div class="col-6 pe-8">' + row('픽업콜(건수/할증)', d.fee_pickup_cnt + '건 / ' + won(d.fee_pickup_surge)) + '</div>';
-			html += '<div class="col-6 ">' + row('도착콜(건수/할증)', d.fee_dest_cnt + '건 / ' + won(d.fee_dest_surge)) + '</div>';
-			html += '<div class="col-6 pe-8">' + row('기상할증(건수/금액)', d.fee_weather_cnt + '건 / ' + won(d.fee_weather)) + '</div>';
-			html += '<div class="col-6 ">' + row('시간제보험', won(d.hourly_insurance)) + '</div>';
-			html += '</div>';
+			var earnItems = [
+				{ label: '픽업 비용', amt: d.fee_pickup },
+				{ label: '배달 비용', amt: d.fee_delivery },
+				{ label: '지역 단가', amt: d.fee_area },
+				{ label: '거리구간 할증', cnt: d.fee_dist_cnt, amt: d.fee_dist_surge },
+				{ label: '픽업콜 할증', cnt: d.fee_pickup_cnt, amt: d.fee_pickup_surge },
+				{ label: '도착콜 할증', cnt: d.fee_dest_cnt, amt: d.fee_dest_surge },
+				{ label: '기상할증', cnt: d.fee_weather_cnt, amt: d.fee_weather },
+				{ label: '프로모션 1', amt: d.fee_promo1 },
+				{ label: '프로모션 2', amt: d.fee_promo2 },
+				{ label: '프로모션 3', amt: d.fee_promo3 },
+				{ label: '프로모션 4', amt: d.fee_promo4 },
+			];
+			if (vat > 0) {
+				earnItems.push({ label: '부가세 10%', amt: vat, note: '구성 합계 ' + won(earn) + ' × 10%' });
+			}
+			var earnHtml = itemTable('① 정산예정이 나온 과정', earnItems, '+', '정산예정');
+			html += earnHtml || '<div class="fw-bold text-gray-800 mb-2">① 정산예정이 나온 과정</div><div class="text-muted fs-8 mb-5">구성 항목 없음 · 엑셀 정산예정 ' + won(credit) + '</div>';
 
-			if (d.fee_promo1 || d.fee_promo2 || d.fee_promo3 || d.fee_promo4) {
-				html += '<div class="fw-bold text-gray-800 mb-2">프로모션</div>';
-				html += '<div class="row g-0 mb-4">';
-				html += '<div class="col-6 pe-8">' + row('프로모션1', won(d.fee_promo1)) + '</div>';
-				html += '<div class="col-6 ">' + row('프로모션2', won(d.fee_promo2)) + '</div>';
-				html += '<div class="col-6 pe-8">' + row('프로모션3', won(d.fee_promo3)) + '</div>';
-				html += '<div class="col-6 ">' + row('프로모션4', won(d.fee_promo4)) + '</div>';
+			var deductItems = [];
+			if (vat > 0) deductItems.push({ label: '부가세 10%', amt: vat, note: '정산예정에 포함, 실지급에서는 빠짐' });
+			if (hourly > 0) deductItems.push({ label: '시간제보험', amt: hourly });
+			if (other > 0) {
+				deductItems.push({
+					label: '기타 공제',
+					amt: other,
+					note: '엑셀 종합탭 고용보험·산재보험·원천세 등 (항목별 값은 현재 미저장)',
+				});
+			}
+			if (deductItems.length) {
+				html += itemTable('② 수수료·공제 내역', deductItems, '-', '공제 합계');
+			} else {
+				html += '<div class="fw-bold text-gray-800 mb-2">② 수수료·공제 내역</div>';
+				html += '<div class="text-muted fs-8 mb-5">공제 항목 없음</div>';
+			}
+
+			var weekly = d.weekly_deductions || [];
+			if (weekly.length) {
+				html += '<div class="alert bg-light-warning d-flex flex-column p-4 mb-5">';
+				html += '<div class="fw-bold text-gray-800 mb-2">정산 반영 시 추가 차감 (엑셀 차감내역 탭)</div>';
+				html += '<div class="text-muted fs-8 mb-3">아래 금액은 엑셀 실지급에 아직 빠지지 않았고, 「정산 반영」할 때 따로 차감됩니다.</div>';
+				weekly.forEach(function (w) {
+					html += '<div class="d-flex justify-content-between py-1"><span>' + esc(w.type);
+					if (w.store_name) html += ' <span class="text-muted">· ' + esc(w.store_name) + '</span>';
+					html += '</span><span class="fw-semibold text-danger">' + minusWon(w.amount) + '</span></div>';
+				});
 				html += '</div>';
 			}
 
-			html += '<div class="separator separator-dashed mb-4"></div>';
-			html += '<div class="fw-bold text-gray-800 mb-2">매칭 라이더</div>';
-			if (d.matched && d.rider) {
-				html += row('이름 / 코드', esc(d.rider.name) + ' / ' + esc(d.rider.rider_code));
-				html += row('연락처', esc(d.rider.phone));
-				html += row('상태', esc(d.rider.status_label));
-			} else {
-				html += '<div class="text-muted">미매칭 — 연결된 라이더가 없습니다.</div>';
+			if (d.original_filename) {
+				html += '<div class="text-muted fs-8">원본 파일 · ' + esc(d.original_filename) + '</div>';
 			}
 
 			body.innerHTML = html;
 
 			if (d.matched && d.rider) {
-				riderLink.href = RIDER_DETAIL_URL + '?id=' + d.rider.id;
+				riderLink.href = RIDER_DETAIL_URL + d.rider.id;
 				riderLink.classList.remove('d-none');
 			} else {
 				riderLink.classList.add('d-none');
@@ -765,6 +886,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		document.querySelectorAll('.dr-detail-btn').forEach(function (btn) {
 			btn.addEventListener('click', function () {
 				var id = btn.getAttribute('data-id');
+				var name = btn.getAttribute('data-name') || '';
+				titleEl.textContent = name ? ('정산 원본 · ' + name) : '정산 원본 데이터 상세';
 				body.innerHTML = '<div class="text-center text-muted py-10">불러오는 중…</div>';
 				riderLink.classList.add('d-none');
 				bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -825,8 +948,14 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 	(function () {
 		var btn = document.getElementById('btn_settlement_apply');
 		if (!btn) return;
+		var dailyCount = <?= (int) $dailyCount ?>;
 		btn.addEventListener('click', function () {
-			if (!confirm('매칭된 라이더에 정산 수수료를 계산하고 지갑에 반영할까요?\n이미 반영된 일자·플랫폼은 건너뜁니다.')) return;
+			var msg = '매칭된 라이더에 정산 수수료를 계산하고 지갑에 반영할까요?\n이미 반영된 일자·플랫폼은 건너뜁니다.';
+			if (dailyCount > 0) {
+				msg += '\n\n⚠ 일일정산 대상 ' + dailyCount + '명은 반영 직후 보증금을 제외한 금액이'
+					+ '\n곧바로 출금(실제 이체)됩니다. 되돌릴 수 없습니다.';
+			}
+			if (!confirm(msg)) return;
 			btn.disabled = true;
 			fetch('<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_apply.php', ENT_QUOTES, 'UTF-8') ?>', {
 				method: 'POST',
@@ -836,7 +965,19 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '실패');
-					alert(res.message || '반영되었습니다.');
+					var out = res.message || '반영되었습니다.';
+					// 자동출금에서 건너뛰거나 실패한 건은 사유를 같이 보여준다(계좌 미등록·보증금 미달 등).
+					var aw = res.auto_withdraw;
+					if (aw && aw.results && aw.results.length) {
+						var problems = aw.results.filter(function (x) { return x.status !== 'paid'; });
+						if (problems.length) {
+							out += '\n\n[자동출금 미처리]\n' + problems.slice(0, 10).map(function (x) {
+								return '· ' + x.name + ': ' + x.message;
+							}).join('\n');
+							if (problems.length > 10) out += '\n… 외 ' + (problems.length - 10) + '명';
+						}
+					}
+					alert(out);
 					location.reload();
 				})
 				.catch(function (e) {

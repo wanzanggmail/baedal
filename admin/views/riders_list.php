@@ -43,15 +43,10 @@ $offset = ($page - 1) * $perPage;
 
 $riders = db_rows(
     "SELECT r.id, r.rider_code, r.login_id, r.name,
-            r.phone, r.status, r.vehicle_type,
-            r.withdrawal_hold, r.created_at, r.last_login_at,
-            o.name AS agency_name, o.code AS agency_code,
-            (SELECT rp.platform
-             FROM rider_platforms rp
-             WHERE rp.rider_id = r.id AND rp.is_connected = 1
-             ORDER BY rp.id LIMIT 1) AS primary_platform
+            r.phone, r.status,
+            r.is_daily_settlement, r.withholding_tax_enabled,
+            r.withdrawal_hold, r.created_at, r.last_login_at
      FROM riders r
-     LEFT JOIN organizations o ON o.id = r.agency_id
      WHERE {$whereStr}
      ORDER BY r.name ASC
      LIMIT {$perPage} OFFSET {$offset}",
@@ -83,12 +78,6 @@ $statusBadge = [
     'active' => 'success', 'suspended' => 'danger',
     'leave_request' => 'warning', 'offboarded' => 'dark',
 ];
-$vehicleLabel = [
-    'motor' => '오토바이', 'bike' => '자전거',
-    'car'   => '자동차',   'walk' => '도보', 'kick' => '전동킥보드',
-];
-$pfLabel = ['baemin' => '배민', 'coupang' => '쿠팡이츠', 'other' => '기타'];
-
 $banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order");
 $detailBase = admin_url('riders/detail');
 $detailBase .= str_contains($detailBase, '?') ? '&id=' : '?id=';
@@ -201,9 +190,8 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							<th class="min-w-100px">로그인ID</th>
 							<th class="min-w-90px">이름</th>
 							<th class="min-w-120px">연락처</th>
-							<th class="min-w-140px">대리점</th>
-							<th class="min-w-80px">플랫폼</th>
-							<th class="min-w-80px">차량</th>
+							<th class="min-w-80px">일일정산</th>
+							<th class="min-w-80px">원천세공제</th>
 							<th class="min-w-100px">상태</th>
 							<th class="min-w-110px">가입일</th>
 							<th class="min-w-80px text-end">관리</th>
@@ -212,7 +200,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 					<tbody>
 						<?php if (empty($riders)): ?>
 						<tr>
-							<td colspan="10" class="text-center text-gray-500 py-10">
+							<td colspan="9" class="text-center text-gray-500 py-10">
 								<?= ($filterQ !== '' || $filterAgency > 0 || $filterStatus !== '')
 								    ? '검색 조건에 맞는 라이더가 없습니다.'
 								    : '등록된 라이더가 없습니다. 「라이더 등록」으로 추가하세요.' ?>
@@ -222,21 +210,19 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<?php foreach ($riders as $r):
 						    $st       = $r['status'] ?? 'active';
 						    $badge    = $statusBadge[$st] ?? 'primary';
-						    $vLabel   = $vehicleLabel[$r['vehicle_type'] ?? ''] ?? ($r['vehicle_type'] ?? '—');
-						    $pf       = $pfLabel[$r['primary_platform'] ?? ''] ?? ($r['primary_platform'] ? $r['primary_platform'] : '—');
-						    $agencyNm = (string) ($r['agency_name'] ?? '') !== '' ? (string) $r['agency_name'] : '미배정';
 						    $phone    = preg_replace('/\D/', '', $r['phone'] ?? '');
 						    $phoneMsk = preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $phone) ?: '—';
 						    $detailUrl = $detailBase . (int) $r['id'];
+						    $isDaily  = !empty($r['is_daily_settlement']);
+						    $isWht    = !empty($r['withholding_tax_enabled']);
 						?>
 						<tr>
 							<td class="fw-bold text-gray-900 font-monospace fs-7"><?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="font-monospace fs-7 text-gray-800"><?= htmlspecialchars($r['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-900 fw-semibold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700"><?= htmlspecialchars($phoneMsk, ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-gray-800"><?= htmlspecialchars($agencyNm, ENT_QUOTES, 'UTF-8') ?><?php if (!empty($r['agency_code'])): ?> <span class="text-muted fs-8"><?= htmlspecialchars((string) $r['agency_code'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></td>
-							<td><span class="badge badge-light-primary"><?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?></span></td>
-							<td class="text-gray-700"><?= htmlspecialchars($vLabel, ENT_QUOTES, 'UTF-8') ?></td>
+							<td><span class="badge badge-light-<?= $isDaily ? 'success' : 'secondary' ?>"><?= $isDaily ? '일일' : '주정산' ?></span></td>
+							<td><span class="badge badge-light-<?= $isWht ? 'info' : 'secondary' ?>"><?= $isWht ? '공제' : '미대상' ?></span></td>
 							<td>
 								<span class="badge badge-light-<?= $badge ?>">
 									<?= htmlspecialchars($statusLabel[$st] ?? $st, ENT_QUOTES, 'UTF-8') ?>
