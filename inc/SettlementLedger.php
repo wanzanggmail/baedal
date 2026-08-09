@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/RiderWallet.php';
 require_once __DIR__ . '/AgencyFeeConfig.php';
 require_once __DIR__ . '/AgencyWallet.php';
+require_once __DIR__ . '/SettlementAmounts.php';
 
 /**
  * 정산 완료·수수료 내역 (settlement_rider_cycles / settlement_fee_items)
@@ -300,17 +301,19 @@ final class SettlementLedger
         // 미수금(대여금·리스·선지급)은 수수료가 아니라 원금 상환 차감 — 화면에서 구분 표기용
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
-            'agency_fee'     => '선정산수수료(대행)',
-            'withholding'    => '원천세',
-            'employment_ins' => '고용보험',
-            'accident_ins'   => '산재보험',
-            'hourly_ins'     => '시간제 보험',
-            'ins_refund'     => '보험료 환급',
-            'loan'           => '대여금',
-            'lease'          => '리스/렌탈',
-            'advance'        => '선지급',
-            'rental'         => '대여금',
-            'manual'         => '수동 차감',
+            'agency_fee'      => '선정산수수료(대행)',
+            'withholding'     => '원천세',
+            'employment_ins'  => '고용보험',
+            'accident_ins'    => '산재보험',
+            'hourly_ins'      => '시간제 보험',
+            'vat'             => '부가세',
+            'excel_deduction' => '차감내역',
+            'ins_refund'      => '보험료 환급',
+            'loan'            => '대여금',
+            'lease'           => '리스/렌탈',
+            'advance'         => '선지급',
+            'rental'          => '대여금',
+            'manual'          => '수동 차감',
         ];
 
         return array_map(static function (array $r) use ($debtCodes, $canonical): array {
@@ -424,17 +427,19 @@ final class SettlementLedger
 
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
-            'agency_fee'     => '선정산수수료(대행)',
-            'withholding'    => '원천세',
-            'employment_ins' => '고용보험',
-            'accident_ins'   => '산재보험',
-            'hourly_ins'     => '시간제 보험',
-            'ins_refund'     => '보험료 환급',
-            'loan'           => '대여금',
-            'lease'          => '리스/렌탈',
-            'advance'        => '선지급',
-            'rental'         => '대여금',
-            'manual'         => '수동 차감',
+            'agency_fee'      => '선정산수수료(대행)',
+            'withholding'     => '원천세',
+            'employment_ins'  => '고용보험',
+            'accident_ins'    => '산재보험',
+            'hourly_ins'      => '시간제 보험',
+            'vat'             => '부가세',
+            'excel_deduction' => '차감내역',
+            'ins_refund'      => '보험료 환급',
+            'loan'            => '대여금',
+            'lease'           => '리스/렌탈',
+            'advance'         => '선지급',
+            'rental'          => '대여금',
+            'manual'          => '수동 차감',
         ];
 
         return array_map(static function (array $r) use ($debtCodes, $canonical): array {
@@ -493,31 +498,101 @@ final class SettlementLedger
     }
 
     /**
+     * 정산 반영·미리보기 공통 산식.
+     *
+     * base = 부가세 제외 정산액 + 지원금. 보수액·부가세는 쓰지 않는다.
+     * 공제 = 시간제보험 + 엑셀 차감내역 + 선정산수수료/원천세(해당 시) + 고용 0.8% + 산재 0.88%
+     *      + 수동 deduction_entries(엑셀 차감내역에서 등록한 건은 제외 — 이중차감 방지).
+     *
+     * @param array<string, mixed> $dailyRow
+     * @param array<string, float> $cfg
+     * @return array{base: int, fees: list<array{fee_code: string, label: string, amount: int}>}
+     */
+    public static function composeFeesForDailyRow(array $dailyRow, array $cfg, ?int $orgId = null): array
+    {
+        $support = (int) ($dailyRow['support_amount'] ?? 0);
+        $base    = SettlementAmounts::exVat($dailyRow) + $support;
+        $riderId = (int) ($dailyRow['rider_id'] ?? 0);
+        $uploadId = (int) ($dailyRow['upload_id'] ?? 0);
+
+        $fees = [];
+
+        $hourlyIns = (int) ($dailyRow['hourly_insurance'] ?? 0);
+        if ($hourlyIns > 0) {
+            $fees[] = ['fee_code' => 'hourly_ins', 'label' => '시간제 보험', 'amount' => $hourlyIns];
+        }
+
+        foreach (SettlementAmounts::excelDeductions($uploadId, $riderId, (string) ($dailyRow['rider_name_raw'] ?? '')) as $ded) {
+            $fees[] = [
+                'fee_code' => $ded['fee_code'],
+                'label'    => $ded['label'],
+                'amount'   => $ded['amount'],
+            ];
+        }
+
+        if ($riderId > 0) {
+            $fees = array_merge(
+                $fees,
+                self::buildFeeItems($base, $riderId, (string) ($dailyRow['settlement_date'] ?? ''), $cfg, $orgId)
+            );
+        } else {
+            $emp = self::pctAmount($base, (float) ($cfg['employment_ins_pct'] ?? 0));
+            if ($emp > 0) {
+                $fees[] = ['fee_code' => 'employment_ins', 'label' => '고용보험', 'amount' => $emp];
+            }
+            $acc = self::pctAmount($base, (float) ($cfg['industrial_accident_ins_pct'] ?? 0));
+            if ($acc > 0) {
+                $fees[] = ['fee_code' => 'accident_ins', 'label' => '산재보험', 'amount' => $acc];
+            }
+        }
+
+        return ['base' => $base, 'fees' => $fees];
+    }
+
+    /**
+     * 업로드 상세 모달용 — DB에 쓰지 않고 같은 산식으로 예상 실지급을 보여준다.
+     *
+     * @param array<string, mixed> $dailyRow
+     * @return array{base: int, earn: int, fees: list<array{fee_code: string, label: string, amount: int}>, total_fee: int, net: int}
+     */
+    public static function previewFromDailyRow(array $dailyRow, ?int $orgId = null): array
+    {
+        $cfg      = self::globalDeductionConfig($orgId);
+        $composed = self::composeFeesForDailyRow($dailyRow, $cfg, $orgId);
+        $totalFee = 0;
+        foreach ($composed['fees'] as $f) {
+            $totalFee += (int) $f['amount'];
+        }
+
+        return [
+            'base'      => $composed['base'],
+            'earn'      => SettlementAmounts::exVat($dailyRow),
+            'fees'      => $composed['fees'],
+            'total_fee' => $totalFee,
+            'net'       => max(0, $composed['base'] - $totalFee),
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $dailyRow settlement_daily_riders row
      * @param array<string, float> $cfg
      */
     private static function createCycleFromDailyRow(array $dailyRow, int $uploadId, array $cfg, ?int $adminId, ?int $orgId = null, string $teamRegion = ''): void
     {
         $riderId = (int) $dailyRow['rider_id'];
-        $gross   = (int) ($dailyRow['gross_amount'] ?? 0);
+        $gross   = SettlementAmounts::exVat($dailyRow);
         $payout  = (int) ($dailyRow['payout_amount'] ?? 0);
-        $base    = $payout > 0 ? $payout : $gross;
-
-        // 지원금+추가지원금(2026-07-30 발견) — 정산금액과 별개로 존재하며 지급액에 **가산**되는 항목.
-        // parser.py 확인 결과 최종 지급액에 그대로 더해지고 차감 항목이 아니므로 fee_items가 아니라 base에 얹는다.
         $support = (int) ($dailyRow['support_amount'] ?? 0);
-        $base   += $support;
 
-        $fees = self::buildFeeItems($base, $riderId, (string) $dailyRow['settlement_date'], $cfg, $orgId);
+        $composed = self::composeFeesForDailyRow($dailyRow, $cfg, $orgId);
+        $base     = $composed['base'];
+        $fees     = $composed['fees'];
 
-        // #6 시간제보험 — 쿠팡 정산서 파일에 포함된 값(계산 아님). 파싱된 값이 있으면 공제.
-        $hourlyIns = (int) ($dailyRow['hourly_insurance'] ?? 0);
-        if ($hourlyIns > 0) {
-            $fees[] = ['fee_code' => 'hourly_ins', 'label' => '시간제 보험', 'amount' => $hourlyIns];
+        $totalFee = 0;
+        foreach ($fees as $f) {
+            $totalFee += (int) $f['amount'];
         }
-
-        $totalFee = array_sum(array_column($fees, 'amount'));
-        $net      = max(0, $base - $totalFee);
+        $net = max(0, $base - $totalFee);
 
         $cycleId = db_insert(
             'INSERT INTO settlement_rider_cycles
@@ -618,10 +693,18 @@ final class SettlementLedger
         }
 
         if (db_table_exists('deduction_entries')) {
+            // 엑셀 차감내역에서 등록된 deduction_entries는 이 업로드 반영 때
+            // SettlementAmounts::excelDeductions 로 이미 빠지므로 여기서 제외한다.
+            $excludeExcel = db_table_exists('settlement_weekly_deductions')
+                ? ' AND NOT EXISTS (
+                        SELECT 1 FROM settlement_weekly_deductions swd
+                         WHERE swd.registered_entry_id = deduction_entries.id
+                    )'
+                : '';
             $manual = db_rows(
                 'SELECT kind, amount, note FROM deduction_entries
-                 WHERE rider_id = ? AND applied_date = ? AND amount <> 0
-                 ORDER BY id ASC',
+                  WHERE rider_id = ? AND applied_date = ? AND amount <> 0' . $excludeExcel . '
+                  ORDER BY id ASC',
                 [$riderId, $settlementDate]
             );
             foreach ($manual as $m) {
@@ -683,9 +766,11 @@ final class SettlementLedger
             'withholding'    => '원천세(수동)',
             'employment_ins' => '고용보험(수동)',
             'accident_ins'   => '산재보험(수동)',
-            'agency_fee'     => '선정산수수료(수동)',
-            'hourly_ins'     => '시간제 보험',
-            'ins_refund'     => '보험료 환급',
+            'agency_fee'      => '선정산수수료(수동)',
+            'hourly_ins'      => '시간제 보험',
+            'vat'             => '부가세',
+            'excel_deduction' => '차감내역',
+            'ins_refund'      => '보험료 환급',
             'rental'         => '대여금',
             'loan'           => '대여금',
             'lease'          => '리스/렌탈',

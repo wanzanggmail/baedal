@@ -105,8 +105,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 	<div class="card-body">
 		<div class="fs-8 text-gray-500 mb-2"><?= htmlspecialchars($filterFrom, ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars($filterTo, ENT_QUOTES, 'UTF-8') ?> 합계 · <?= number_format($sum['count']) ?>건</div>
 		<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
-			<span class="text-gray-600 fs-7">플랫폼 지급 합계</span>
-			<span class="fw-bold fs-6"><?= $fmtWon($sum['payout']) ?></span>
+			<span class="text-gray-600 fs-7">정산금액 합계</span>
+			<span class="fw-bold fs-6"><?= $fmtWon($sum['gross']) ?></span>
 		</div>
 		<?php if ($sum['support'] > 0) : ?>
 		<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">

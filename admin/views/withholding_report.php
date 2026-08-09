@@ -35,7 +35,7 @@ if (!$needsMigrate) {
         "SELECT r.id, r.rider_code, r.name, r.agency_id, o.name AS agency_name,
                 COUNT(fi.id) AS tax_count,
                 COALESCE(SUM(fi.amount), 0) AS tax_total,
-                COALESCE(SUM(c.platform_payout + c.support_amount), 0) AS base_total
+                COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base_total
            FROM riders r
            LEFT JOIN organizations o ON o.id = r.agency_id
            LEFT JOIN settlement_rider_cycles c ON {$cycleCond}
@@ -52,7 +52,7 @@ if (!$needsMigrate) {
     if ($scopeSql !== '') { $detailWhere[] = $scopeSql; }
     $detailRows = db_rows(
         'SELECT c.rider_id, c.settlement_date, c.platform, c.team_region,
-                c.platform_payout, c.support_amount, c.net_amount,
+                c.gross_amount, c.support_amount, c.net_amount,
                 fi.amount AS tax_amount
            FROM settlement_rider_cycles c
            INNER JOIN settlement_fee_items fi ON fi.cycle_id = c.id AND fi.fee_code = \'withholding\'
@@ -152,7 +152,7 @@ $quickRanges = [
 			<div class="card card-flush bg-light-info"><div class="card-body py-4">
 				<div class="fs-7 text-muted">과세표준 합계</div>
 				<div class="fs-2 fw-bold text-gray-900"><?= number_format($baseGrandTotal) ?>원</div>
-				<div class="fs-8 text-muted mt-1">실지급 + 지원금</div>
+				<div class="fs-8 text-muted mt-1">정산금액(부가세 제외) + 지원금</div>
 			</div></div>
 		</div>
 		<div class="col-sm-6 col-xl-3">
@@ -222,7 +222,7 @@ $quickRanges = [
 											<th>정산일</th>
 											<th>플랫폼</th>
 											<th>팀지역</th>
-											<th class="text-end">실지급</th>
+											<th class="text-end">정산금액</th>
 											<th class="text-end">지원금</th>
 											<th class="text-end">과세표준</th>
 											<th class="text-end">원천세(3.3%)</th>
@@ -230,12 +230,12 @@ $quickRanges = [
 									</thead>
 									<tbody>
 										<?php foreach ($details as $d) :
-										    $dBase = (int) $d['platform_payout'] + (int) $d['support_amount']; ?>
+										    $dBase = (int) $d['gross_amount'] + (int) $d['support_amount']; ?>
 										<tr>
 											<td class="text-gray-800"><?= htmlspecialchars(substr((string) $d['settlement_date'], 0, 10), ENT_QUOTES, 'UTF-8') ?></td>
 											<td class="text-muted"><?= htmlspecialchars($platformShort[(string) $d['platform']] ?? (string) $d['platform'], ENT_QUOTES, 'UTF-8') ?></td>
 											<td class="text-muted"><?= htmlspecialchars((string) ($d['team_region'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
-											<td class="text-end text-muted"><?= number_format((int) $d['platform_payout']) ?>원</td>
+											<td class="text-end text-muted"><?= number_format((int) $d['gross_amount']) ?>원</td>
 											<td class="text-end text-muted"><?= (int) $d['support_amount'] > 0 ? '+' . number_format((int) $d['support_amount']) . '원' : '—' ?></td>
 											<td class="text-end"><?= number_format($dBase) ?>원</td>
 											<td class="text-end fw-bold text-gray-900"><?= number_format((int) $d['tax_amount']) ?>원</td>

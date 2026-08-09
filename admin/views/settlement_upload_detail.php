@@ -61,7 +61,7 @@ $riders = db_rows(
        FROM settlement_daily_riders dr
        LEFT JOIN riders r ON r.id = dr.rider_id
       WHERE {$whereStr}
-      ORDER BY dr.payout_amount DESC, dr.rider_name_raw ASC",
+      ORDER BY dr.gross_amount DESC, dr.rider_name_raw ASC",
     $params
 );
 
@@ -74,14 +74,14 @@ $dailyCount = (int) (db_row(
     [$uploadId]
 )['cnt'] ?? 0);
 
+$exVatExpr = SettlementAmounts::sqlExVatExpr('dr');
 $totals = db_row(
-    'SELECT COUNT(*) AS cnt,
-            COALESCE(SUM(order_count), 0) AS sum_orders,
-            COALESCE(SUM(gross_amount), 0) AS sum_gross,
-            COALESCE(SUM(payout_amount), 0) AS sum_payout,
-            SUM(CASE WHEN rider_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_cnt
-       FROM settlement_daily_riders
-      WHERE upload_id = ?',
+    "SELECT COUNT(*) AS cnt,
+            COALESCE(SUM(dr.order_count), 0) AS sum_orders,
+            COALESCE(SUM({$exVatExpr}), 0) AS sum_gross,
+            SUM(CASE WHEN dr.rider_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_cnt
+       FROM settlement_daily_riders dr
+      WHERE dr.upload_id = ?",
     [$uploadId]
 ) ?: [];
 
@@ -242,10 +242,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		<div class="col-xl-3">
 			<div class="card card-flush h-100">
 				<div class="card-body py-6">
-					<div class="text-gray-500 fw-semibold fs-7 mb-1">합계 (저장된 행 기준)</div>
-					<div class="fw-bold fs-4 text-gray-900"><?= $fmtWon((int) $totals['sum_payout']) ?></div>
-					<div class="text-muted fs-7 mt-1">정산예정 <?= $fmtWon((int) $totals['sum_gross']) ?></div>
-					<div class="text-muted fs-7">오더 <?= number_format((int) $totals['sum_orders']) ?>건</div>
+					<div class="text-gray-500 fw-semibold fs-7 mb-1">정산금액 (부가세 제외)</div>
+					<div class="fw-bold fs-4 text-gray-900"><?= $fmtWon((int) $totals['sum_gross']) ?></div>
+					<div class="text-muted fs-7 mt-1">오더 <?= number_format((int) $totals['sum_orders']) ?>건</div>
 				</div>
 			</div>
 		</div>
@@ -318,8 +317,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<th class="min-w-80px">정산유형</th>
 							<th class="min-w-110px">라이선스 ID</th>
 							<th class="min-w-60px text-end">오더</th>
-							<th class="min-w-100px text-end">정산예정</th>
-							<th class="min-w-100px text-end">실지급</th>
+							<th class="min-w-100px text-end">정산금액</th>
 							<th class="min-w-80px text-end">픽업</th>
 							<th class="min-w-80px text-end">배달</th>
 							<th class="min-w-80px text-end">지역단가</th>
@@ -330,15 +328,15 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<tbody>
 					<?php if ($riders === []) : ?>
 						<tr>
-							<td colspan="13" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
+							<td colspan="12" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
 						</tr>
 					<?php else :
 					    $i = 0;
 					    foreach ($riders as $row) :
 					        $i++;
 					        $matched = $row['rider_id'] !== null && (int) $row['rider_id'] > 0;
-					        $payout  = (int) $row['payout_amount'];
-					        $payoutClass = $payout < 0 ? 'text-danger' : 'text-gray-900';
+					        $gross   = SettlementAmounts::exVat($row);
+					        $grossClass = $gross < 0 ? 'text-danger' : 'text-gray-900';
 					        ?>
 						<tr>
 							<td class="text-muted"><?= $i ?></td>
@@ -369,8 +367,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							</td>
 							<td class="font-monospace fs-7"><?= htmlspecialchars((string) $row['license_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-end"><?= number_format((int) $row['order_count']) ?></td>
-							<td class="text-end"><?= $fmtWon((int) $row['gross_amount']) ?></td>
-							<td class="text-end fw-bold <?= $payoutClass ?>"><?= $fmtWon($payout) ?></td>
+							<td class="text-end fw-bold <?= $grossClass ?>"><?= $fmtWon($gross) ?></td>
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_pickup']) ?></td>
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_delivery']) ?></td>
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_area']) ?></td>
@@ -775,16 +772,12 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			var matchBadge = d.matched
 				? '<span class="badge badge-light-success">매칭</span>'
 				: '<span class="badge badge-light-warning">미매칭</span>';
-			var gross = Number(d.gross_amount) || 0;
-			var payout = Number(d.payout_amount) || 0;
 			var earn = Number(d.earn_amount) || 0;
-			var vat = Number(d.vat_amount) || 0;
-			var hourly = Number(d.fee_hourly != null ? d.fee_hourly : d.hourly_insurance) || 0;
-			var other = Number(d.fee_other) || 0;
-			var feeTotal = Number(d.fee_total);
-			if (isNaN(feeTotal)) feeTotal = Math.max(0, (gross || payout) - payout);
 			var support = Number(d.support_amount) || 0;
-			var credit = gross > 0 ? gross : payout;
+			var feeTotal = Number(d.total_fee) || 0;
+			var net = Number(d.estimated_net) || 0;
+			var base = earn + support;
+			var fees = d.fees || [];
 
 			var html = '<div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-5 pb-4 border-bottom">';
 			html += '<div>';
@@ -805,19 +798,19 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			html += '</div></div>';
 
 			html += '<div class="bg-light rounded p-5 mb-6">';
-			html += moneyRow('정산예정', '<span class="text-gray-900">' + plusWon(credit) + '</span>', {
-				border: true, note: vat > 0 ? '배달 구성 + 부가세 10%' : '엑셀 총 정산 금액',
+			html += moneyRow('정산금액', '<span class="text-gray-900">' + plusWon(earn) + '</span>', {
+				border: true, note: '부가세 제외 · 보수액 미사용',
 			});
-			html += moneyRow('수수료·공제', '<span class="text-danger">' + minusWon(feeTotal) + '</span>', {
-				border: true, note: '정산예정 − 실지급',
+			if (support > 0) {
+				html += moneyRow('지원금', '<span class="text-success">' + plusWon(support) + '</span>', { border: true });
+			}
+			html += moneyRow('공제', '<span class="text-danger">' + minusWon(feeTotal) + '</span>', {
+				border: true, note: '시간제보험 · 차감내역 · 고용 0.8% · 산재 0.88%' + (d.matched ? '' : ' (예상)'),
 			});
-			html += moneyRow('실지급', '<span class="fs-2 fw-bold ' + (payout < 0 ? 'text-danger' : 'text-primary') + '">' + won(payout) + '</span>', {
+			html += moneyRow('예상 실지급', '<span class="fs-2 fw-bold ' + (net < 0 ? 'text-danger' : 'text-primary') + '">' + won(net) + '</span>', {
 				wrapClass: 'd-flex justify-content-between align-items-center pt-3',
 			});
-			html += '<div class="text-muted fs-8 mt-3">정산예정 ' + won(credit) + ' − 공제 ' + won(feeTotal) + ' = 실지급 ' + won(payout) + '</div>';
-			if (support > 0) {
-				html += '<div class="text-success fs-8 mt-2">+ 지원금 ' + won(support) + ' · 정산 반영 시 실지급에 가산됩니다</div>';
-			}
+			html += '<div class="text-muted fs-8 mt-3">' + won(base) + ' − 공제 ' + won(feeTotal) + ' = 실지급 ' + won(net) + '</div>';
 			html += '</div>';
 
 			var earnItems = [
@@ -833,40 +826,17 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				{ label: '프로모션 3', amt: d.fee_promo3 },
 				{ label: '프로모션 4', amt: d.fee_promo4 },
 			];
-			if (vat > 0) {
-				earnItems.push({ label: '부가세 10%', amt: vat, note: '구성 합계 ' + won(earn) + ' × 10%' });
-			}
-			var earnHtml = itemTable('① 정산예정이 나온 과정', earnItems, '+', '정산예정');
-			html += earnHtml || '<div class="fw-bold text-gray-800 mb-2">① 정산예정이 나온 과정</div><div class="text-muted fs-8 mb-5">구성 항목 없음 · 엑셀 정산예정 ' + won(credit) + '</div>';
+			var earnHtml = itemTable('① 정산금액 구성 (부가세 제외)', earnItems, '+', '정산금액');
+			html += earnHtml || '<div class="fw-bold text-gray-800 mb-2">① 정산금액 구성</div><div class="text-muted fs-8 mb-5">구성 항목 없음 · 정산금액 ' + won(earn) + '</div>';
 
-			var deductItems = [];
-			if (vat > 0) deductItems.push({ label: '부가세 10%', amt: vat, note: '정산예정에 포함, 실지급에서는 빠짐' });
-			if (hourly > 0) deductItems.push({ label: '시간제보험', amt: hourly });
-			if (other > 0) {
-				deductItems.push({
-					label: '기타 공제',
-					amt: other,
-					note: '엑셀 종합탭 고용보험·산재보험·원천세 등 (항목별 값은 현재 미저장)',
-				});
-			}
+			var deductItems = fees.map(function (f) {
+				return { label: f.label, amt: f.amount };
+			});
 			if (deductItems.length) {
-				html += itemTable('② 수수료·공제 내역', deductItems, '-', '공제 합계');
+				html += itemTable('② 공제 내역 (정산 반영과 동일)', deductItems, '-', '공제 합계');
 			} else {
-				html += '<div class="fw-bold text-gray-800 mb-2">② 수수료·공제 내역</div>';
+				html += '<div class="fw-bold text-gray-800 mb-2">② 공제 내역</div>';
 				html += '<div class="text-muted fs-8 mb-5">공제 항목 없음</div>';
-			}
-
-			var weekly = d.weekly_deductions || [];
-			if (weekly.length) {
-				html += '<div class="alert bg-light-warning d-flex flex-column p-4 mb-5">';
-				html += '<div class="fw-bold text-gray-800 mb-2">정산 반영 시 추가 차감 (엑셀 차감내역 탭)</div>';
-				html += '<div class="text-muted fs-8 mb-3">아래 금액은 엑셀 실지급에 아직 빠지지 않았고, 「정산 반영」할 때 따로 차감됩니다.</div>';
-				weekly.forEach(function (w) {
-					html += '<div class="d-flex justify-content-between py-1"><span>' + esc(w.type);
-					if (w.store_name) html += ' <span class="text-muted">· ' + esc(w.store_name) + '</span>';
-					html += '</span><span class="fw-semibold text-danger">' + minusWon(w.amount) + '</span></div>';
-				});
-				html += '</div>';
 			}
 
 			if (d.original_filename) {

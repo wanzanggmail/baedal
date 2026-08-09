@@ -151,8 +151,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		<div class="col-xl-3">
 			<div class="card card-flush h-100">
 				<div class="card-body py-6">
-					<div class="text-gray-500 fw-semibold fs-7 mb-1">플랫폼 지급 합계</div>
-					<div class="fw-bold fs-3 text-gray-900"><?= $fmtWon($sum['payout']) ?></div>
+					<div class="text-gray-500 fw-semibold fs-7 mb-1">정산금액 합계</div>
+					<div class="fw-bold fs-3 text-gray-900"><?= $fmtWon($sum['gross']) ?></div>
 					<div class="text-muted fs-8 mt-1">
 						<?= number_format($sum['count']) ?>건 · 오더 <?= number_format($sum['orders']) ?>건
 						<?php if ($sum['support'] > 0) : ?>
@@ -281,7 +281,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<th>정산일</th>
 							<th>라이더</th>
 							<th>플랫폼</th>
-							<th class="text-end">플랫폼 지급</th>
+							<th class="text-end">정산금액</th>
 							<th class="text-end">수수료 합</th>
 							<th class="text-end">지갑 반영</th>
 							<th class="text-end">상세</th>
@@ -305,7 +305,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 								<?php endif; ?>
 							</td>
 							<td class="text-end">
-								<?= number_format((int) $row['platform_payout']) ?>원
+								<?= number_format((int) $row['gross_amount']) ?>원
 								<?php if ((int) ($row['support_amount'] ?? 0) > 0) : ?>
 								<span class="text-success fs-8 d-block">+지원금 <?= number_format((int) $row['support_amount']) ?>원</span>
 								<?php endif; ?>
@@ -323,7 +323,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<tfoot>
 						<tr class="fw-bold bg-light">
 							<td colspan="3">기간 합계 <span class="text-muted fs-8 fw-normal">(<?= number_format($sum['count']) ?>건 전체)</span></td>
-							<td class="text-end"><?= $fmtWon($sum['payout']) ?></td>
+							<td class="text-end"><?= $fmtWon($sum['gross']) ?></td>
 							<td class="text-end text-danger">−<?= $fmtWon($sum['fee']) ?></td>
 							<td class="text-end text-primary"><?= $fmtWon($sum['net']) ?></td>
 							<td></td>

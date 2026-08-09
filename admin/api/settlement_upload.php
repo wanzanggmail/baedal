@@ -15,6 +15,7 @@ require_once INC_PATH . '/XlsxDecrypt.php';
 require_once INC_PATH . '/SettlementExcelConfig.php';
 require_once INC_PATH . '/SettlementPlatformDetect.php';
 require_once INC_PATH . '/AuditLog.php';
+require_once INC_PATH . '/SettlementAmounts.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -217,7 +218,7 @@ if ($dryRun) {
             'name_raw'      => (string) $row['name_raw'],
             'name'          => (string) $row['name'],
             'order_count'   => (int) $row['order_count'],
-            'gross_amount'  => (int) $row['gross_amount'],
+            'gross_amount'  => SettlementAmounts::exVat($row),
             'payout_amount' => (int) $row['payout_amount'],
             'matched'       => $rid !== null,
             'rider_id'      => $rid,

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/SettlementAmounts.php';
+
 /**
  * 관리자 대시보드 집계 (DB)
  */
@@ -263,8 +265,9 @@ final class AdminDashboard
         [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
         $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $row = db_row(
-            "SELECT COALESCE(SUM(sdr.payout_amount), 0) AS payout,
+            "SELECT COALESCE(SUM({$exVat}), 0) AS payout,
                     COALESCE(SUM(sdr.order_count), 0) AS orders
                FROM settlement_daily_riders sdr {$join}
               WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}",
@@ -280,7 +283,7 @@ final class AdminDashboard
     /**
      * 기간 내 일별 정산 추이 — 차트용(대리점 대시보드).
      * 데이터 없는 날도 0으로 채워 x축이 실제 날짜 간격을 반영하게 하고,
-     * 62일을 넘으면 주 단위로 묶는다. 집계 소스는 KPI와 같은 `payout_amount`.
+     * 62일을 넘으면 주 단위로 묶는다. 집계 소스는 KPI와 같은 부가세 제외 정산액.
      *
      * @return array{labels: list<string>, payout: list<int>, orders: list<int>, bucket: string}
      */
@@ -294,9 +297,10 @@ final class AdminDashboard
         [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
         $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $rows = db_rows(
             "SELECT sdr.settlement_date d,
-                    COALESCE(SUM(sdr.payout_amount), 0) payout,
+                    COALESCE(SUM({$exVat}), 0) payout,
                     COALESCE(SUM(sdr.order_count), 0)   orders
                FROM settlement_daily_riders sdr {$join}
               WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
@@ -362,10 +366,11 @@ final class AdminDashboard
         [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
         $cond = $scope !== '' ? ' AND ' . $scope : '';
         $limit = max(1, min(20, $limit));
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
 
         $rows = db_rows(
             "SELECT r.id, r.name, r.rider_code,
-                    COALESCE(SUM(sdr.payout_amount), 0) payout,
+                    COALESCE(SUM({$exVat}), 0) payout,
                     COALESCE(SUM(sdr.order_count), 0)   orders
                FROM settlement_daily_riders sdr
                INNER JOIN riders r ON r.id = sdr.rider_id
@@ -402,8 +407,9 @@ final class AdminDashboard
         [$scope, $scopeParams] = Org::agencyScopeClause('r.agency_id');
         $join = $scope !== '' ? 'INNER JOIN riders r ON r.id = sdr.rider_id' : '';
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $rows = db_rows(
-            "SELECT sdr.platform, COALESCE(SUM(sdr.payout_amount), 0) AS amount
+            "SELECT sdr.platform, COALESCE(SUM({$exVat}), 0) AS amount
                FROM settlement_daily_riders sdr {$join}
               WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
               GROUP BY sdr.platform

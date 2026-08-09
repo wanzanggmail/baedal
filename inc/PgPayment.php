@@ -12,7 +12,7 @@ require_once __DIR__ . '/PgFeeConfig.php';
  *
  * 정산 반영 후, 대리점이 라이더에게 지급할 자금을 카드로 조달(FUND)한다.
  * - 결제 단위: 라이더별 건건히(총액 일괄 아님).
- * - 카드 청구액 = 라이더 net + 플랫폼 수수료(PgFeeConfig).
+ * - 카드 청구액 = 부가세 제외 정산액(지원금 포함) + 플랫폼 수수료(PgFeeConfig).
  * - 우선순위 1번 카드부터 시도 → 한도초과 등 실패 시 다음 카드로 자동 재시도.
  * - 성공: agency_wallets.balance 에 net 충전 + pg_payments(success) 기록.
  * - 전 카드 실패: pg_payments(failed) 기록(알림/재시도는 상위에서).
@@ -108,10 +108,11 @@ final class PgPayment
         }
 
         $cycles = db_rows(
-            'SELECT c.rider_id, c.net_amount, r.name
+            'SELECT c.rider_id, c.gross_amount, c.support_amount, r.name
                FROM settlement_rider_cycles c
                INNER JOIN riders r ON r.id = c.rider_id
-              WHERE c.upload_id = ? AND c.net_amount > 0
+              WHERE c.upload_id = ?
+                AND (c.gross_amount + c.support_amount) > 0
                 AND r.agency_id = ?
                 AND NOT EXISTS (
                     SELECT 1 FROM pg_payments p
@@ -121,8 +122,9 @@ final class PgPayment
         );
 
         foreach ($cycles as $c) {
+            $fund = (int) $c['gross_amount'] + (int) $c['support_amount'];
             try {
-                $r = self::chargeForRider($agencyId, (int) $c['rider_id'], (int) $c['net_amount'], $uploadId, $adminId);
+                $r = self::chargeForRider($agencyId, (int) $c['rider_id'], $fund, $uploadId, $adminId);
                 $charged++;
                 if ($r['success']) {
                     $funded += (int) $r['net'];

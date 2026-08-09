@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/Org.php';
+require_once INC_PATH . '/SettlementAmounts.php';
 require_once INC_PATH . '/download_response.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -103,19 +104,19 @@ try {
         [$uploadId]
     );
     $drHeaders = [
-        '엑셀이름', '매칭라이더', '라이더코드', '라이선스ID', '오더건수', '정산예정액',
+        '엑셀이름', '매칭라이더', '라이더코드', '라이선스ID', '오더건수', '정산금액(부가세제외)',
         '픽업', '배달비', '지역단가', '거리구간건수', '거리구간할증', '픽업콜건수', '픽업콜할증',
         '도착콜건수', '도착콜할증', '기상할증건수', '기상할증금액',
-        '프로모션1', '프로모션2', '프로모션3', '프로모션4', '시간제보험', '지원금', '실지급액', '정산일',
+        '프로모션1', '프로모션2', '프로모션3', '프로모션4', '시간제보험', '지원금', '정산일',
     ];
     $drRows = array_map(static fn (array $d): array => [
         $d['rider_name_raw'], $d['rider_name'] ?? '', $d['rider_code'] ?? '', $d['license_id'],
-        (int) $d['order_count'], (int) $d['gross_amount'],
+        (int) $d['order_count'], SettlementAmounts::exVat($d),
         (int) $d['fee_pickup'], (int) $d['fee_delivery'], (int) $d['fee_area'],
         (int) $d['fee_dist_cnt'], (int) $d['fee_dist_surge'], (int) $d['fee_pickup_cnt'], (int) $d['fee_pickup_surge'],
         (int) $d['fee_dest_cnt'], (int) $d['fee_dest_surge'], (int) $d['fee_weather_cnt'], (int) $d['fee_weather'],
         (int) $d['fee_promo1'], (int) $d['fee_promo2'], (int) $d['fee_promo3'], (int) $d['fee_promo4'],
-        (int) $d['hourly_insurance'], (int) $d['support_amount'], (int) $d['payout_amount'],
+        (int) $d['hourly_insurance'], (int) $d['support_amount'],
         (string) $d['settlement_date'],
     ], $dr);
     settlement_export_write_sheet($book, true, '정산상세', $drHeaders, $drRows, [0, 1, 2, 3]);

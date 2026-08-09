@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/Org.php';
+require_once __DIR__ . '/SettlementAmounts.php';
 
 /**
  * 본사·총판 전용 대시보드 집계.
@@ -170,11 +171,12 @@ final class OrgDashboard
         self::fill($out, "SELECT agency_id k, COUNT(*) v FROM riders
                            WHERE status = 'active' AND agency_id IN ({$ph}) GROUP BY agency_id", $ids, 'riders');
 
-        // 이번 주 정산액 · 건수
+        // 이번 주 정산액 · 건수 (부가세 제외)
         if (db_table_exists('settlement_daily_riders')) {
+            $exVat = SettlementAmounts::sqlExVatExpr('sdr');
             foreach (db_rows(
                 "SELECT r.agency_id k,
-                        COALESCE(SUM(sdr.payout_amount), 0) payout,
+                        COALESCE(SUM({$exVat}), 0) payout,
                         COALESCE(SUM(sdr.order_count), 0) orders
                    FROM settlement_daily_riders sdr
                    INNER JOIN riders r ON r.id = sdr.rider_id
@@ -285,7 +287,7 @@ final class OrgDashboard
      * 반영하게 한다(데이터 있는 날만 이으면 2월과 6월이 붙어 보여 오해를 부른다).
      * 기간이 길면 포인트가 과해지므로 62일을 넘으면 주 단위로 묶는다.
      *
-     * ⚠️ 집계 소스는 반드시 KPI·순위와 같은 `settlement_daily_riders.payout_amount`를 쓴다.
+     * ⚠️ 집계 소스는 반드시 KPI·순위와 같은 부가세 제외 정산액(`SettlementAmounts::sqlExVatExpr`)을 쓴다.
      *    `settlement_rider_cycles.net_amount`(수수료·공제 후 지갑 적립액)로 그리면 바로 위
      *    "기간 정산 합계" 숫자와 차트가 어긋나 버그처럼 보인다(실측 차이 39만원).
      *
@@ -300,9 +302,10 @@ final class OrgDashboard
 
         [$scope, $params] = Org::agencyScopeClause('r.agency_id');
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $rows = db_rows(
             "SELECT sdr.settlement_date d,
-                    COALESCE(SUM(sdr.payout_amount), 0) net,
+                    COALESCE(SUM({$exVat}), 0) net,
                     COALESCE(SUM(sdr.order_count), 0)   orders
                FROM settlement_daily_riders sdr
                INNER JOIN riders r ON r.id = sdr.rider_id
@@ -359,7 +362,7 @@ final class OrgDashboard
 
     /**
      * 기간 내 플랫폼별 정산 비중 — 도넛 차트용.
-     * dailyTrend()와 같은 이유로 KPI와 동일한 `payout_amount`를 집계 소스로 쓴다.
+     * dailyTrend()와 같은 이유로 KPI와 동일한 부가세 제외 정산액을 집계 소스로 쓴다.
      *
      * @return list<array{platform:string, label:string, net:int}>
      */
@@ -372,8 +375,9 @@ final class OrgDashboard
 
         [$scope, $params] = Org::agencyScopeClause('r.agency_id');
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $rows = db_rows(
-            "SELECT sdr.platform, COALESCE(SUM(sdr.payout_amount), 0) net
+            "SELECT sdr.platform, COALESCE(SUM({$exVat}), 0) net
                FROM settlement_daily_riders sdr
                INNER JOIN riders r ON r.id = sdr.rider_id
               WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}
@@ -478,8 +482,9 @@ final class OrgDashboard
         }
         [$scope, $params] = Org::agencyScopeClause('r.agency_id');
         $cond = $scope !== '' ? ' AND ' . $scope : '';
+        $exVat = SettlementAmounts::sqlExVatExpr('sdr');
         $row = db_row(
-            "SELECT COALESCE(SUM(sdr.payout_amount), 0) v
+            "SELECT COALESCE(SUM({$exVat}), 0) v
                FROM settlement_daily_riders sdr
                INNER JOIN riders r ON r.id = sdr.rider_id
               WHERE sdr.settlement_date >= ? AND sdr.settlement_date <= ?{$cond}",

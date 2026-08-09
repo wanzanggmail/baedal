@@ -43,8 +43,8 @@ $fees = $cycle['fees'] ?? [];
 	</div>
 	<div class="card-body pt-0 fs-7">
 		<div class="d-flex justify-content-between py-3 border-bottom border-gray-200">
-			<span>플랫폼 지급액</span>
-			<span class="fw-semibold">₩ <?= number_format((int) $cycle['platform_payout']) ?></span>
+			<span>정산금액</span>
+			<span class="fw-semibold">₩ <?= number_format((int) $cycle['gross_amount']) ?></span>
 		</div>
 		<?php if ((int) ($cycle['support_amount'] ?? 0) > 0) : ?>
 		<div class="d-flex justify-content-between py-3 border-bottom border-gray-200">

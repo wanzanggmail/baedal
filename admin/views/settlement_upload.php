@@ -226,7 +226,7 @@ $platformLabels = [
 											['P','기상 할증 건수',''],
 											['Q','기상 할증 금액',''],
 											['…','기타 프로모션1~4',''],
-											['끝','라이더별 실지급액','최종 지급금'],
+											['끝','보수액','저장만 함 · 정산 계산에 미사용'],
 										];
 										foreach ($cols as $c): ?>
 										<tr>
@@ -350,7 +350,7 @@ $platformLabels = [
 									<th class="min-w-110px">라이선스 ID</th>
 									<th class="min-w-90px">이름(원본)</th>
 									<th class="text-end min-w-60px">건수</th>
-									<th class="text-end min-w-90px">지급액</th>
+									<th class="text-end min-w-90px">정산금액</th>
 									<th class="min-w-160px">매칭</th>
 								</tr>
 							</thead>
@@ -713,7 +713,7 @@ $platformLabels = [
 			<td class="font-monospace">${escHtml((r.match_key || r.license_id) || '-')}</td>
 			<td>${escHtml(r.name_raw)}</td>
 			<td class="text-end">${won(r.order_count)}</td>
-			<td class="text-end fw-bold">${won(r.payout_amount)}</td>
+			<td class="text-end fw-bold">${won(r.gross_amount)}</td>
 			<td class="match-cell">${matchCell}</td>
 		</tr>`;
 	}

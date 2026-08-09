@@ -134,7 +134,7 @@ settlement_uploads (1건 업로드)
 `fee_pickup/delivery/area/dist_*/pickup_*/dest_*/weather*/promo1~4` 등 쿠팡 정산서 세부 항목 컬럼.
 `hourly_insurance`: 시간제보험 — **계산이 아니라 "시간제보험" 탭 값을 파싱해 채움**(✅ 2026-07-23 실 파일 검증 완료, `XlsxParser::parseHourlyInsuranceSheet()`).
 **UNIQUE(`upload_id`,`license_id`,`settlement_date`)** — 2026-07-23 확장(기존 `(upload_id,license_id)`). 배민은 파일 하나가 여러 운행일을 포함해 라이더가 날짜별로 여러 행을 가질 수 있어 날짜를 유니크에 포함. 쿠팡은 upload당 단일 날짜라 영향 없음.
-- 쿠팡: `license_id`=라이선스ID, 종합탭 값 그대로. 배민: `license_id`=라이더ID(J), 주문을 라이더·운행일별로 집계(`settlement_baemin_normalize`)해 채움 — `gross_amount`=`payout_amount`=배달처리비 합, 쿠팡 전용 fee 세부컬럼은 0(체계 다름).
+- 쿠팡: `license_id`=라이선스ID, 종합탭 값 그대로. **정산 기준액은 부가세 제외 공급가액**(`SettlementAmounts::exVat` = fee 구성합). 엑셀 `gross_amount`(총 정산 금액, 부가세 포함)는 원본 보관만. `payout_amount`(보수액)도 계산에 쓰지 않는다. 배민: `license_id`=라이더ID(J), 주문을 라이더·운행일별로 집계 — `gross_amount`=`payout_amount`=배달처리비(부가세 없음).
 
 ### `settlement_order_details` — 🆕(2026-07-23) 엑셀 "오더별 상세 내역서" 탭 원본, 주문 1건=1행
 `rider_id`(FK→`riders`, `ON DELETE SET NULL`, 파일 내 성함 매칭·DB 폴백) · `order_no`(축약형 주문번호) · `pickup_area`/`delivery_area` · `assigned_at`/`accepted_at`/`delivered_at`(datetime, 엑셀 시리얼 변환 — **실제 배달 시각**, §7 #18 age-bucket 계산의 미래 데이터 소스) · `duration_minutes` · `distance_m` · `delivery_type`(멀티배달 등) · 수수료 세부(`fee_pickup`/`fee_delivery`/`fee_area`/`fee_dist_surge`/`fee_pickup_surge`/`fee_dest_surge`/`fee_weather`/`fee_promo1~4`) · `net_amount`(오더 단위 정산금액).
@@ -148,16 +148,16 @@ settlement_uploads (1건 업로드)
 ⚠️ `XlsxParser::parseSupportSheet()` 헤더 판정 시 키워드 `'지원금'`을 쓰면 시트 제목("지원금 **상세 내역서**")에도 포함돼 있어 제목 행을 헤더로 오판한다(실 파일로 발견·수정) — `'주문일자'`만 사용할 것.
 
 ### `settlement_rider_cycles` — 정산 반영 확정 1건
-`gross_amount`(플랫폼 총액, 지원금 미포함 원본) · `support_amount`(🆕 2026-07-30, 지원금+추가지원금 합계 — net 계산 시 `gross_amount`에 가산됨) → `total_fee_amount`(차감 합) → `net_amount`(지갑 반영액, `rider_wallets.balance`에 적립. 실제로는 `platform_payout`이 있으면 그걸, 없으면 `gross_amount`를 base로 사용 — `SettlementLedger::createCycleFromDailyRow` 참고).
+`gross_amount`(부가세 제외 정산액 — 2026-08-09부터. 엑셀 총액이 아님) · `support_amount`(지원금+추가지원금) → `total_fee_amount`(차감 합, 부가세 없음) → `net_amount`(라이더 지갑 적립). PG 조달액 = `gross_amount` + `support_amount`. `platform_payout`은 엑셀 보수액 스냅샷.
 UNIQUE(`rider_id`,`settlement_date`,`platform`) — 같은 날 중복 반영 방지.
 
-### `settlement_fee_items` — 반영 시 차감 항목 상세(`SettlementLedger::buildFeeItems` 산출)
-`fee_code` 값: `agency_fee`(선정산수수료, `is_daily_settlement=1`만 반영시점 부과) · `withholding`(원천세, 대상자만) · `employment_ins`(고용 0.8%) · `accident_ins`(산재 0.88%) · `hourly_ins`(시간제보험) · `advance`(선지급) 등.
+### `settlement_fee_items` — 반영 시 차감 항목 상세(`SettlementLedger::composeFeesForDailyRow`)
+`fee_code` 값: `hourly_ins`(시간제보험) · `excel_deduction`(차감내역 탭) · `agency_fee`(선정산수수료) · `withholding`(원천세) · `employment_ins`(고용 0.8%) · `accident_ins`(산재 0.88%) · `advance`(선지급) 등. **부가세(`vat`)는 2026-08-09부터 생성하지 않음**(과거 사이클에만 남을 수 있음).
 ⚠️ `agency_fee`(대행수수료, 대리점 몫)와 §6의 `org_fee_config`(영업대행수수료, PG 결제 시 3자 분배)는 **이름이 비슷하지만 완전히 다른 개념**.
 
 ### `settlement_weekly_deductions` — 엑셀 "차감내역" 탭 원본
 🐛→✅ **2026-07-23 버그 수정**: 실 파일로 헤더 대조 결과 기존 파서가 D열부터 한 칸씩 밀려 읽어 **실제 차감액(금액열)이 아니라 배달비를 저장하던 버그**를 발견·수정. 라이더 매칭(`rider_id`, 이전엔 항상 NULL)도 이번에 추가.
-`registered_entry_id`(🆕): 이 차감행을 `deduction_entries`로 "등록"하면 채워짐(`admin/api/deduction_register.php`) — 중복 등록 방지 + 등록 취소 시 NULL로 복원. 등록된 `deduction_entries` 행은 정산 반영 시 `applied_date` 기준으로 자동 차감된다(§5.3 참고).
+정산 반영 시 **해당 `upload_id`의 차감행을 라이더별로 바로 공제**한다(`SettlementAmounts::excelDeductions`, fee_code=`excel_deduction`). `registered_entry_id`(🆕): 이 차감행을 `deduction_entries`로 "등록"하면 채워짐(`admin/api/deduction_register.php`) — 수동 원장용. 등록분은 엑셀 차감과 이중으로 빠지지 않게 `buildFeeItems`에서 제외.
 
 ### `settlement_excel_config` — 정산 엑셀 열기 암호(대리점별 오버라이드)
 UNIQUE(`org_id`,`platform`), `org_id IS NULL`=전역 기본. 복호화 순서: 업로드 직접입력→대리점→전역→env→baemin 하드코딩.
@@ -287,7 +287,7 @@ PK `(role, area)`. `role`: `admin`/`operation`/`settlement`(super는 항상 전�
 | `admins` | `AdminAccount`(전체), `OrgAccount`(조직 서브계정) |
 | `riders`, `rider_platforms` | (라이더 CRUD — `admin/api/riders.php`, `rider_action.php`) |
 | `rider_wallets` | `RiderWallet` |
-| `settlement_*` | `SettlementLedger`, `AgencyFeeConfig`, `XlsxParser`(파싱), `admin/api/settlement_upload.php`(저장) |
+| `settlement_*` | `SettlementLedger`, `SettlementAmounts`(총액·부가세·차감내역 산식), `AgencyFeeConfig`, `XlsxParser`(파싱), `admin/api/settlement_upload.php`(저장) |
 | `settlement_order_details` | `XlsxParser::parseOrderDetailSheet` → `settlement_upload.php` |
 | `settlement_hourly_insurance` | `XlsxParser::parseHourlyInsuranceSheet` → `settlement_upload.php` |
 | `settlement_weekly_deductions` | `XlsxParser::parseDeductionSheet` → `settlement_upload.php`(저장), `admin/api/deduction_register.php`(등록) |
@@ -310,6 +310,8 @@ PK `(role, area)`. `role`: `admin`/`operation`/`settlement`(super는 항상 전�
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-09 (2) | **부가세 제외.** 반영 기준·사이클 `gross_amount`·PG 조달액을 부가세 제외 공급가액으로 통일. `fee_code=vat` 신규 생성 중단. 컬럼 추가 없음. |
+| 2026-08-09 | **정산 기준액 의미 정정(스키마 컬럼 추가 없음).** `settlement_daily_riders.gross_amount`=엑셀 총 정산금액(원본). 반영 base는 부가세 제외액. `payout_amount`/`platform_payout`는 보수액 스냅샷. `excel_deduction` 사용. |
 | 2026-08-05 (7) | **`pg_payments` 수수료 분배 스냅샷 추가.** `hq_amount`/`distributor_amount`/`agency_amount`/`hq_pct`/`distributor_pct`/`agency_pct` 6컬럼 추가(테이블 수 변화 없음). §7 참고. |
 | 2026-08-05 (4) | **총괄 관리자 역할(`manager`) 추가.** `admins.role` ENUM에 `manager` 추가(테이블 수 변화 없음). §2 참고. |
 | 2026-08-05 (3) | **역할별 권한 관리 신규.** `role_permissions`(role×area→can_view/can_write) 추가 → **34개 테이블**. 기존 `inc/auth.php` 하드코딩 라우트·역할 매핑을 DB화, 「권한 관리」(`system/permissions`, super 전용) 화면에서 편집. `system/*`(시스템관리)는 이 테이블과 무관하게 코드로 super 전용 고정. §9 참고. |
