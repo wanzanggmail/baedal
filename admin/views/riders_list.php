@@ -94,6 +94,8 @@ $detailBase = admin_url('riders/detail');
 $detailBase .= str_contains($detailBase, '?') ? '&id=' : '?id=';
 $apiBase    = ADMIN_BASE . '/api/riders.php';
 $currentUrl = admin_url('riders/list');
+$bulkTplApi = ADMIN_BASE . '/api/riders_bulk_template.php';
+$bulkUpApi  = ADMIN_BASE . '/api/riders_bulk_upload.php';
 
 // 멀티테넌시: 라이더 소속 대리점 선택 (대리점 계정은 자기 대리점 자동)
 require_once INC_PATH . '/Organization.php';
@@ -114,6 +116,11 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 			</ul>
 		</div>
 		<div class="d-flex gap-2">
+			<button type="button" class="btn btn-sm btn-light-primary fw-bold"
+			        data-bs-toggle="modal" data-bs-target="#kt_rider_bulk_modal">
+				<i class="ki-duotone ki-file-up fs-3"><span class="path1"></span><span class="path2"></span></i>
+				엑셀 일괄등록
+			</button>
 			<button type="button" class="btn btn-sm btn-primary fw-bold"
 			        data-bs-toggle="modal" data-bs-target="#kt_rider_register_modal">
 				<i class="ki-duotone ki-user-tick fs-3"><span class="path1"></span><span class="path2"></span></i>
@@ -428,6 +435,88 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 	</div>
 	<!--end::Register Modal-->
 
+	<!--begin::Bulk Upload Modal-->
+	<div class="modal fade" id="kt_rider_bulk_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 class="fw-bold">라이더 엑셀 일괄등록</h2>
+					<div class="btn btn-icon btn-sm btn-active-icon-primary" data-bs-dismiss="modal">
+						<i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i>
+					</div>
+				</div>
+				<div class="modal-body py-lg-8 px-lg-10">
+					<div class="alert bg-light-primary d-flex p-5 mb-6">
+						<i class="ki-duotone ki-information-5 fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+						<div class="fs-7 text-gray-800">
+							신규 대리점이 입점했을 때 기존에 관리하던 라이더를 한 번에 옮겨 적을 때 사용합니다.
+							① <strong>템플릿 다운로드</strong> → ② 이름·휴대전화 등 채워서 업로드 → ③ 미리보기로 오류 확인 → ④ <strong>등록 확정</strong>.
+							이름·휴대전화만 필수이며, 로그인ID·라이더코드는 비우면 자동 생성되고 초기 비밀번호는 0000으로 통일됩니다.
+						</div>
+					</div>
+					<div id="bulk_alert" class="d-none mb-6"></div>
+
+					<form id="bulk_upload_form" enctype="multipart/form-data" accept-charset="UTF-8">
+						<?php if (!$isAgencyCreator): ?>
+						<div class="mb-6">
+							<label class="form-label required">소속 대리점</label>
+							<select class="form-select form-select-solid" id="bulk_agency_id"
+								data-control="select2" data-placeholder="대리점 선택" data-dropdown-parent="#kt_rider_bulk_modal">
+								<option value=""></option>
+								<?php foreach ($agencyOptions as $ag): ?>
+								<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
+								<?php endforeach; ?>
+							</select>
+						</div>
+						<?php endif; ?>
+
+						<div class="row g-4 align-items-end mb-6">
+							<div class="col-md-5">
+								<button type="button" class="btn btn-light-primary w-100" id="bulk_tpl_btn">
+									<i class="ki-duotone ki-file-down fs-3"><span class="path1"></span><span class="path2"></span></i>
+									① 빈 템플릿 다운로드
+								</button>
+							</div>
+							<div class="col-md-7">
+								<label class="form-label required">작성한 엑셀 파일</label>
+								<input type="file" class="form-control form-control-solid" id="bulk_file" accept=".xlsx" />
+							</div>
+						</div>
+
+						<button type="submit" class="btn btn-primary w-100" id="bulk_preview_btn">
+							<span class="indicator-label">
+								<i class="ki-duotone ki-eye fs-3"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+								미리보기 · 오류 확인
+							</span>
+							<span class="indicator-progress">처리 중... <span class="spinner-border spinner-border-sm align-middle ms-2"></span></span>
+						</button>
+					</form>
+
+					<div id="bulk_preview_area" class="d-none mt-8">
+						<div class="separator my-6"></div>
+						<div id="bulk_summary" class="mb-4"></div>
+						<div class="table-responsive" style="max-height: 420px;">
+							<table class="table table-row-bordered align-middle gy-2 fs-7">
+								<thead><tr class="fw-bold text-muted bg-light">
+									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th>라이더코드</th><th>상태</th>
+								</tr></thead>
+								<tbody id="bulk_tbody"></tbody>
+							</table>
+						</div>
+					</div>
+				</div>
+				<div class="modal-footer flex-center">
+					<button type="button" class="btn btn-light" data-bs-dismiss="modal">닫기</button>
+					<button type="button" class="btn btn-primary d-none" id="bulk_confirm_btn">
+						<span class="indicator-label">등록 확정</span>
+						<span class="indicator-progress">등록 중... <span class="spinner-border spinner-border-sm align-middle ms-2"></span></span>
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::Bulk Upload Modal-->
+
 <script>
 (function () {
 	var API_URL   = <?= json_encode($apiBase,    JSON_HEX_TAG | JSON_HEX_AMP) ?>;
@@ -503,6 +592,135 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 		var al = document.getElementById('reg_alert');
 		al.className = 'd-none mb-6';
 		al.textContent = '';
+	});
+})();
+
+// ── 엑셀 일괄등록 ────────────────────────────────────────────
+(function () {
+	var TPL_API = <?= json_encode($bulkTplApi, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+	var UP_API  = <?= json_encode($bulkUpApi,  JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+	var IS_AGENCY = <?= $isAgencyCreator ? 'true' : 'false' ?>;
+
+	var form        = document.getElementById('bulk_upload_form');
+	var fileInput   = document.getElementById('bulk_file');
+	var alertEl     = document.getElementById('bulk_alert');
+	var previewArea = document.getElementById('bulk_preview_area');
+	var previewBtn  = document.getElementById('bulk_preview_btn');
+	var confirmBtn  = document.getElementById('bulk_confirm_btn');
+	var modalEl     = document.getElementById('kt_rider_bulk_modal');
+
+	function esc(s) {
+		return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+		});
+	}
+	function showAlert(msg, type) {
+		alertEl.className = 'alert alert-' + (type || 'danger') + ' mb-6';
+		alertEl.innerHTML = msg;
+	}
+	function agencyId() {
+		if (IS_AGENCY) return null;
+		var el = document.getElementById('bulk_agency_id');
+		return el ? el.value : '';
+	}
+
+	document.getElementById('bulk_tpl_btn').addEventListener('click', function () {
+		var ag = agencyId();
+		if (!IS_AGENCY && !ag) { showAlert('먼저 소속 대리점을 선택하세요.'); return; }
+		window.location.href = TPL_API + (IS_AGENCY ? '' : ('?agency_id=' + encodeURIComponent(ag)));
+	});
+
+	function buildForm(mode) {
+		var fd = new FormData();
+		fd.append('mode', mode);
+		fd.append('file', fileInput.files[0]);
+		if (!IS_AGENCY) { fd.append('agency_id', agencyId()); }
+		return fd;
+	}
+
+	function renderPreview(d) {
+		var s = d.summary;
+		document.getElementById('bulk_summary').innerHTML =
+			'<div class="d-flex flex-wrap gap-2 fs-6">'
+			+ '<span class="badge badge-light fs-7 py-2">총 ' + s.total + '행</span>'
+			+ '<span class="badge badge-light-success fs-7 py-2">등록 가능 ' + s.ok + '명</span>'
+			+ (s.fail ? '<span class="badge badge-light-danger fs-7 py-2">오류 ' + s.fail + '명</span>' : '')
+			+ '</div>';
+
+		document.getElementById('bulk_tbody').innerHTML = d.rows.map(function (r) {
+			return '<tr class="' + (r.ok ? '' : 'table-danger') + '">'
+				+ '<td>' + r.row_no + '</td>'
+				+ '<td>' + esc(r.name) + '</td>'
+				+ '<td>' + esc(r.phone) + '</td>'
+				+ '<td class="font-monospace">' + esc(r.login_id) + '</td>'
+				+ '<td class="font-monospace">' + esc(r.rider_code) + '</td>'
+				+ '<td>' + (r.ok
+					? '<span class="badge badge-light-success fs-8">등록 가능</span>'
+					: '<span class="badge badge-light-danger fs-8">' + esc(r.error) + '</span>')
+				+ '</td></tr>';
+		}).join('');
+
+		previewArea.classList.remove('d-none');
+		if (s.ok > 0) {
+			confirmBtn.classList.remove('d-none');
+		} else {
+			confirmBtn.classList.add('d-none');
+		}
+	}
+
+	form.addEventListener('submit', function (e) {
+		e.preventDefault();
+		if (!fileInput.files[0]) { showAlert('엑셀 파일을 선택하세요.'); return; }
+		if (!IS_AGENCY && !agencyId()) { showAlert('소속 대리점을 선택하세요.'); return; }
+
+		alertEl.className = 'd-none mb-6';
+		previewArea.classList.add('d-none');
+		confirmBtn.classList.add('d-none');
+		previewBtn.setAttribute('data-kt-indicator', 'on');
+		previewBtn.disabled = true;
+
+		fetch(UP_API, { method: 'POST', body: buildForm('preview'), credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (d) {
+				if (!d.ok) throw new Error(d.error || d.message || '오류');
+				renderPreview(d);
+			})
+			.catch(function (err) { showAlert(esc(err.message)); })
+			.finally(function () {
+				previewBtn.removeAttribute('data-kt-indicator');
+				previewBtn.disabled = false;
+			});
+	});
+
+	confirmBtn.addEventListener('click', function () {
+		if (!confirm('오류 없는 행만 실제로 등록합니다. 계속할까요?')) return;
+		confirmBtn.setAttribute('data-kt-indicator', 'on');
+		confirmBtn.disabled = true;
+
+		fetch(UP_API, { method: 'POST', body: buildForm('confirm'), credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (d) {
+				if (!d.ok) throw new Error(d.error || d.message || '오류');
+				showAlert(esc(d.message), d.summary.fail > 0 ? 'warning' : 'success');
+				renderPreview(d);
+				confirmBtn.classList.add('d-none');
+				setTimeout(function () { location.reload(); }, 2000);
+			})
+			.catch(function (err) { showAlert(esc(err.message)); })
+			.finally(function () {
+				confirmBtn.removeAttribute('data-kt-indicator');
+				confirmBtn.disabled = false;
+			});
+	});
+
+	modalEl.addEventListener('show.bs.modal', function () {
+		form.reset();
+		var resetAgencyEl = document.getElementById('bulk_agency_id');
+		if (resetAgencyEl && window.jQuery) { jQuery(resetAgencyEl).val('').trigger('change'); }
+		alertEl.className = 'd-none mb-6';
+		alertEl.innerHTML = '';
+		previewArea.classList.add('d-none');
+		confirmBtn.classList.add('d-none');
 	});
 })();
 </script>
