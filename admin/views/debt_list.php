@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/RiderDebt.php';
+require_once INC_PATH . '/Org.php';
 
 $debtApi  = ADMIN_BASE . '/api/debt_action.php';
 $riderApi = ADMIN_BASE . '/api/riders.php';
@@ -12,9 +13,22 @@ $needsMigrate = !RiderDebt::tableReady();
 $filterKind   = trim((string) ($_GET['kind']   ?? ''));
 $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $filterQ      = trim((string) ($_GET['q']      ?? ''));
+$filterDist   = (int) ($_GET['distributor'] ?? 0);
+$filterAgency = (int) ($_GET['agency'] ?? 0);
 
 $rows = [];
 $kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0, 'lease_overdue' => 0];
+
+// 총판·대리점 선택 목록 — 현재 계정 스코프 안에서만(총판 계정=자기, 대리점 계정=자기뿐이라 사실상 선택 불필요)
+[$orgScopeSql, $orgScopeParams] = Org::orgScopeClause('id');
+$distributorOptions = $needsMigrate ? [] : db_rows(
+    "SELECT id, name FROM organizations WHERE level = 'distributor'" . ($orgScopeSql !== '' ? " AND {$orgScopeSql}" : '') . ' ORDER BY name ASC',
+    $orgScopeParams
+);
+$agencyOptions = $needsMigrate ? [] : db_rows(
+    "SELECT id, name, parent_id FROM organizations WHERE level = 'agency'" . ($orgScopeSql !== '' ? " AND {$orgScopeSql}" : '') . ' ORDER BY name ASC',
+    $orgScopeParams
+);
 
 if (!$needsMigrate) {
     [$scopeSql, $scopeParams] = Org::agencyScopeClause('r.agency_id');
@@ -27,6 +41,14 @@ if (!$needsMigrate) {
     }
     if (isset(RiderDebt::KINDS[$filterKind])) { $where[] = 'd.kind = ?';   $params[] = $filterKind; }
     if (in_array($filterStatus, ['active', 'paused', 'closed'], true)) { $where[] = 'd.status = ?'; $params[] = $filterStatus; }
+    if ($filterAgency > 0) {
+        $where[] = 'r.agency_id = ?';
+        $params[] = $filterAgency;
+    } elseif ($filterDist > 0) {
+        $subAgencyIds = Org::subtreeAgencyIds($filterDist);
+        $where[] = $subAgencyIds !== [] ? 'r.agency_id IN (' . implode(',', array_fill(0, count($subAgencyIds), '?')) . ')' : '1=0';
+        $params = array_merge($params, $subAgencyIds);
+    }
     if ($filterQ !== '') {
         $like    = '%' . $filterQ . '%';
         $where[] = '(r.name LIKE ? OR r.rider_code LIKE ? OR d.title LIKE ? OR d.creditor LIKE ?)';
@@ -167,7 +189,34 @@ $currentUrl = admin_url('deduction/debts');
 		<?php endif; ?>
 		<div class="card card-flush mb-8"><div class="card-body py-5">
 			<div class="row g-4 align-items-end">
-				<div class="col-md-4">
+				<?php if ($distributorOptions !== []): ?>
+				<div class="col-md-2">
+					<label class="form-label fw-semibold">총판</label>
+					<select class="form-select form-select-solid" name="distributor" id="debt_filter_distributor" data-control="select2" data-placeholder="전체">
+						<option value=""></option>
+						<?php foreach ($distributorOptions as $do): ?>
+						<option value="<?= (int) $do['id'] ?>" <?= $filterDist === (int) $do['id'] ? 'selected' : '' ?>><?= htmlspecialchars((string) $do['name'], ENT_QUOTES, 'UTF-8') ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<?php endif; ?>
+				<?php if ($agencyOptions !== []): ?>
+				<div class="col-md-2">
+					<label class="form-label fw-semibold">대리점</label>
+					<?php // data-control="select2" 없음(의도적) — 총판 선택에 따라 대리점 목록을 걸러야 해서
+					      // 커스텀 matcher로 직접 초기화한다(아래 스크립트). 자동 스캐너가 먼저 잡으면
+					      // 두 번 초기화돼 충돌하므로 자동 초기화 대상에서 제외.
+					      // 총판을 먼저 골라야 대리점을 고를 수 있다 — 처음부터 전체를 다 보여주면
+					      // "총판을 고르면 대리점이 나와야지"(사용자 확인) 의도와 어긋남. ?>
+					<select class="form-select form-select-solid" name="agency" id="debt_filter_agency" <?= $filterDist > 0 ? '' : 'disabled' ?>>
+						<option value=""></option>
+						<?php foreach ($agencyOptions as $ao): ?>
+						<option value="<?= (int) $ao['id'] ?>" data-parent="<?= (int) ($ao['parent_id'] ?? 0) ?>" <?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>><?= htmlspecialchars((string) $ao['name'], ENT_QUOTES, 'UTF-8') ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<?php endif; ?>
+				<div class="col-md-3">
 					<label class="form-label fw-semibold">검색</label>
 					<input type="text" class="form-control form-control-solid" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="라이더명·코드·항목·채권자" />
 				</div>
@@ -189,7 +238,7 @@ $currentUrl = admin_url('deduction/debts');
 						<?php endforeach; ?>
 					</select>
 				</div>
-				<div class="col-md-4 d-flex gap-2 justify-content-md-end">
+				<div class="col-md-12 d-flex gap-2 justify-content-md-end">
 					<button type="submit" class="btn btn-primary">필터 적용</button>
 					<a href="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light">초기화</a>
 				</div>
@@ -197,6 +246,64 @@ $currentUrl = admin_url('deduction/debts');
 		</div></div>
 	</form>
 	<!--end::Filter-->
+
+	<?php if ($distributorOptions !== [] && $agencyOptions !== []) : ?>
+	<script>
+	(function () {
+		// 총판 → 대리점 연동 필터. 조회 권한만 있어도 동작해야 하므로(위쪽 canWrite 게이트 밖) 별도 블록으로 둔다.
+		// jQuery/select2는 이 화면 맨 아래(shell_close.php)에서 로드되므로 DOMContentLoaded 이후로 미룬다.
+		function init() {
+			var distEl   = document.getElementById('debt_filter_distributor');
+			var agencyEl = document.getElementById('debt_filter_agency');
+			if (!distEl || !agencyEl || typeof jQuery === 'undefined') { return; }
+
+			var $agency = jQuery(agencyEl);
+
+			/**
+			 * 총판을 골라야 대리점을 고를 수 있다 — 총판 미선택 시 비활성화("총판을 먼저
+			 * 선택하세요")하고, 선택하면 그 소속 대리점만 남도록 select2를 커스텀 matcher로
+			 * 재초기화한다.
+			 */
+			function applyMatcher() {
+				var distVal = distEl.value;
+				agencyEl.disabled = (distVal === '');
+				if ($agency.hasClass('select2-hidden-accessible')) { $agency.select2('destroy'); }
+				$agency.select2({
+					placeholder: distVal === '' ? '총판을 먼저 선택하세요' : '전체',
+					allowClear: true,
+					matcher: function (params, data) {
+						if (!params.term && distVal === '') { return data; }
+						var opt = data.element;
+						if (distVal !== '' && opt && opt.getAttribute('data-parent') !== distVal) { return null; }
+						if (!params.term) { return data; }
+						return (data.text || '').toLowerCase().indexOf(params.term.toLowerCase()) > -1 ? data : null;
+					},
+				});
+			}
+
+			// ⚠️ select2가 옵션 선택 시 발생시키는 'change'는 jQuery 이벤트라 네이티브
+			// addEventListener로는 못 받는다(실측 확인) — jQuery.on()으로 바인딩해야 한다.
+			jQuery(distEl).on('change', function () {
+				// 대리점 선택이 새 총판 소속이 아니면 초기화(다른 총판 소속 대리점이 조회되는 걸 방지)
+				var selectedOpt = agencyEl.options[agencyEl.selectedIndex];
+				if (distEl.value !== '' && selectedOpt && selectedOpt.getAttribute('data-parent') !== distEl.value) {
+					jQuery(agencyEl).val('').trigger('change');
+				} else if (distEl.value === '') {
+					jQuery(agencyEl).val('').trigger('change');
+				}
+				applyMatcher();
+			});
+
+			applyMatcher();
+		}
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', init);
+		} else {
+			init();
+		}
+	})();
+	</script>
+	<?php endif; ?>
 
 	<div class="card card-flush">
 		<div class="card-header pt-5">

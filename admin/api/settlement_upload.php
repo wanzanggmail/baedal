@@ -276,7 +276,9 @@ try {
         $supports,
         $addSupports,
         $adminId,
-        $agencyId
+        $agencyId,
+        $teamName,
+        $regionName
     ): array {
         $dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId);
         if ($dupError !== null) {
