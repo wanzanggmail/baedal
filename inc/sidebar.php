@@ -229,6 +229,14 @@ $route = $route ?? '';
 														<span class="menu-title">처리 완료</span>
 													</a>
 												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/wallet-ledger') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/wallet-ledger'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet">
+															<span class="bullet bullet-dot"></span>
+														</span>
+														<span class="menu-title">지갑 입출금</span>
+													</a>
+												</div>
 												<?php if (admin_org_level() === Org::LEVEL_AGENCY) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/daily-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/daily-payout'), ENT_QUOTES, 'UTF-8') ?>">

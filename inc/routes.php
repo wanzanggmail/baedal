@@ -24,6 +24,7 @@ return [
     'withdrawal/settings' => ['title' => '출금 정책 설정', 'view' => 'withdrawal_settings'],
     'withdrawal/download' => ['title' => '출금 다운로드', 'view' => 'withdrawal_download'],
     'withdrawal/complete' => ['title' => '출금 처리 완료', 'view' => 'withdrawal_complete'],
+    'withdrawal/wallet-ledger' => ['title' => '지갑 입출금', 'view' => 'wallet_ledger'],
     'withdrawal/agency-payout' => ['title' => '대리점 자체 인출', 'view' => 'agency_payout'],
     'withdrawal/daily-payout' => ['title' => '일일정산 지급 리스트', 'view' => 'daily_payout'],
     'withdrawal/payment-setup' => ['title' => '결제 설정(카드·계좌)', 'view' => 'payment_setup'],

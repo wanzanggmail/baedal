@@ -2,16 +2,32 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Org.php';
+
 /**
- * 대리점 지갑 (agency_wallets) — PG 카드결제로 충전된 잔액 + 원천세 예수금 누적.
+ * 조직 지갑 (agency_wallets) — 대리점뿐 아니라 본사·총판도 같은 테이블을 쓴다.
  *
  * 자금 흐름(LOGIC §5.4·§5.5):
  *   PG 카드결제(FUND) → balance 충전 → 오픈뱅킹 이체(DISBURSE)로 라이더 지급 → balance 차감
+ *   플랫폼 수수료·리스 수수료 몫은 본사/총판/대리점 지갑에 credit
  *   원천세 대상 라이더 공제분은 withholding_reserve로 누적(대리점이 신고·납부할 예수금)
  *   대리점 자체 인출가능액 = balance − 라이더채무(rider_wallets 합계) − withholding_reserve
  */
 final class AgencyWallet
 {
+    /** @var array<string, string> */
+    public const REASON_LABELS = [
+        'pg_fund'          => 'PG 정산 조달',
+        'pg_fee_in'         => '플랫폼 수수료 수입',
+        'rider_payout'      => '라이더 지급',
+        'agency_payout'     => '자체 인출',
+        'manual_adjust'     => '수동 조정',
+        'lease_fee_up'      => '리스 수수료 상위 이체',
+        'lease_fee_up_rev'  => '리스 수수료 상위 이체 취소',
+        'lease_fee_in'      => '리스 수수료 수입',
+        'lease_fee_in_rev'  => '리스 수수료 수입 취소',
+    ];
+
     public static function tableExists(): bool
     {
         return db_table_exists('agency_wallets');
@@ -184,5 +200,174 @@ final class AgencyWallet
               LIMIT ' . $limit,
             [$agencyId]
         );
+    }
+
+    public static function reasonLabel(string $reason): string
+    {
+        return self::REASON_LABELS[$reason] ?? ($reason !== '' ? $reason : '기타');
+    }
+
+    /**
+     * 스코프 내 지갑이 있는 조직(필터 드롭다운).
+     *
+     * @return list<array{id:int,name:string,level:string,level_label:string,balance:int}>
+     */
+    public static function orgFilterOptions(): array
+    {
+        if (!self::tableExists()) {
+            return [];
+        }
+        [$scopeSql, $scopeParams] = Org::orgScopeClause('o.id');
+        $where = $scopeSql !== '' ? 'WHERE ' . $scopeSql : '';
+        $rows = db_rows(
+            "SELECT o.id, o.name, o.level, w.balance
+               FROM agency_wallets w
+               INNER JOIN organizations o ON o.id = w.agency_id
+              {$where}
+              ORDER BY FIELD(o.level, 'admin', 'distributor', 'agency'), o.name ASC",
+            $scopeParams
+        );
+
+        return array_map(static fn (array $r): array => [
+            'id'           => (int) $r['id'],
+            'name'         => (string) $r['name'],
+            'level'        => (string) $r['level'],
+            'level_label'  => Org::levelLabel((string) $r['level']),
+            'balance'      => (int) $r['balance'],
+        ], $rows);
+    }
+
+    /**
+     * 스코프·필터 적용 원장 목록.
+     *
+     * @param array{from?:string,to?:string,org_id?:int,direction?:string,reason?:string,limit?:int} $filters
+     * @return list<array<string,mixed>>
+     */
+    public static function listLedgerScoped(array $filters = []): array
+    {
+        if (!db_table_exists('agency_wallet_ledger')) {
+            return [];
+        }
+        $limit = max(1, min(1000, (int) ($filters['limit'] ?? 500)));
+        [$where, $params] = self::buildLedgerWhere($filters);
+
+        $rows = db_rows(
+            "SELECT l.id, l.agency_id, l.direction, l.reason, l.amount, l.balance_after,
+                    l.ref_id, l.note, l.created_at, l.created_by,
+                    o.name AS org_name, o.level AS org_level,
+                    a.name AS actor_name
+               FROM agency_wallet_ledger l
+               INNER JOIN organizations o ON o.id = l.agency_id
+               LEFT JOIN admins a ON a.id = l.created_by
+              WHERE {$where}
+              ORDER BY l.id DESC
+              LIMIT {$limit}",
+            $params
+        );
+
+        return array_map([self::class, 'mapLedgerRow'], $rows);
+    }
+
+    /**
+     * @param array{from?:string,to?:string,org_id?:int,direction?:string,reason?:string} $filters
+     * @return array{count:int, credit:int, debit:int}
+     */
+    public static function sumLedgerScoped(array $filters = []): array
+    {
+        $empty = ['count' => 0, 'credit' => 0, 'debit' => 0];
+        if (!db_table_exists('agency_wallet_ledger')) {
+            return $empty;
+        }
+        [$where, $params] = self::buildLedgerWhere($filters);
+        $row = db_row(
+            "SELECT COUNT(*) AS cnt,
+                    COALESCE(SUM(CASE WHEN l.direction = 'credit' THEN l.amount ELSE 0 END), 0) AS credit,
+                    COALESCE(SUM(CASE WHEN l.direction = 'debit' THEN l.amount ELSE 0 END), 0) AS debit
+               FROM agency_wallet_ledger l
+              WHERE {$where}",
+            $params
+        );
+
+        return [
+            'count'  => (int) ($row['cnt'] ?? 0),
+            'credit' => (int) ($row['credit'] ?? 0),
+            'debit'  => (int) ($row['debit'] ?? 0),
+        ];
+    }
+
+    /**
+     * @param array{from?:string,to?:string,org_id?:int,direction?:string,reason?:string} $filters
+     * @return array{0:string,1:list<mixed>}
+     */
+    private static function buildLedgerWhere(array $filters): array
+    {
+        $where  = ['1=1'];
+        $params = [];
+
+        [$scopeSql, $scopeParams] = Org::orgScopeClause('l.agency_id');
+        if ($scopeSql !== '') {
+            $where[] = $scopeSql;
+            $params  = array_merge($params, $scopeParams);
+        }
+
+        $orgId = (int) ($filters['org_id'] ?? 0);
+        if ($orgId > 0) {
+            if (!Org::canAccessOrg($orgId)) {
+                $where[] = '1=0';
+            } else {
+                $where[]  = 'l.agency_id = ?';
+                $params[] = $orgId;
+            }
+        }
+
+        $from = trim((string) ($filters['from'] ?? ''));
+        if ($from !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $where[]  = 'l.created_at >= ?';
+            $params[] = $from . ' 00:00:00';
+        }
+        $to = trim((string) ($filters['to'] ?? ''));
+        if ($to !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $where[]  = 'l.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+            $params[] = $to;
+        }
+
+        $dir = (string) ($filters['direction'] ?? '');
+        if ($dir === 'credit' || $dir === 'debit') {
+            $where[]  = 'l.direction = ?';
+            $params[] = $dir;
+        }
+
+        $reason = trim((string) ($filters['reason'] ?? ''));
+        if ($reason !== '' && isset(self::REASON_LABELS[$reason])) {
+            $where[]  = 'l.reason = ?';
+            $params[] = $reason;
+        }
+
+        return [implode(' AND ', $where), $params];
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function mapLedgerRow(array $row): array
+    {
+        $dir = (string) $row['direction'];
+        $lvl = (string) ($row['org_level'] ?? '');
+
+        return [
+            'id'             => (int) $row['id'],
+            'org_id'         => (int) $row['agency_id'],
+            'org_name'       => (string) ($row['org_name'] ?? ''),
+            'org_level'      => $lvl,
+            'org_level_label'=> Org::levelLabel($lvl),
+            'direction'      => $dir,
+            'direction_label'=> $dir === 'credit' ? '입금' : '출금',
+            'reason'         => (string) $row['reason'],
+            'reason_label'   => self::reasonLabel((string) $row['reason']),
+            'amount'         => (int) $row['amount'],
+            'balance_after'  => (int) $row['balance_after'],
+            'ref_id'         => isset($row['ref_id']) ? (int) $row['ref_id'] : 0,
+            'note'           => (string) ($row['note'] ?? ''),
+            'actor_name'     => (string) ($row['actor_name'] ?? ''),
+            'created_at'     => substr((string) ($row['created_at'] ?? ''), 0, 16),
+        ];
     }
 }

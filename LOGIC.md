@@ -83,6 +83,7 @@
 | 대리점 카드 등록(PG) | — | — | 등록 | 🆕 |
 | 결제수수료 분배 계약 | ✓ | — | — | 🆕 |
 | 대리점 자체 정산금 인출 | — | — | 신청·바로 실행(승인절차 없음) | 🆕 ⚠️ 스키마 충돌 |
+| 지갑 입출금 (`withdrawal/wallet-ledger`) | ✓(전체) | ✓(자기+하위) | ✓(자기) | ✅ 신규(2026-08-09) — `agency_wallet_ledger` 조회. 본사·총판·대리점 지갑 입출금 원장 |
 | 공지 / 배너 관리 | ✓(작성) | 조회 | 조회 | ✅ + 🔧 권한 축소 |
 | 라이더 관리 | 조회 | 조회 | ✓(등록·관리) | ✅ |
 | 조직 관리 | ✓(생성) | — | — | ✅ 고도화(2026-07-23): KPI·검색/필터·트리·대표역할·상세모달·코드자동생성·설정 시딩 |
@@ -264,6 +265,8 @@
 
 > ⚠️ **스키마 충돌 (가장 시급)** — `withdrawal_requests.rider_id`가 `NOT NULL`(FK)인데 대리점 인출(`kind=agency_payout`)은 라이더가 없음. **`rider_id`를 nullable로 바꾸고 `agency_id` 추가**하거나 **별도 테이블**(`agency_payout_requests`)이 필요.
 
+✅ **지갑 입출금 조회 화면**(2026-08-09) — `withdrawal/wallet-ledger` · `admin/views/wallet_ledger.php`. 테이블명은 `agency_wallets`이지만 PK는 `organizations.id`라 **본사·총판·대리점 모두 같은 지갑·원장을 쓴다**(PG `pg_fund`/`pg_fee_in`, 라이더 지급 `rider_payout`, 자체인출 `agency_payout`, 리스 수수료 `lease_fee_*`, 수동조정 `manual_adjust`). 권한은 출금 area(`withdrawal/`). 스코프는 `Org::scopeOrgIds`(본사=전체, 총판=자기+하위, 대리점=자기). 기간·조직·입출금구분·유형 필터 + 현재잔액/기간입출금 KPI. `AgencyWallet::listLedgerScoped` / `sumLedgerScoped`.
+
 ### 5.6 관리자 계정 / 대시보드
 
 - super만 전체 계정 CRUD, 🆕 조직 대표계정은 자기 org 범위 내 서브계정 CRUD 가능해야 함(§2).
@@ -390,6 +393,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-08-09 (9) | **지갑 입출금 조회 화면 신규(§5.5).** 본사·총판·대리점이 자기(및 스코프 하위) 지갑의 입출금 원장을 보는 `withdrawal/wallet-ledger`. `AgencyWallet::listLedgerScoped`/`sumLedgerScoped`/`orgFilterOptions` + reason 라벨. 사이드바 출금 하위에 전 레벨 노출(자체인출·일일정산은 기존처럼 대리점만). 스키마 변경 없음. |
 | 2026-08-09 (8) | **부가세 전면 제외(§5.3·§5.4·§5.6).** 정산 기준·화면·대시보드·원천세 과세표준·엑셀보내기에서 부가세를 빼다. 기준액 = 공급가액(구성합, 없으면 엑셀총액) + 지원금. PG 청구 = 그 금액 + 플랫폼 수수료(`PgPayment::fundAppliedUpload`가 net 대신 cycle.gross+support 사용). 사이클 `gross_amount`도 부가세 제외액으로 저장. |
 | 2026-08-09 (7) | **정산 엑셀 금액 산식 정정(§5.3).** 보수액(`payout_amount`)을 기준·실지급으로 쓰던 것을 폐기 — 원인 불명 「기타 공제」의 근원. **기준액 = 총 정산금액 + 지원금.** 엑셀 공제 = 부가세 + 시간제보험 + 차감내역 탭(업로드 반영 시 자동). 고용 0.8%·산재 0.88%는 자체 계산. 원천세·선정산수수료는 기존 규칙 유지. `SettlementAmounts` + `SettlementLedger::composeFeesForDailyRow`로 반영·모달 산식 통일. 대시보드·수수료 목록·원천세 과세표준도 `gross_amount` 기준으로 맞춤. 이미 반영된 사이클은 재계산하지 않음(재반영은 기존처럼 skip). |
 | 2026-08-09 (6) | **정산 원본 상세 — 정산예정·실지급 산식 + 공제 내역.** 정산예정 = 픽업·배달·할증·프로모션 합계 + 부가세 10%(엑셀 총액과 일치 검증). 실지급 = 정산예정 − (부가세 + 시간제보험 + 기타공제). 기타공제는 종합탭 고용·산재·원천세 등 항목별 미저장분. 차감내역 탭은 「정산 반영 시 추가 차감」으로 분리 표시(엑셀 실지급에 아직 미포함). |

@@ -218,12 +218,14 @@ UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: �
 - `auto_daily`: 선정산 라이더, 관리자 "일일정산 지급 리스트"에서 원클릭(`DailyPayout::payRider`) — 즉시 completed/failed
 - `agency_payout`: 대리점 자체 인출, **승인 절차 없음**, 신청 즉시 이체 실행(`AgencyPayout::create`)
 
-### `agency_wallets` — 🆕(2026-07-22) 대리점 잔액
-PK=`agency_id`. `balance`(PG 충전 잔액) · `withholding_reserve`(원천세 예수금 누적, 고용·산재는 예수금 아님이라 제외).
-**대리점 인출가능액 = balance − 라이더채무(rider_wallets 합계) − withholding_reserve** (`AgencyWallet::withdrawable`)
+### `agency_wallets` — 🆕(2026-07-22) 조직 지갑 잔액
+PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점 모두 사용**). `balance`(PG 충전·수수료 수입 잔액) · `withholding_reserve`(원천세 예수금 누적, 고용·산재는 예수금 아님이라 제외).
+**대리점 인출가능액 = balance − 라이더채무(rider_wallets 합계) − withholding_reserve** (`AgencyWallet::withdrawable`). 본사·총판은 라이더채무·예수금이 보통 0이라 잔액≈인출가능액.
 
-### `agency_wallet_ledger` — 🆕 대리점 잔액 변동 원장(감사용)
-`direction`(credit/debit) · `reason`(`pg_fund`/`rider_payout`/`agency_payout`/`manual_adjust`) · `balance_after`(스냅샷) · `ref_id`(연관 레코드).
+### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)
+`direction`(credit/debit) · `reason` · `amount`(양수) · `balance_after`(스냅샷) · `ref_id`(연관 레코드) · `note` · `created_by`.
+`reason` 코드: `pg_fund`(PG 정산 조달) · `pg_fee_in`(플랫폼 수수료 수입) · `rider_payout`(라이더 지급) · `agency_payout`(자체 인출) · `manual_adjust`(수동 조정) · `lease_fee_up`/`lease_fee_up_rev`(리스 수수료 상위 이체·취소) · `lease_fee_in`/`lease_fee_in_rev`(리스 수수료 수입·취소).
+조회 화면: `withdrawal/wallet-ledger` (`AgencyWallet::listLedgerScoped`).
 
 ---
 
@@ -310,6 +312,7 @@ PK `(role, area)`. `role`: `admin`/`operation`/`settlement`(super는 항상 전�
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-09 (3) | **지갑 원장 문서화.** `agency_wallets`/`agency_wallet_ledger`가 본사·총판에도 쓰임을 명시. ledger `reason` 코드 목록 보강. 컬럼 추가 없음. |
 | 2026-08-09 (2) | **부가세 제외.** 반영 기준·사이클 `gross_amount`·PG 조달액을 부가세 제외 공급가액으로 통일. `fee_code=vat` 신규 생성 중단. 컬럼 추가 없음. |
 | 2026-08-09 | **정산 기준액 의미 정정(스키마 컬럼 추가 없음).** `settlement_daily_riders.gross_amount`=엑셀 총 정산금액(원본). 반영 base는 부가세 제외액. `payout_amount`/`platform_payout`는 보수액 스냅샷. `excel_deduction` 사용. |
 | 2026-08-05 (7) | **`pg_payments` 수수료 분배 스냅샷 추가.** `hq_amount`/`distributor_amount`/`agency_amount`/`hq_pct`/`distributor_pct`/`agency_pct` 6컬럼 추가(테이블 수 변화 없음). §7 참고. |
