@@ -55,6 +55,7 @@ final class MigrateRunner
         self::migrateAdminManagerRole();
         self::migratePgPaymentFeeSplit();
         self::migrateLeaseProviderAndVin();
+        self::migratePromotionDeductionColumns();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1191,6 +1192,48 @@ final class MigrateRunner
                 echo 'OK    rider_debt_entries ' . count($eadds) . "개 컬럼 추가\n";
             }
         }
+    }
+
+    /**
+     * 프로모션도 정산과 동일하게 원천세·고용보험·산재보험을 공제하고 순액만 지갑에 적립하도록
+     * 확장(§5.8). 배분액 스냅샷을 남겨야 나중에 요율이 바뀌어도 과거 지급 건은 그대로 보인다.
+     */
+    private static function migratePromotionDeductionColumns(): void
+    {
+        echo "== promotion_entries 원천세·보험 공제 컬럼 ==\n";
+
+        if (!db_table_exists('promotion_entries')) {
+            echo "SKIP  promotion_entries (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM promotion_entries'), 'Field');
+        $adds = [];
+        foreach ([
+            'withholding_amount'    => '원천세',
+            'employment_ins_amount' => '고용보험',
+            'accident_ins_amount'   => '산재보험',
+        ] as $c => $label) {
+            if (!in_array($c, $cols, true)) {
+                $adds[] = "ADD COLUMN {$c} INT NOT NULL DEFAULT 0 COMMENT '{$label} 공제액(지급 시점 스냅샷)'";
+            }
+        }
+        if (!in_array('net_amount', $cols, true)) {
+            $adds[] = "ADD COLUMN net_amount INT NOT NULL DEFAULT 0 COMMENT '공제 후 라이더 실지급액(total_amount - 세금·보험)'";
+        }
+
+        if ($adds === []) {
+            echo "SKIP  공제 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE promotion_entries ' . implode(', ', $adds));
+        echo 'OK    promotion_entries ' . count($adds) . "개 컬럼 추가\n";
+
+        // 기존에 지급 완료된(paid) 건은 net_amount가 비어 있으면 total_amount로 백필(공제 없이 전액
+        // 지급됐던 과거 데이터 그대로 — 소급 재계산·재출금은 하지 않는다).
+        db_execute("UPDATE promotion_entries SET net_amount = total_amount WHERE status = 'paid' AND net_amount = 0 AND total_amount > 0");
     }
 
     private static function migratePgPaymentFeeSplit(): void

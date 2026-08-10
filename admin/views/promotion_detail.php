@@ -41,11 +41,18 @@ $entryLabels = [
 [$stLabel, $stBadge] = $statusLabels[$batch['status']] ?? [(string) $batch['status'], 'badge-light'];
 
 $retryable = 0;
+$withholdingTotal = 0;
+$insuranceTotal   = 0;
 foreach ($entries as $e) {
     if (in_array((string) $e['status'], ['failed', 'pending'], true) && (int) $e['total_amount'] > 0 && $e['rider_id'] !== null) {
         $retryable++;
     }
+    if ((string) $e['status'] === 'paid') {
+        $withholdingTotal += (int) $e['withholding_amount'];
+        $insuranceTotal   += (int) $e['employment_ins_amount'] + (int) $e['accident_ins_amount'];
+    }
 }
+$deductionTotal = $withholdingTotal + $insuranceTotal;
 
 $fmtWon = static fn (int $n): string => number_format($n) . '원';
 $payApi = rtrim(ADMIN_BASE, '/') . '/api/promotion_pay.php';
@@ -96,15 +103,24 @@ $payApi = rtrim(ADMIN_BASE, '/') . '/api/promotion_pay.php';
 			<div class="card card-flush h-100"><div class="card-body py-6">
 				<div class="text-gray-500 fw-semibold fs-7 mb-1">실지급액</div>
 				<div class="fw-bold fs-3 text-primary"><?= $fmtWon((int) $batch['paid_amount']) ?></div>
-				<div class="text-muted fs-8 mt-1">예정 <?= $fmtWon((int) $batch['total_amount']) ?></div>
+				<div class="text-muted fs-8 mt-1">공제 전 <?= $fmtWon((int) $batch['total_amount']) ?> · 원천세·보험 −<?= $fmtWon($deductionTotal) ?></div>
 			</div></div>
 		</div>
 		<div class="col-xl-3">
 			<div class="card card-flush h-100"><div class="card-body py-6">
 				<div class="text-gray-500 fw-semibold fs-7 mb-1">플랫폼 수수료</div>
 				<div class="fw-bold fs-3 text-danger"><?= $fmtWon((int) $batch['fee_amount']) ?></div>
-				<div class="text-muted fs-8 mt-1">카드 청구 = 지급액 + 수수료</div>
+				<div class="text-muted fs-8 mt-1">카드 청구 = 공제 전 금액 + 수수료</div>
 			</div></div>
+		</div>
+	</div>
+
+	<div class="alert bg-light-info d-flex p-5 mb-8">
+		<i class="ki-duotone ki-percentage fs-2hx text-info me-4"><span class="path1"></span><span class="path2"></span></i>
+		<div class="fs-7 text-gray-800">
+			프로모션도 정산과 같은 요율로 <strong>원천세(대상자만)·고용보험·산재보험</strong>을 공제한 뒤 순액만 라이더 지갑에 적립합니다(2026-08-10부터).
+			카드 결제는 공제 전 총액 기준으로 그대로 청구되고, 원천세 공제분은 대리점 지갑의 신고·납부 예수금에 함께 쌓입니다.
+			이번 배치 원천세 <?= $fmtWon($withholdingTotal) ?> · 보험 <?= $fmtWon($insuranceTotal) ?>.
 		</div>
 	</div>
 
@@ -126,17 +142,22 @@ $payApi = rtrim(ADMIN_BASE, '/') . '/api/promotion_pay.php';
 						<th>라이더</th>
 						<th class="text-end">프로모션1</th>
 						<th class="text-end">프로모션2</th>
-						<th class="text-end">합계</th>
-						<th class="text-end">수수료</th>
+						<th class="text-end">합계(공제 전)</th>
+						<th class="text-end">원천세</th>
+						<th class="text-end">보험</th>
+						<th class="text-end">실지급</th>
+						<th class="text-end">PG수수료</th>
 						<th>상태</th>
 						<th>지급시각 / 사유</th>
 					</tr></thead>
 					<tbody>
 						<?php if ($entries === []) : ?>
-						<tr><td colspan="7" class="text-center text-muted py-10">내역이 없습니다.</td></tr>
+						<tr><td colspan="10" class="text-center text-muted py-10">내역이 없습니다.</td></tr>
 						<?php endif; ?>
 						<?php foreach ($entries as $e) :
 						    [$eLabel, $eBadge] = $entryLabels[$e['status']] ?? [(string) $e['status'], 'badge-light'];
+						    $isPaid = (string) $e['status'] === 'paid';
+						    $insSum = (int) $e['employment_ins_amount'] + (int) $e['accident_ins_amount'];
 						    ?>
 						<tr>
 							<td>
@@ -146,6 +167,9 @@ $payApi = rtrim(ADMIN_BASE, '/') . '/api/promotion_pay.php';
 							<td class="text-end"><?= $fmtWon((int) $e['promo1_amount']) ?></td>
 							<td class="text-end"><?= $fmtWon((int) $e['promo2_amount']) ?></td>
 							<td class="text-end fw-bold"><?= $fmtWon((int) $e['total_amount']) ?></td>
+							<td class="text-end text-warning fs-8"><?= $isPaid && (int) $e['withholding_amount'] > 0 ? '−' . $fmtWon((int) $e['withholding_amount']) : '—' ?></td>
+							<td class="text-end text-warning fs-8"><?= $isPaid && $insSum > 0 ? '−' . $fmtWon($insSum) : '—' ?></td>
+							<td class="text-end fw-bold text-primary"><?= $isPaid ? $fmtWon((int) $e['net_amount']) : '—' ?></td>
 							<td class="text-end text-muted fs-8"><?= (int) $e['fee_amount'] > 0 ? $fmtWon((int) $e['fee_amount']) : '—' ?></td>
 							<td><span class="badge <?= htmlspecialchars($eBadge, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($eLabel, ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="fs-8 text-gray-600">

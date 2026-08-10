@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/PgPayment.php';
 require_once __DIR__ . '/PgFeeConfig.php';
 require_once __DIR__ . '/RiderWallet.php';
+require_once __DIR__ . '/AgencyWallet.php';
+require_once __DIR__ . '/SettlementLedger.php';
 
 /**
  * 프로모션 지급 (LOGIC §5.8).
@@ -14,7 +16,17 @@ require_once __DIR__ . '/RiderWallet.php';
  *   결제가 성공한 건만 라이더 지갑에 적립한다(정산과 달리 실패 건은 지급되지 않음).
  *
  * 정산 사이클(settlement_rider_cycles)과는 완전히 별개다 — 프로모션은 플랫폼 정산서가 아니라
- * 대리점이 자체적으로 주는 돈이라 수수료·보험·원천세 차감 대상이 아니다.
+ * 대리점이 자체적으로 주는 돈이다. 다만 세무상으로는 정산과 마찬가지로 라이더에게 실제 귀속되는
+ * 소득이라, **정산과 같은 요율(원천세·고용보험·산재보험, `deduction_global_config`)로 공제한 뒤
+ * 순액만 지갑에 적립**한다(2026-08-10 확정). 원천세는 원천세 대상 라이더(`withholding_tax_enabled`)
+ * 에게만, 고용·산재보험은 정산과 동일하게 전원 무조건 공제 — `SettlementLedger::buildFeeItems()`와
+ * 완전히 같은 규칙을 재사용해 두 화면의 계산이 어긋나지 않게 한다.
+ *
+ * 카드결제(PG)는 여전히 **공제 전 총액**(promo1+promo2)을 청구한다 — 대리점이 실제로 지출하는
+ * 돈은 프로모션 총액이고, 공제는 "그중 얼마를 라이더에게 줄지"에 대한 것이지 대리점이 덜 내는
+ * 게 아니기 때문이다. 원천세 공제분은 정산과 동일하게 대리점 지갑의 `withholding_reserve`
+ * (신고·납부 예수금)에 쌓이고, 고용·산재보험 공제분은 별도 적립처가 없다(정산과 동일 — 실제
+ * 보험료는 쿠팡 등 플랫폼이 대납 처리하므로 예수금이 아니라 단순히 라이더 몫에서 빠진다).
  */
 final class Promotion
 {
@@ -191,12 +203,43 @@ final class Promotion
         });
     }
 
+    private static function pctAmount(int $base, float $pct): int
+    {
+        if ($base <= 0 || $pct <= 0) {
+            return 0;
+        }
+
+        return (int) round($base * $pct / 100);
+    }
+
+    /**
+     * 프로모션 총액(공제 전)에서 정산과 같은 요율로 원천세·고용보험·산재보험을 계산한다.
+     * `SettlementLedger::buildFeeItems()`와 같은 규칙: 원천세는 대상 라이더만, 보험 둘은 무조건.
+     *
+     * @return array{withholding:int, employment:int, accident:int, net:int}
+     */
+    private static function computeDeductions(int $grossAmount, int $riderId, ?int $agencyId): array
+    {
+        $rates = SettlementLedger::deductionRates($agencyId);
+        $withholdRider = (int) (db_row(
+            'SELECT withholding_tax_enabled FROM riders WHERE id = ? LIMIT 1',
+            [$riderId]
+        )['withholding_tax_enabled'] ?? 0) === 1;
+
+        $withholding = $withholdRider ? self::pctAmount($grossAmount, (float) $rates['withholding_tax_pct']) : 0;
+        $employment  = self::pctAmount($grossAmount, (float) $rates['employment_ins_pct']);
+        $accident    = self::pctAmount($grossAmount, (float) $rates['industrial_accident_ins_pct']);
+        $net         = max(0, $grossAmount - $withholding - $employment - $accident);
+
+        return ['withholding' => $withholding, 'employment' => $employment, 'accident' => $accident, 'net' => $net];
+    }
+
     /**
      * 지급 실행 — 라이더별로 카드결제 후 성공 건만 지갑 적립.
      *
      * 재실행 안전: 이미 paid 인 건은 건너뛰므로, 일부 실패 후 다시 눌러 재시도할 수 있다.
      *
-     * @return array{paid:int, failed:int, paid_amount:int, fee_amount:int, errors:list<string>}
+     * @return array{paid:int, failed:int, paid_amount:int, fee_amount:int, deduction_amount:int, errors:list<string>}
      */
     public static function pay(int $batchId, ?int $adminId = null): array
     {
@@ -217,15 +260,18 @@ final class Promotion
         $failed = 0;
         $paidAmount = 0;
         $feeAmount = 0;
+        $deductionAmount = 0;
         $errors = [];
 
         foreach ($entries as $e) {
             $entryId = (int) $e['id'];
             $riderId = (int) $e['rider_id'];
-            $amount  = (int) $e['total_amount'];
+            $amount  = (int) $e['total_amount']; // 공제 전 총액 — 카드 청구는 이 금액 기준(대리점 실지출)
 
             try {
-                // 카드결제: 프로모션액 + 플랫폼 수수료. 성공 시 대리점 지갑에 자금이 충전된다.
+                $ded = self::computeDeductions($amount, $riderId, $agencyId > 0 ? $agencyId : null);
+
+                // 카드결제: 프로모션액(공제 전) + 플랫폼 수수료. 성공 시 대리점 지갑에 자금이 충전된다.
                 $res = PgPayment::chargeForRider($agencyId, $riderId, $amount, null, $adminId);
 
                 if (!$res['success']) {
@@ -238,22 +284,36 @@ final class Promotion
                     continue;
                 }
 
-                // 결제 성공분만 라이더 지갑에 적립.
+                // 결제 성공분만 라이더 지갑에 적립 — 단, 원천세·보험 공제 후 순액만.
                 // accrued_days 는 증가시키지 않는다 — 프로모션은 "정산 1일치"가 아니라 별도 지급이라
                 // 출금 수수료 산정(경과일)에 영향을 주면 안 된다.
-                db_transaction(static function () use ($riderId, $amount, $entryId, $res): void {
-                    RiderWallet::credit($riderId, $amount, false);
+                db_transaction(static function () use ($riderId, $entryId, $res, $ded, $agencyId): void {
+                    if ($ded['net'] > 0) {
+                        RiderWallet::credit($riderId, $ded['net'], false);
+                    }
                     db_execute(
                         "UPDATE promotion_entries
-                            SET status = 'paid', pg_payment_id = ?, fee_amount = ?, fail_reason = '', paid_at = NOW()
+                            SET status = 'paid', pg_payment_id = ?, fee_amount = ?,
+                                withholding_amount = ?, employment_ins_amount = ?, accident_ins_amount = ?, net_amount = ?,
+                                fail_reason = '', paid_at = NOW()
                           WHERE id = ?",
-                        [(int) $res['pg_id'], (int) $res['fee'], $entryId]
+                        [
+                            (int) $res['pg_id'], (int) $res['fee'],
+                            $ded['withholding'], $ded['employment'], $ded['accident'], $ded['net'],
+                            $entryId,
+                        ]
                     );
+                    // 원천세 공제분은 정산과 동일하게 대리점의 신고·납부 예수금으로 적립.
+                    // 고용·산재보험은 예수금이 아니라 단순 차감(정산과 동일 처리 — buildFeeItems 주석 참고).
+                    if ($ded['withholding'] > 0 && $agencyId > 0) {
+                        AgencyWallet::addWithholdingReserve($agencyId, $ded['withholding']);
+                    }
                 });
 
                 $paid++;
-                $paidAmount += $amount;
-                $feeAmount  += (int) $res['fee'];
+                $paidAmount      += $ded['net'];
+                $feeAmount       += (int) $res['fee'];
+                $deductionAmount += $ded['withholding'] + $ded['employment'] + $ded['accident'];
             } catch (Throwable $ex) {
                 db_execute(
                     "UPDATE promotion_entries SET status = 'failed', fail_reason = ? WHERE id = ?",
@@ -266,7 +326,11 @@ final class Promotion
 
         self::refreshBatchTotals($batchId);
 
-        return ['paid' => $paid, 'failed' => $failed, 'paid_amount' => $paidAmount, 'fee_amount' => $feeAmount, 'errors' => $errors];
+        return [
+            'paid' => $paid, 'failed' => $failed,
+            'paid_amount' => $paidAmount, 'fee_amount' => $feeAmount, 'deduction_amount' => $deductionAmount,
+            'errors' => $errors,
+        ];
     }
 
     /** 배치 집계·상태 갱신 (지급 실행 후 호출) */
@@ -275,7 +339,7 @@ final class Promotion
         $agg = db_row(
             "SELECT
                 SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END)            AS paid_cnt,
-                SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) AS paid_amt,
+                SUM(CASE WHEN status = 'paid' THEN net_amount ELSE 0 END)   AS paid_amt,
                 SUM(CASE WHEN status = 'paid' THEN fee_amount ELSE 0 END)   AS fee_amt,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END)         AS pending_cnt,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)          AS failed_cnt
@@ -396,7 +460,9 @@ final class Promotion
         $limit = max(1, min(200, $limit));
 
         return db_rows(
-            "SELECT e.promo1_amount, e.promo2_amount, e.total_amount, e.paid_at, b.pay_date
+            "SELECT e.promo1_amount, e.promo2_amount, e.total_amount,
+                    e.withholding_amount, e.employment_ins_amount, e.accident_ins_amount, e.net_amount,
+                    e.paid_at, b.pay_date
                FROM promotion_entries e
                INNER JOIN promotion_batches b ON b.id = e.batch_id
               WHERE e.rider_id = ? AND e.status = 'paid'
@@ -436,7 +502,9 @@ final class Promotion
         }
 
         return db_rows(
-            'SELECT e.promo1_amount, e.promo2_amount, e.total_amount, e.status, e.fail_reason, e.paid_at, b.pay_date
+            'SELECT e.promo1_amount, e.promo2_amount, e.total_amount,
+                    e.withholding_amount, e.employment_ins_amount, e.accident_ins_amount, e.net_amount,
+                    e.status, e.fail_reason, e.paid_at, b.pay_date
                FROM promotion_entries e
                INNER JOIN promotion_batches b ON b.id = e.batch_id
               WHERE ' . implode(' AND ', $where) . '

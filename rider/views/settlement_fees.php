@@ -84,7 +84,7 @@ $promoStatusBadge = [
 $promoTotal = 0;
 foreach ($promoRows as $p) {
     if ((string) $p['status'] === 'paid') {
-        $promoTotal += (int) $p['total_amount'];
+        $promoTotal += (int) $p['net_amount'];
     }
 }
 ?>
@@ -217,7 +217,7 @@ foreach ($promoRows as $p) {
 					<span class="fw-bold"><?= htmlspecialchars((string) $p['pay_date'], ENT_QUOTES, 'UTF-8') ?></span>
 					<div class="d-flex align-items-center gap-2">
 						<span class="fw-bold <?= (string) $p['status'] === 'paid' ? 'text-primary' : 'text-gray-500' ?>">
-							<?= (string) $p['status'] === 'paid' ? '+' : '' ?><?= $fmtWon((int) $p['total_amount']) ?>
+							<?= (string) $p['status'] === 'paid' ? '+' . $fmtWon((int) $p['net_amount']) : $fmtWon((int) $p['total_amount']) ?>
 						</span>
 						<span class="badge badge-light-<?= htmlspecialchars($stBadge, ENT_QUOTES, 'UTF-8') ?> fs-9"><?= htmlspecialchars($stLabel, ENT_QUOTES, 'UTF-8') ?></span>
 					</div>
@@ -230,6 +230,15 @@ foreach ($promoRows as $p) {
 					<?= (int) $p['promo1_amount'] > 0 ? ' · ' : '' ?>프로모션2 <?= $fmtWon((int) $p['promo2_amount']) ?>
 					<?php endif; ?>
 				</div>
+				<?php $pDed = (int) $p['withholding_amount'] + (int) $p['employment_ins_amount'] + (int) $p['accident_ins_amount']; ?>
+				<?php if ((string) $p['status'] === 'paid' && $pDed > 0) : ?>
+				<div class="fs-9 text-gray-500 mt-1">
+					공제 전 <?= $fmtWon((int) $p['total_amount']) ?>
+					<?php if ((int) $p['withholding_amount'] > 0) : ?> · 원천세 −<?= $fmtWon((int) $p['withholding_amount']) ?><?php endif; ?>
+					<?php $pIns = (int) $p['employment_ins_amount'] + (int) $p['accident_ins_amount']; ?>
+					<?php if ($pIns > 0) : ?> · 보험 −<?= $fmtWon($pIns) ?><?php endif; ?>
+				</div>
+				<?php endif; ?>
 				<?php if ((string) $p['status'] === 'failed' && (string) ($p['fail_reason'] ?? '') !== '') : ?>
 				<div class="fs-8 text-danger mt-1"><?= htmlspecialchars((string) $p['fail_reason'], ENT_QUOTES, 'UTF-8') ?></div>
 				<?php endif; ?>

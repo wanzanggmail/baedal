@@ -85,7 +85,9 @@ if ($riderId > 0 && Promotion::tableReady()) {
         foreach (Promotion::listForRider($riderId, 100) as $p) {
             $d = (string) $p['pay_date'];
             if ($d >= $monthStart && $d <= $monthEnd) {
-                $promoMonthTotal += (int) $p['total_amount'];
+                // 지갑에 실제로 들어간 금액(원천세·보험 공제 후) 기준으로 합산 — 공제 전 금액을
+                // 더하면 실제 지갑 잔액 증가분보다 크게 나와 라이더가 혼란스러워한다.
+                $promoMonthTotal += (int) $p['net_amount'];
             }
         }
     } catch (Throwable) {
