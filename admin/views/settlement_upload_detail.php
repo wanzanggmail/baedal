@@ -471,14 +471,17 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 
 	<!--begin::원본 데이터 상세 모달-->
 	<div class="modal fade" id="kt_dr_detail_modal" tabindex="-1" aria-hidden="true">
-		<div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+		<div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
 			<div class="modal-content">
 				<div class="modal-header">
 					<h3 class="modal-title" id="dr_detail_title">정산 원본 데이터 상세</h3>
 					<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
 				</div>
-				<div class="modal-body fs-7" id="dr_detail_body">
-					<div class="text-center text-muted py-10">불러오는 중…</div>
+				<div class="modal-body fs-7 bg-light bg-opacity-50" id="dr_detail_body">
+					<div class="d-flex flex-column align-items-center text-muted py-15">
+						<div class="spinner-border text-primary mb-3" role="status"></div>
+						불러오는 중…
+					</div>
 				</div>
 				<div class="modal-footer">
 					<a href="#" id="dr_detail_rider_link" class="btn btn-primary d-none" target="_self">라이더 상세 보기</a>
@@ -734,39 +737,52 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		}
 		function plusWon(n) { return '+ ' + won(n); }
 		function minusWon(n) { return '− ' + won(Math.abs(Number(n) || 0)); }
-		function moneyRow(label, valueHtml, opts) {
+		function statTile(label, valueHtml, opts) {
 			opts = opts || {};
-			var wrap = opts.wrapClass || 'd-flex justify-content-between align-items-start py-2';
-			if (opts.border) wrap += ' border-bottom';
-			var note = opts.note ? '<span class="d-block text-muted fs-8 fw-normal">' + esc(opts.note) + '</span>' : '';
-			return '<div class="' + wrap + '"><span>' + esc(label) + note + '</span>' +
-				'<span class="fw-semibold text-nowrap ms-4">' + valueHtml + '</span></div>';
+			var box = 'border rounded-3 p-4 h-100 ' + (opts.boxClass || 'border-gray-300 bg-white');
+			var note = opts.note ? '<div class="text-muted fs-9 mt-1">' + esc(opts.note) + '</div>' : '';
+			return '<div class="col-6 col-md-3"><div class="' + box + '">' +
+				'<div class="text-muted fs-8 mb-1">' + esc(label) + '</div>' +
+				'<div class="fs-4 fw-bold text-nowrap ' + (opts.valueClass || 'text-gray-900') + '">' + valueHtml + '</div>' +
+				note + '</div></div>';
 		}
-		function itemTable(title, items, sign, footerLabel) {
+		function sectionHead(icon, title, badge) {
+			return '<div class="d-flex align-items-center gap-2 mb-3">' +
+				'<i class="ki-duotone ' + icon + ' fs-2 text-primary">' +
+				'<span class="path1"></span><span class="path2"></span></i>' +
+				'<span class="fw-bold text-gray-800 fs-6">' + esc(title) + '</span>' +
+				(badge != null ? '<span class="badge badge-light fs-9">' + badge + '건</span>' : '') +
+				'</div>';
+		}
+		function itemTable(icon, title, items, sign, footerLabel) {
 			var active = [];
 			items.forEach(function (it) {
 				if ((Number(it.amt) || 0) !== 0 || (it.cnt || 0) > 0) active.push(it);
 			});
-			if (!active.length) return '';
+			var html = '<div class="border border-gray-300 rounded-3 p-4 mb-4 bg-white">';
+			html += sectionHead(icon, title, active.length);
+			if (!active.length) {
+				html += '<div class="text-muted fs-8 py-2">구성 항목 없음</div></div>';
+				return { html: html, sum: 0 };
+			}
 			var sum = 0;
-			var html = '<div class="fw-bold text-gray-800 mb-2">' + esc(title) + '</div>';
-			html += '<table class="table table-row-bordered align-middle gy-2 mb-5">';
-			html += '<thead><tr class="fw-bold text-muted fs-8"><th>항목</th><th class="text-end">건수</th><th class="text-end">금액</th></tr></thead><tbody>';
+			html += '<div class="table-responsive"><table class="table table-row-bordered table-row-gray-200 align-middle gy-2 mb-0 fs-8">';
+			html += '<thead><tr class="fw-bold text-muted"><th>항목</th><th class="text-end">건수</th><th class="text-end">금액</th></tr></thead><tbody>';
 			active.forEach(function (it) {
 				var amt = Number(it.amt) || 0;
 				sum += amt;
 				var amtClass = sign === '-' ? 'text-danger' : 'text-gray-900';
 				var amtText = sign === '-' ? minusWon(amt) : plusWon(amt);
 				html += '<tr><td class="text-gray-800">' + esc(it.label);
-				if (it.note) html += '<span class="d-block text-muted fs-8 fw-normal">' + esc(it.note) + '</span>';
+				if (it.note) html += '<span class="d-block text-muted fs-9 fw-normal">' + esc(it.note) + '</span>';
 				html += '</td>' +
 					'<td class="text-end text-muted">' + (it.cnt == null ? '—' : Number(it.cnt).toLocaleString('ko-KR') + '건') + '</td>' +
 					'<td class="text-end fw-semibold ' + amtClass + '">' + amtText + '</td></tr>';
 			});
 			html += '</tbody><tfoot><tr class="fw-bold bg-light"><td>' + esc(footerLabel || '소계') + '</td><td></td>' +
 				'<td class="text-end ' + (sign === '-' ? 'text-danger' : '') + '">' +
-				(sign === '-' ? minusWon(sum) : plusWon(sum)) + '</td></tr></tfoot></table>';
-			return html;
+				(sign === '-' ? minusWon(sum) : plusWon(sum)) + '</td></tr></tfoot></table></div></div>';
+			return { html: html, sum: sum };
 		}
 		function render(d) {
 			var matchBadge = d.matched
@@ -779,40 +795,54 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			var base = earn + support;
 			var fees = d.fees || [];
 
-			var html = '<div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-5 pb-4 border-bottom">';
+			var html = '';
+
+			// ── 상단 헤더 카드: 엑셀 원본 정보 + 매칭 라이더 ─────────────
+			html += '<div class="d-flex flex-wrap align-items-start justify-content-between gap-4 border border-gray-300 rounded-3 bg-white p-5 mb-5">';
+			html += '<div class="d-flex align-items-center gap-4">';
+			html += '<div class="symbol symbol-50px symbol-circle"><span class="symbol-label bg-light-primary text-primary fs-3 fw-bold">' +
+				esc((d.rider_name_raw || '?').trim().charAt(0)) + '</span></div>';
 			html += '<div>';
-			html += '<div class="fs-4 fw-bold text-gray-900 mb-1">' + esc(d.rider_name_raw || '이름 없음') + '</div>';
-			html += '<div class="text-muted fs-8">' + esc(d.settlement_date) + ' · ' + esc(d.platform_label);
-			if (d.license_id) html += ' · 라이선스 ' + esc(d.license_id);
-			html += ' · 오더 ' + (Number(d.order_count) || 0).toLocaleString('ko-KR') + '건';
-			html += '</div></div><div class="text-end">' + matchBadge;
+			html += '<div class="fs-4 fw-bold text-gray-900">' + esc(d.rider_name_raw || '이름 없음') + '<span class="text-muted fs-8 fw-normal ms-2">(엑셀 표기명)</span></div>';
+			html += '<div class="d-flex flex-wrap align-items-center gap-3 text-muted fs-8 mt-1">';
+			html += '<span><i class="ki-duotone ki-calendar fs-6 me-1"><span class="path1"></span><span class="path2"></span></i>' + esc(d.settlement_date) + '</span>';
+			html += '<span class="badge badge-light-secondary">' + esc(d.platform_label) + '</span>';
+			if (d.license_id) html += '<span class="font-monospace">라이선스 ' + esc(d.license_id) + '</span>';
+			html += '<span>오더 ' + (Number(d.order_count) || 0).toLocaleString('ko-KR') + '건</span>';
+			html += '</div></div></div>';
+
+			html += '<div class="text-end border-start ps-4">';
+			html += '<div class="mb-1">' + matchBadge + '</div>';
 			if (d.matched && d.rider) {
-				html += '<div class="fs-7 fw-semibold text-gray-800 mt-1">' + esc(d.rider.name) + '</div>';
+				html += '<div class="fs-7 fw-semibold text-gray-800">' + esc(d.rider.name) + '</div>';
 				html += '<div class="text-muted fs-8">' + esc(d.rider.rider_code);
 				if (d.rider.phone) html += ' · ' + esc(d.rider.phone);
 				html += '</div>';
 				html += '<div class="text-muted fs-8">' + esc(d.rider.status_label) + '</div>';
 			} else {
-				html += '<div class="text-muted fs-8 mt-1">연결된 라이더 없음</div>';
+				html += '<div class="text-muted fs-8">연결된 라이더 없음</div>';
 			}
 			html += '</div></div>';
 
-			html += '<div class="bg-light rounded p-5 mb-6">';
-			html += moneyRow('정산금액', '<span class="text-gray-900">' + plusWon(earn) + '</span>', {
-				border: true, note: '부가세 제외 · 보수액 미사용',
-			});
+			// ── 정산금액 요약: 스탯 타일 ─────────────────────────────
+			html += '<div class="row g-3 mb-5">';
+			html += statTile('정산금액', '<span>' + plusWon(earn) + '</span>', { note: '부가세 제외' });
 			if (support > 0) {
-				html += moneyRow('지원금', '<span class="text-success">' + plusWon(support) + '</span>', { border: true });
+				html += statTile('지원금', '<span class="text-success">' + plusWon(support) + '</span>');
 			}
-			html += moneyRow('공제', '<span class="text-danger">' + minusWon(feeTotal) + '</span>', {
-				border: true, note: '시간제보험 · 차감내역 · 고용 0.8% · 산재 0.88%' + (d.matched ? '' : ' (예상)'),
+			html += statTile('공제', '<span class="text-danger">' + minusWon(feeTotal) + '</span>', {
+				note: d.matched ? '시간제보험 등' : '시간제보험 등 (예상)',
 			});
-			html += moneyRow('예상 실지급', '<span class="fs-2 fw-bold ' + (net < 0 ? 'text-danger' : 'text-primary') + '">' + won(net) + '</span>', {
-				wrapClass: 'd-flex justify-content-between align-items-center pt-3',
+			html += statTile('예상 실지급', '<span>' + won(net) + '</span>', {
+				boxClass: net < 0 ? 'border-danger bg-light-danger' : 'border-primary bg-light-primary',
+				valueClass: net < 0 ? 'text-danger' : 'text-primary',
 			});
-			html += '<div class="text-muted fs-8 mt-3">' + won(base) + ' − 공제 ' + won(feeTotal) + ' = 실지급 ' + won(net) + '</div>';
 			html += '</div>';
+			html += '<div class="d-flex align-items-center gap-2 text-muted fs-8 mb-6">';
+			html += '<i class="ki-duotone ki-information-5 fs-6"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>';
+			html += won(base) + ' − 공제 ' + won(feeTotal) + ' = 실지급 ' + won(net) + '</div>';
 
+			// ── ① 정산금액 구성 / ② 공제 내역 ─────────────────────────
 			var earnItems = [
 				{ label: '픽업 비용', amt: d.fee_pickup },
 				{ label: '배달 비용', amt: d.fee_delivery },
@@ -826,21 +856,17 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				{ label: '프로모션 3', amt: d.fee_promo3 },
 				{ label: '프로모션 4', amt: d.fee_promo4 },
 			];
-			var earnHtml = itemTable('① 정산금액 구성 (부가세 제외)', earnItems, '+', '정산금액');
-			html += earnHtml || '<div class="fw-bold text-gray-800 mb-2">① 정산금액 구성</div><div class="text-muted fs-8 mb-5">구성 항목 없음 · 정산금액 ' + won(earn) + '</div>';
+			html += itemTable('ki-tag', '정산금액 구성 (부가세 제외)', earnItems, '+', '정산금액').html;
 
 			var deductItems = fees.map(function (f) {
 				return { label: f.label, amt: f.amount };
 			});
-			if (deductItems.length) {
-				html += itemTable('② 공제 내역 (정산 반영과 동일)', deductItems, '-', '공제 합계');
-			} else {
-				html += '<div class="fw-bold text-gray-800 mb-2">② 공제 내역</div>';
-				html += '<div class="text-muted fs-8 mb-5">공제 항목 없음</div>';
-			}
+			html += itemTable('ki-minus-circle', '공제 내역 (정산 반영과 동일)', deductItems, '-', '공제 합계').html;
 
 			if (d.original_filename) {
-				html += '<div class="text-muted fs-8">원본 파일 · ' + esc(d.original_filename) + '</div>';
+				html += '<div class="text-muted fs-8 d-flex align-items-center gap-2">' +
+					'<i class="ki-duotone ki-file fs-6"><span class="path1"></span><span class="path2"></span></i>' +
+					'원본 파일 · ' + esc(d.original_filename) + '</div>';
 			}
 
 			body.innerHTML = html;
@@ -858,7 +884,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				var id = btn.getAttribute('data-id');
 				var name = btn.getAttribute('data-name') || '';
 				titleEl.textContent = name ? ('정산 원본 · ' + name) : '정산 원본 데이터 상세';
-				body.innerHTML = '<div class="text-center text-muted py-10">불러오는 중…</div>';
+				body.innerHTML = '<div class="d-flex flex-column align-items-center text-muted py-15">' +
+					'<div class="spinner-border text-primary mb-3" role="status"></div>불러오는 중…</div>';
 				riderLink.classList.add('d-none');
 				bootstrap.Modal.getOrCreateInstance(modalEl).show();
 				fetch(API + '?id=' + id, { credentials: 'same-origin' })
@@ -868,7 +895,9 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 						render(res.row);
 					})
 					.catch(function (e) {
-						body.innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>';
+						body.innerHTML = '<div class="alert alert-danger d-flex align-items-center gap-2">' +
+							'<i class="ki-duotone ki-information-5 fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>' +
+							esc(e.message) + '</div>';
 					});
 			});
 		});
