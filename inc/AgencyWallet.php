@@ -11,7 +11,7 @@ require_once __DIR__ . '/Org.php';
  *   PG 카드결제(FUND) → balance 충전 → 오픈뱅킹 이체(DISBURSE)로 라이더 지급 → balance 차감
  *   플랫폼 수수료·리스 수수료 몫은 본사/총판/대리점 지갑에 credit
  *   원천세 대상 라이더 공제분은 withholding_reserve로 누적(대리점이 신고·납부할 예수금)
- *   대리점 자체 인출가능액 = balance − 라이더채무(rider_wallets 합계) − withholding_reserve
+ *   대리점 자체 인출가능액 = balance − 라이더 정산금(rider_wallets 합계) − withholding_reserve
  */
 final class AgencyWallet
 {
@@ -26,6 +26,8 @@ final class AgencyWallet
         'lease_fee_up_rev'  => '리스 수수료 상위 이체 취소',
         'lease_fee_in'      => '리스 수수료 수입',
         'lease_fee_in_rev'  => '리스 수수료 수입 취소',
+        'wd_fee_up'         => '정산수수료 상위 이체',
+        'wd_fee_in'         => '정산수수료 수입',
     ];
 
     public static function tableExists(): bool
@@ -60,7 +62,7 @@ final class AgencyWallet
     }
 
     /**
-     * 라이더 채무 — 이 대리점 소속 라이더들에게 아직 지급해야 할 지갑 잔액 합계.
+     * 라이더 정산금 — 이 대리점 소속 라이더들에게 아직 지급해야 할 지갑 잔액 합계.
      */
     public static function riderDebt(int $agencyId): int
     {
@@ -79,7 +81,7 @@ final class AgencyWallet
     }
 
     /**
-     * 대리점 자체 인출가능액 = balance − 라이더채무 − 원천세 예수금 (0 하한).
+     * 대리점 자체 인출가능액 = balance − 라이더 정산금 − 원천세 예수금 (0 하한).
      *
      * @return array{balance:int, rider_debt:int, withholding_reserve:int, withdrawable:int}
      */

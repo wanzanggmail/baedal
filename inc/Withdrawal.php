@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/RiderWallet.php';
+require_once INC_PATH . '/WithdrawalFeeShare.php';
 
 /**
  * 출금 신청 조회·상태 변경·라이더 신청
@@ -349,6 +350,12 @@ final class Withdrawal
                         (int) $row['rider_id'],
                         (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
                     );
+                    // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
+                    WithdrawalFeeShare::distribute(
+                        $id,
+                        (int) $row['rider_id'],
+                        (int) ($row['withhold_other'] ?? 0)
+                    );
                 }
             }
         });
@@ -463,6 +470,12 @@ final class Withdrawal
                     RiderWallet::deductAfterWithdrawal(
                         (int) $row['rider_id'],
                         (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
+                    );
+                    // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
+                    WithdrawalFeeShare::distribute(
+                        $id,
+                        (int) $row['rider_id'],
+                        (int) ($row['withhold_other'] ?? 0)
                     );
                 }
             });

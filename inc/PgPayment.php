@@ -59,10 +59,14 @@ final class PgPayment
                 $cardId = (int) $card['id'];
                 $pgId = db_transaction(static function () use ($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, $res, $attempts, $adminId): int {
                     $id = self::record($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, 'success', $res->tid, '', $attempts, $adminId);
-                    // 조달된 자금(net)을 대리점 잔액에 충전
+                    // 조달된 자금(net)을 대리점 잔액에 충전. 카드에는 net+수수료가 청구되지만
+                    // 지갑에 들어가는 건 **수수료를 제외한 순액**이다(2026-08-12 갑 확정 ②).
                     AgencyWallet::credit($agencyId, $netAmount, 'pg_fund', $id, 'PG 카드결제 충전', $adminId);
-                    // 영업대행수수료(카드 청구액 − net)를 본사·총판·대리점 지갑에 배분 적립
-                    self::creditFeeSplit($agencyId, $fee, $id, $adminId);
+                    // ⚠️ 플랫폼 수수료는 **지갑에 적립하지 않는다**(2026-08-12 갑 확정 ③).
+                    // 본사가 대리점·총판에 계산서를 발행해 시스템 밖에서 정산하므로, 시스템은
+                    // 「플랫폼 수수료 내역」(settlement/platform-fee) 조회용 기록만 남긴다.
+                    // 분배 금액은 self::record()가 pg_payments의 hq/distributor/agency_amount
+                    // 스냅샷 컬럼에 이미 저장한다.
 
                     return $id;
                 });
@@ -282,50 +286,21 @@ final class PgPayment
         ];
     }
 
-    /**
-     * 영업대행수수료를 본사·총판·대리점 지갑에 각각 적립한다(결제 성공 시).
+    /*
+     * 🗑️ creditFeeSplit() 제거 — 2026-08-12 갑 확정 ③.
      *
-     * ⚠️ 리스 수수료 배분과 **자금 출처가 다르다** — 리스료는 라이더 정산에서 걷어 이미 대리점
-     * 지갑에 남아 있는 돈이라 "대리점 → 상위" 이동이었지만, 영업대행수수료는 **대리점이 카드로
-     * 결제한 금액 중 net을 넘는 부분**이라 어느 지갑에도 없던 돈이다. 따라서 어디서도 빼지 않고
-     * 세 조직에 각각 credit 한다(합계 = service_fee).
+     * 예전에는 결제 성공 시 플랫폼 수수료를 본사·총판·대리점 지갑에 `pg_fee_in`으로 적립했다.
+     * 이제는 **지갑에 넣지 않는다** — 본사가 대리점·총판에 계산서를 발행해 시스템 밖에서
+     * 정산하기 때문이다. 시스템의 역할은 "누가 얼마를 발생시켰는지"를 기간별로 보여주는 것뿐.
      *
-     * 총판이 없는(본사 직속) 대리점이면 총판 몫은 갈 곳이 없으므로 **본사로 합친다** — 돈이
-     * 증발하지 않게 하되 어디로 갔는지 원장 메모에 남긴다.
+     * 분배 금액 자체는 record()가 pg_payments의 hq_amount/distributor_amount/agency_amount
+     * 스냅샷 컬럼에 계속 저장하므로 「플랫폼 수수료 내역」(settlement/platform-fee) 화면은
+     * 그대로 동작한다. 분배 계산식이 필요하면 feeSplit()이 남아 있다.
+     *
+     * ⚠️ 리스 수수료 배분(RiderDebt::moveLeaseFees)은 이와 달리 **여전히 실제로 지갑을 옮긴다** —
+     *    자금 출처가 다르기 때문이다(리스료는 이미 대리점 지갑에 있는 돈, 플랫폼 수수료는
+     *    대리점이 카드로 더 낸 돈). 둘을 같은 규칙으로 착각하지 말 것.
      */
-    private static function creditFeeSplit(int $agencyId, int $fee, int $pgId, ?int $adminId): void
-    {
-        if ($fee <= 0) {
-            return;
-        }
-        require_once __DIR__ . '/Org.php';
-
-        $sp    = self::feeSplit($fee, $agencyId);
-        $chain = Org::chainForAgency($agencyId);
-
-        $hq   = (int) $sp['hq'];
-        $dist = (int) $sp['distributor'];
-        $agy  = (int) $sp['agency'];
-        $note = 'PG 영업대행수수료 배분';
-
-        // 받을 조직이 없는 몫은 본사로 흡수(본사는 항상 존재)
-        $foldedNote = '';
-        if ($dist > 0 && $chain['distributor'] < 1) {
-            $hq  += $dist;
-            $dist = 0;
-            $foldedNote = ' · 총판 없음(본사 직속)이라 총판 몫을 본사에 합산';
-        }
-
-        if ($hq > 0 && $chain['hq'] > 0) {
-            AgencyWallet::credit($chain['hq'], $hq, 'pg_fee_in', $pgId, $note . ' · 본사 몫' . $foldedNote, $adminId);
-        }
-        if ($dist > 0 && $chain['distributor'] > 0) {
-            AgencyWallet::credit($chain['distributor'], $dist, 'pg_fee_in', $pgId, $note . ' · 총판 몫', $adminId);
-        }
-        if ($agy > 0 && $chain['agency'] > 0) {
-            AgencyWallet::credit($chain['agency'], $agy, 'pg_fee_in', $pgId, $note . ' · 대리점 몫', $adminId);
-        }
-    }
 
     private static function record(int $agencyId, ?int $riderId, ?int $uploadId, ?int $cardId, int $net, int $fee, int $total, string $status, string $tid, string $failReason, int $attempts, ?int $adminId): int
     {

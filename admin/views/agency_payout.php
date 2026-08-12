@@ -50,7 +50,7 @@ $rows   = !$needsMigrate ? AgencyPayout::listScoped($isAgency ? $myAgency : null
 						<span class="fw-bold" id="ap_balance"><?= number_format((int) $wallet['balance']) ?>원</span>
 					</div>
 					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
-						<span class="text-muted">− 라이더 채무</span>
+						<span class="text-muted">− 라이더 정산금</span>
 						<span id="ap_debt"><?= number_format((int) $wallet['rider_debt']) ?>원</span>
 					</div>
 					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
@@ -66,7 +66,7 @@ $rows   = !$needsMigrate ? AgencyPayout::listScoped($isAgency ? $myAgency : null
 			<div class="card card-flush">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">인출 신청</h3></div>
 				<div class="card-body pt-2 fs-7">
-					<div class="alert bg-light-primary text-gray-800 fs-8 p-4 mb-5">본사 승인 없이 <strong>신청 즉시 처리</strong>됩니다. (인출가능액은 이미 예수금·라이더채무를 제외한 순수 대리점 몫)</div>
+					<div class="alert bg-light-primary text-gray-800 fs-8 p-4 mb-5">본사 승인 없이 <strong>신청 즉시 처리</strong>됩니다. (인출가능액은 이미 예수금·라이더 정산금을 제외한 순수 대리점 몫)</div>
 					<div class="mb-4">
 						<label class="form-label required" for="ap_amount">인출 금액 (원)</label>
 						<input type="number" class="form-control form-control-solid" id="ap_amount" min="1" step="1000" placeholder="0" />

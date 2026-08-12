@@ -557,7 +557,7 @@ foreach ($agencyByParent as $orphans) {
 				if (ag.wallet) {
 					h += kv('대리점 잔액', won(ag.wallet.balance));
 					h += kv('인출가능액', '<span class="text-primary fw-bold">' + won(ag.wallet.withdrawable) + '</span>');
-					h += kv('라이더 채무 / 원천세예수금', won(ag.wallet.rider_debt) + ' / ' + won(ag.wallet.withholding_reserve));
+					h += kv('라이더 정산금 / 원천세예수금', won(ag.wallet.rider_debt) + ' / ' + won(ag.wallet.withholding_reserve));
 				}
 				h += '</div></div>';
 				h += '<div class="row mt-2"><div class="col-md-6">';

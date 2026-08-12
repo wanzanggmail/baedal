@@ -104,7 +104,7 @@ $agencies = $needsMigrate ? [] : db_rows(
 							<span class="text-muted">잔액</span><span class="fw-bold" id="ma_ag_balance">—</span>
 						</div>
 						<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
-							<span class="text-muted">라이더 채무</span><span id="ma_ag_debt">—</span>
+							<span class="text-muted">라이더 정산금</span><span id="ma_ag_debt">—</span>
 						</div>
 						<div class="d-flex justify-content-between py-2 border-bottom border-gray-200 mb-4">
 							<span class="text-muted">원천세 예수금</span><span id="ma_ag_reserve">—</span>

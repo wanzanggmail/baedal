@@ -7,7 +7,7 @@ declare(strict_types=1);
  */
 final class WithdrawalConfig
 {
-    /** @return array<string, int> */
+    /** @return array<string, int|float> */
     public static function defaults(): array
     {
         return [
@@ -15,6 +15,9 @@ final class WithdrawalConfig
             'fee_day_threshold' => 7,
             'fee_per_tx_short'  => 80,
             'fee_per_tx_long'   => 40,
+            // 정산수수료 3분할(2026-08-12 갑 확정) — 본사는 배달 건당 정액, 나머지를 총판·대리점이 비율로.
+            'hq_fee_per_order'          => 0,
+            'fee_share_distributor_pct' => 0.0,
         ];
     }
 
@@ -47,6 +50,40 @@ final class WithdrawalConfig
             'fee_day_threshold' => max(1, (int) ($row['fee_day_threshold'] ?? $d['fee_day_threshold'])),
             'fee_per_tx_short'  => max(0, (int) ($row['fee_per_tx_short'] ?? $d['fee_per_tx_short'])),
             'fee_per_tx_long'   => max(0, (int) ($row['fee_per_tx_long'] ?? $d['fee_per_tx_long'])),
+            'hq_fee_per_order'  => max(0, (int) ($row['hq_fee_per_order'] ?? $d['hq_fee_per_order'])),
+            'fee_share_distributor_pct' => max(0.0, min(100.0, (float) ($row['fee_share_distributor_pct'] ?? $d['fee_share_distributor_pct']))),
+        ];
+    }
+
+    /**
+     * 정산수수료를 본사·총판·대리점 몫으로 나눈다 (2026-08-12 갑 확정).
+     *
+     * - **본사 몫 = 배달 건당 정액 × 건수.** 비율이 아니라 정액이며, 대리점이 라이더에게 받는
+     *   건당 수수료(80/40원)보다 작아야 대리점에 남는 게 생긴다("대리점은 그 이상을 받아야 한다").
+     * - 남은 금액을 총판 비율만큼 떼고, **나머지 전부가 대리점 몫**(끝수는 대리점으로 몰아
+     *   세 몫의 합이 항상 총액과 정확히 일치하게 한다).
+     * - 설정 실수로 본사 몫이 총액을 넘으면 총액까지만 가져간다 — 지갑이 음수로 새지 않도록.
+     *
+     * @return array{hq:int, distributor:int, agency:int, hq_per_order:int, orders:int}
+     */
+    public static function feeShare(int $totalFee, int $orderCount, ?int $orgId = null): array
+    {
+        $cfg     = self::get($orgId);
+        $perOrder = (int) $cfg['hq_fee_per_order'];
+        $totalFee = max(0, $totalFee);
+        $orders   = max(0, $orderCount);
+
+        $hq   = min($totalFee, $perOrder * $orders);
+        $rest = $totalFee - $hq;
+        $dist = (int) round($rest * ((float) $cfg['fee_share_distributor_pct']) / 100);
+        $dist = max(0, min($rest, $dist));
+
+        return [
+            'hq'           => $hq,
+            'distributor'  => $dist,
+            'agency'       => $rest - $dist,
+            'hq_per_order' => $perOrder,
+            'orders'       => $orders,
         ];
     }
 
@@ -60,12 +97,25 @@ final class WithdrawalConfig
             throw new RuntimeException('withdrawal_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
+        $cur = self::get($orgId);
         $cfg = [
             'reserve_amount'    => max(0, (int) ($data['reserve_amount'] ?? 0)),
             'fee_day_threshold' => max(1, min(365, (int) ($data['fee_day_threshold'] ?? 7))),
             'fee_per_tx_short'  => max(0, (int) ($data['fee_per_tx_short'] ?? 0)),
             'fee_per_tx_long'   => max(0, (int) ($data['fee_per_tx_long'] ?? 0)),
+            // 분배 설정은 본사만 보내는 값이라, 대리점이 저장할 땐 키가 안 온다 → 기존 값 유지.
+            'hq_fee_per_order'  => array_key_exists('hq_fee_per_order', $data)
+                ? max(0, (int) $data['hq_fee_per_order'])
+                : (int) $cur['hq_fee_per_order'],
+            'fee_share_distributor_pct' => array_key_exists('fee_share_distributor_pct', $data)
+                ? max(0.0, min(100.0, (float) $data['fee_share_distributor_pct']))
+                : (float) $cur['fee_share_distributor_pct'],
         ];
+
+        // ⚠️ 본사 건당 몫이 건당 정산수수료보다 커도 **막지 않는다**(2026-08-12 갑 확정:
+        // "대리점은 0이 되어도 되. 어차피 본사만 잘 받으면 되니까 대리점을 알아서 해야지").
+        // 본사 몫이 걷은 총액을 넘으면 feeShare()가 총액까지만 가져가고 대리점 몫이 0이 된다
+        // (음수로는 안 내려간다 — 그러면 대리점 지갑에서 없던 돈이 빠져나간다).
 
         $hasOrg  = $orgId !== null && $orgId > 0;
         $exists  = $hasOrg
@@ -76,6 +126,7 @@ final class WithdrawalConfig
             db_execute(
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
+                     hq_fee_per_order = ?, fee_share_distributor_pct = ?,
                      updated_by = ?, updated_at = NOW()
                  WHERE id = ?',
                 [
@@ -83,6 +134,8 @@ final class WithdrawalConfig
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
                     $cfg['fee_per_tx_long'],
+                    $cfg['hq_fee_per_order'],
+                    $cfg['fee_share_distributor_pct'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                     (int) $exists['id'],
                 ]
@@ -90,14 +143,17 @@ final class WithdrawalConfig
         } else {
             db_insert(
                 'INSERT INTO withdrawal_config
-                    (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?)',
+                    (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
+                     hq_fee_per_order, fee_share_distributor_pct, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
                     $cfg['fee_per_tx_long'],
+                    $cfg['hq_fee_per_order'],
+                    $cfg['fee_share_distributor_pct'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                 ]
             );

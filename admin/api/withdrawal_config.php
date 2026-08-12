@@ -117,6 +117,10 @@ try {
         )
     );
     echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg, 'scope' => $scope], JSON_UNESCAPED_UNICODE);
+} catch (InvalidArgumentException $e) {
+    // 검증 실패(예: 본사 건당 몫이 건당 수수료보다 큼)는 사용자가 고칠 수 있는 입력 오류다 →
+    // 500이 아니라 422로 내려서 화면에 사유가 그대로 보이게 한다.
+    $err($e->getMessage(), 422);
 } catch (Throwable $e) {
     $err('저장 실패: ' . $e->getMessage(), 500);
 }

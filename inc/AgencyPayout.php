@@ -7,7 +7,7 @@ require_once __DIR__ . '/AgencyWallet.php';
 /**
  * 대리점 자체 정산금 인출 (withdrawal_requests.kind = agency_payout).
  *
- * LOGIC §5.5: 인출가능액(= balance − 라이더채무 − 원천세예수금)이 이미 "순수 대리점 몫"이므로
+ * LOGIC §5.5: 인출가능액(= balance − 라이더 정산금 − 원천세예수금)이 이미 "순수 대리점 몫"이므로
  * 본사 승인 없이 대리점이 신청하면 즉시 실행(잔액 차감). 실제 계좌이체는 오픈뱅킹(Phase F).
  * 신청 시점에 잔액을 차감하고 status=pending(지급 대기)으로 둔다.
  */
@@ -48,7 +48,7 @@ final class AgencyPayout
         $wd = AgencyWallet::withdrawable($agencyId);
         if ($amount > (int) $wd['withdrawable']) {
             throw new InvalidArgumentException(sprintf(
-                '인출가능액(%s원)을 초과했습니다. (잔액 %s − 라이더채무 %s − 원천세예수금 %s)',
+                '인출가능액(%s원)을 초과했습니다. (잔액 %s − 라이더 정산금 %s − 원천세예수금 %s)',
                 number_format((int) $wd['withdrawable']),
                 number_format((int) $wd['balance']),
                 number_format((int) $wd['rider_debt']),

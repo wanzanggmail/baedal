@@ -156,6 +156,12 @@ function admin_can_access_route(string $route): bool
         return admin_can_manage_team();
     }
 
+    // 리스 수수료 배분 — 본사 전용(2026-08-12 갑 확정: "수수료 배분 기능은 본사에서만 한다.
+    // 대리점이나 총판은 볼 필요 없음"). 대리점은 배분 없이 자기 몫을 전액 가져가므로 볼 게 없다.
+    if (str_starts_with($route, 'deduction/lease-fees')) {
+        return admin_org_level() === Org::LEVEL_ADMIN;
+    }
+
     // 정산 엑셀 열기 암호 — 대리점이 자기 암호를 스스로 설정할 수 있어야 해서
     // "시스템 관리" 메뉴 소속이지만 super 전용이 아니라 'settlement' 영역 권한을 따른다.
     if (str_starts_with($route, 'system/settlement-excel')) {

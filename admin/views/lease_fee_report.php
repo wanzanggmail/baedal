@@ -13,6 +13,16 @@ declare(strict_types=1);
 require_once INC_PATH . '/RiderDebt.php';
 require_once INC_PATH . '/Org.php';
 
+// 본사 전용(2026-08-12 갑 확정). 라우트 가드가 이미 막지만, 직접 include 되는 경로가 생겨도
+// 총판·대리점에 배분 내역이 노출되지 않도록 화면에서도 한 번 더 차단한다.
+if (admin_org_level() !== Org::LEVEL_ADMIN) {
+    require_once INC_PATH . '/app_content_open.php';
+    echo '<div class="alert alert-danger">리스 수수료 배분은 본사만 조회할 수 있습니다.</div>';
+    require_once INC_PATH . '/app_content_close.php';
+
+    return;
+}
+
 $filterFrom   = trim((string) ($_GET['from'] ?? ''));
 $filterTo     = trim((string) ($_GET['to'] ?? ''));
 $filterAgency = (int) ($_GET['agency'] ?? 0);

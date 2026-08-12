@@ -72,10 +72,16 @@ try {
         $riderId = (int) ($body['rider_id'] ?? 0);
         $assertMine($riderId);
         $res = DailyPayout::payRider($riderId, $adminId > 0 ? $adminId : null);
-        AuditLog::record('withdrawal.daily_payout', (string) $riderId, sprintf('일일정산 지급 %s원', number_format((int) $res['amount'])));
+        $fee = (int) ($res['fee'] ?? 0);
+        AuditLog::record('withdrawal.daily_payout', (string) $riderId, sprintf(
+            '일일정산 지급 %s원(정산수수료 %s원 차감)',
+            number_format((int) $res['amount']),
+            number_format($fee)
+        ));
         echo json_encode([
             'ok'      => true,
-            'message' => number_format((int) $res['amount']) . '원 지급 완료',
+            'message' => number_format((int) $res['amount']) . '원 지급 완료'
+                . ($fee > 0 ? sprintf(' (정산수수료 %s원 차감)', number_format($fee)) : ''),
             'result'  => $res,
         ] + DailyPayout::listPayable($myAgency), JSON_UNESCAPED_UNICODE);
         exit;

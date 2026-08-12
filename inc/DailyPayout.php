@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AgencyWallet.php';
 require_once __DIR__ . '/RiderWallet.php';
+require_once __DIR__ . '/WithdrawalConfig.php';
+require_once __DIR__ . '/WithdrawalCycles.php';
+require_once __DIR__ . '/WithdrawalFeeShare.php';
 
 /**
  * 일일정산(선정산) 지급 — LOGIC §5.4 2단계.
@@ -67,13 +70,23 @@ final class DailyPayout
             $agencyIds[$aid] = true;
             $hasBank = trim((string) $r['bank_code']) !== '' && trim((string) $r['bank_account']) !== '';
 
+            // 정산수수료를 뗀 실지급액을 목록에서도 보여준다 — 지급 버튼을 누르기 전에
+            // 관리자가 실제 이체될 금액을 알 수 있어야 한다(2026-08-12 일일정산 수수료 부과).
+            $balance    = (int) $r['balance'];
+            $feeCalc    = WithdrawalConfig::feeForCycles(WithdrawalCycles::unwithdrawn((int) $r['id']), $aid);
+            $orderCount = (int) $feeCalc['short_orders'] + (int) $feeCalc['long_orders'];
+            $fee        = min($balance, max(0, (int) $feeCalc['total']));
+
             return [
                 'rider_id'     => (int) $r['id'],
                 'rider_code'   => (string) $r['rider_code'],
                 'name'         => (string) $r['name'],
                 'agency_id'    => $aid,
                 'agency_name'  => (string) ($r['agency_name'] ?? ''),
-                'balance'      => (int) $r['balance'],
+                'balance'      => $balance,
+                'fee'          => $fee,
+                'order_count'  => $orderCount,
+                'payout'       => $balance - $fee,
                 'accrued_days' => (int) $r['accrued_days'],
                 'bank_label'   => (string) ($r['bank_label'] ?? ''),
                 'has_bank'     => $hasBank,
@@ -122,11 +135,32 @@ final class DailyPayout
         }
 
         RiderWallet::ensure($riderId);
-        $amount = (int) (db_row('SELECT balance FROM rider_wallets WHERE rider_id = ? LIMIT 1', [$riderId])['balance'] ?? 0);
-        if ($amount <= 0) {
+        $balance = (int) (db_row('SELECT balance FROM rider_wallets WHERE rider_id = ? LIMIT 1', [$riderId])['balance'] ?? 0);
+        if ($balance <= 0) {
             throw new InvalidArgumentException($rider['name'] . ': 지급할 잔액이 없습니다.');
         }
 
+        // 정산수수료 — 일일정산에도 부과한다(2026-08-12 갑 확정: "일일정산도 정산수수료를 부과해야해").
+        // 주정산과 같은 age-bucket 규칙(기준일 이내 건당 80원 / 지난 건 40원)을 그대로 쓴다.
+        require_once __DIR__ . '/WithdrawalCycles.php';
+        require_once __DIR__ . '/WithdrawalFeeShare.php';
+        $cycles     = WithdrawalCycles::unwithdrawn($riderId);
+        $feeCalc    = WithdrawalConfig::feeForCycles($cycles, $agencyId);
+        $orderCount = (int) $feeCalc['short_orders'] + (int) $feeCalc['long_orders'];
+        // 잔액보다 수수료가 클 수는 없다(그러면 지급액이 음수) — 잔액까지만 뗀다.
+        $fee    = min($balance, max(0, (int) $feeCalc['total']));
+        $amount = $balance - $fee;
+        if ($amount <= 0) {
+            throw new InvalidArgumentException(sprintf(
+                '%s: 정산수수료(%s원)를 빼면 지급액이 남지 않습니다. (잔액 %s원)',
+                $rider['name'],
+                number_format($fee),
+                number_format($balance)
+            ));
+        }
+
+        // 대리점 지갑은 실제 이체분(수수료 제외)만큼만 빠진다. 수수료는 대리점 지갑에 남아
+        // 아래에서 본사·총판 몫만 상위로 이동한다.
         $agencyBalance = AgencyWallet::get($agencyId)['balance'];
         if ($agencyBalance < $amount) {
             throw new InvalidArgumentException(sprintf(
@@ -145,12 +179,12 @@ final class DailyPayout
             // 실패 이력 기록(잔액 이동 없음) — 다른 라이더 지급은 계속 진행
             db_insert(
                 "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount,
+                    (rider_id, agency_id, kind, amount, gross_amount, withhold_other,
                      bank_code, bank_account, account_holder,
                      status, fail_reason, note, requested_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'failed', ?, ?, NOW())",
+                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, 'failed', ?, ?, NOW())",
                 [
-                    $riderId, $agencyId, $amount, $amount,
+                    $riderId, $agencyId, $amount, $balance, $fee,
                     (string) $rider['bank_code'], (string) $rider['bank_account'],
                     (string) ($rider['account_holder'] ?: $rider['name']),
                     mb_substr($res->failReason, 0, 300), '일일정산 지급 실패',
@@ -159,31 +193,36 @@ final class DailyPayout
             throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
         }
 
-        db_transaction(static function () use ($riderId, $agencyId, $amount, $rider, $adminId, $res): void {
+        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $orderCount, $rider, $adminId, $res): void {
             $reqId = db_insert(
                 "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount,
+                    (rider_id, agency_id, kind, amount, gross_amount, withhold_other,
                      bank_code, bank_account, account_holder,
                      status, note, requested_at, completed_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
+                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
                 [
                     $riderId,
                     $agencyId,
                     $amount,
-                    $amount,
+                    $balance,
+                    $fee,
                     (string) $rider['bank_code'],
                     (string) $rider['bank_account'],
                     (string) ($rider['account_holder'] ?: $rider['name']),
-                    '일일정산 지급(원클릭) · ' . $res->txId,
+                    sprintf('일일정산 지급(원클릭) · 정산수수료 %s원(배달 %d건) · %s', number_format($fee), $orderCount, $res->txId),
                 ]
             );
 
             AgencyWallet::debit($agencyId, $amount, 'rider_payout', $reqId, (string) $rider['name'] . ' 일일정산 지급', $adminId);
 
+            // 수수료를 본사·총판·대리점 몫으로 배분(대리점 몫은 이미 지갑에 있어 이동 없음).
+            // 사이클 점유 기록을 만들지 않는 경로라 배달 건수를 직접 넘긴다.
+            WithdrawalFeeShare::distribute($reqId, $riderId, $fee, $adminId, $orderCount);
+
             db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
         });
 
-        return ['rider_id' => $riderId, 'amount' => $amount, 'tx_id' => $res->txId];
+        return ['rider_id' => $riderId, 'amount' => $amount, 'fee' => $fee, 'tx_id' => $res->txId];
     }
 
     /**
@@ -311,17 +350,19 @@ final class DailyPayout
     {
         $paid = 0;
         $total = 0;
+        $feeTotal = 0;
         $failed = [];
         foreach (array_values(array_unique(array_filter($riderIds, static fn ($i): bool => (int) $i > 0))) as $rid) {
             try {
                 $r = self::payRider((int) $rid, $adminId);
                 $paid++;
                 $total += (int) $r['amount'];
+                $feeTotal += (int) ($r['fee'] ?? 0);
             } catch (Throwable $e) {
                 $failed[] = $e->getMessage();
             }
         }
 
-        return ['paid' => $paid, 'total_amount' => $total, 'failed' => $failed];
+        return ['paid' => $paid, 'total_amount' => $total, 'fee_amount' => $feeTotal, 'failed' => $failed];
     }
 }

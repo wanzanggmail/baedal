@@ -57,6 +57,7 @@ final class MigrateRunner
         self::migrateLeaseProviderAndVin();
         self::migratePromotionDeductionColumns();
         self::migrateOrgCeoBizColumns();
+        self::migrateWithdrawalFeeShare();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1274,6 +1275,41 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE organizations ' . implode(', ', $adds));
         echo 'OK    organizations ' . count($adds) . "개 컬럼 추가\n";
+    }
+
+    /**
+     * 정산수수료 3분할(본사·총판·대리점) 설정 — 2026-08-12 갑 확정.
+     *
+     * 본사 몫은 **배달 건당 정액**(hq_fee_per_order)이고, 총 수수료에서 본사 몫을 뺀 나머지를
+     * 총판·대리점이 비율로 나눈다. 값은 `withdrawal_config`가 이미 대리점별(org_id) 오버라이드
+     * 구조라 여기에 얹으면 "대리점별 설정"(갑 확정)이 그대로 성립한다.
+     */
+    private static function migrateWithdrawalFeeShare(): void
+    {
+        echo "== withdrawal_config 정산수수료 분배 컬럼 ==\n";
+
+        if (!db_table_exists('withdrawal_config')) {
+            echo "SKIP  withdrawal_config (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+        $adds = [];
+        if (!in_array('hq_fee_per_order', $cols, true)) {
+            $adds[] = "ADD COLUMN hq_fee_per_order INT NOT NULL DEFAULT 0 COMMENT '정산수수료 중 본사 몫(배달 건당 정액 원)'";
+        }
+        if (!in_array('fee_share_distributor_pct', $cols, true)) {
+            $adds[] = "ADD COLUMN fee_share_distributor_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00 COMMENT '본사 몫을 뺀 나머지 중 총판 몫(%%) — 대리점은 잔여'";
+        }
+
+        if ($adds === []) {
+            echo "SKIP  분배 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
+        echo 'OK    withdrawal_config ' . count($adds) . "개 컬럼 추가\n";
     }
 
     private static function migratePgPaymentFeeSplit(): void

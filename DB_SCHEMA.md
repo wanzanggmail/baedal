@@ -178,7 +178,10 @@ UNIQUE(`org_id`,`platform`), `org_id IS NULL`=전역 기본. 복호화 순서: �
 | `agency_fee_pct` | 구 비율(미사용) |
 | `agency_fee_day_threshold`/`_short`/`_long` | 선정산수수료(대행수수료) 구간 — 대리점이 자유 설정 가능 |
 
-### `withdrawal_config` — 정산수수료(구 이체수수료) 정책
+### `withdrawal_config` — 정산수수료(구 이체수수료) 정책 + 3분할 배분 설정
+
+🆕 **(2026-08-12 갑 확정) 정산수수료 3분할** — `hq_fee_per_order`(본사 몫, **배달 건당 정액 원**) · `fee_share_distributor_pct`(본사 몫을 뺀 나머지 중 총판 %, 대리점은 잔여). 대리점별 설정이지만 **편집은 본사만**(대리점은 조회). 저장 시 `hq_fee_per_order < min(fee_per_tx_short, fee_per_tx_long)` 검증 — 아니면 대리점에 남는 금액이 없다.
+계산·이동은 `WithdrawalConfig::feeShare()` + `inc/WithdrawalFeeShare.php`. **대리점 몫은 이동하지 않는다**(정산수수료는 라이더 지갑에서 빠져 이미 대리점 지갑에 남아 있는 돈) — 본사·총판 몫만 대리점 지갑에서 빼서 각 조직 지갑으로 옮기고 `agency_wallet_ledger`에 `wd_fee_up`(대리점 출금)·`wd_fee_in`(상위 수입)으로 기록한다.
 `fee_day_threshold`(기준일수, 기본 7) · `fee_per_tx_short`(80원) · `fee_per_tx_long`(40원) — **대리점별 설정 가능**(2026-07-16 재정정, 방향 불변: 최근=비쌈/오래됨=쌈). `reserve_amount`(출금 시 남기는 보증금).
 ⚠️ 실제 계산은 아직 `accrued_days` 단일값 모델(`Withdrawal::applyForRider`) — 주문별 age-bucket 합산 모델(§7 #18)로의 전환은 **라이더 출금 플로우 단계로 이연**.
 
@@ -220,11 +223,11 @@ UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: �
 
 ### `agency_wallets` — 🆕(2026-07-22) 조직 지갑 잔액
 PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점 모두 사용**). `balance`(PG 충전·수수료 수입 잔액) · `withholding_reserve`(원천세 예수금 누적, 고용·산재는 예수금 아님이라 제외).
-**대리점 인출가능액 = balance − 라이더채무(rider_wallets 합계) − withholding_reserve** (`AgencyWallet::withdrawable`). 본사·총판은 라이더채무·예수금이 보통 0이라 잔액≈인출가능액.
+**대리점 인출가능액 = balance − 라이더 정산금(rider_wallets 합계) − withholding_reserve** (`AgencyWallet::withdrawable`). 본사·총판은 라이더 정산금·예수금이 보통 0이라 잔액≈인출가능액.
 
 ### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)
 `direction`(credit/debit) · `reason` · `amount`(양수) · `balance_after`(스냅샷) · `ref_id`(연관 레코드) · `note` · `created_by`.
-`reason` 코드: `pg_fund`(PG 정산 조달) · `pg_fee_in`(플랫폼 수수료 수입) · `rider_payout`(라이더 지급) · `agency_payout`(자체 인출) · `manual_adjust`(수동 조정) · `lease_fee_up`/`lease_fee_up_rev`(리스 수수료 상위 이체·취소) · `lease_fee_in`/`lease_fee_in_rev`(리스 수수료 수입·취소).
+`reason` 코드: `pg_fund`(PG 정산 조달) · `pg_fee_in`(플랫폼 수수료 수입 — ⚠️ **2026-08-12부터 신규 생성 안 함**, 과거 행만 남음) · `rider_payout`(라이더 지급) · `agency_payout`(자체 인출) · `manual_adjust`(수동 조정) · `lease_fee_up`/`lease_fee_up_rev`(리스 수수료 상위 이체·취소) · `lease_fee_in`/`lease_fee_in_rev`(리스 수수료 수입·취소) · 🆕 `wd_fee_up`/`wd_fee_in`(정산수수료 상위 이체·수입).
 조회 화면: `withdrawal/wallet-ledger` (`AgencyWallet::listLedgerScoped`).
 
 ---

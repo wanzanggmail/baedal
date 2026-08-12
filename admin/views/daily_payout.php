@@ -13,7 +13,9 @@ $data     = $needsMigrate ? ['rows' => [], 'agency_wallets' => []] : DailyPayout
 $rows     = $data['rows'];
 $wallets  = $data['agency_wallets'];
 $myBalance = $isAgency ? (int) ($wallets[$myAgency] ?? AgencyWallet::get($myAgency)['balance']) : 0;
-$totalPayable = array_sum(array_map(static fn ($r) => (int) $r['balance'], $rows));
+// 정산수수료를 뗀 뒤 실제로 이체될 금액 기준(2026-08-12 일일정산 수수료 부과).
+$totalPayable = array_sum(array_map(static fn ($r) => (int) $r['payout'], $rows));
+$totalFee     = array_sum(array_map(static fn ($r) => (int) $r['fee'], $rows));
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -51,8 +53,9 @@ $totalPayable = array_sum(array_map(static fn ($r) => (int) $r['balance'], $rows
 		</div>
 		<div class="col-sm-4">
 			<div class="card card-flush bg-light-warning"><div class="card-body py-4">
-				<div class="fs-7 text-muted">지급 예정 총액</div>
+				<div class="fs-7 text-muted">지급 예정 총액<span class="fs-9">(수수료 차감 후)</span></div>
 				<div class="fs-2 fw-bold text-gray-900"><span id="dp_total"><?= number_format($totalPayable) ?></span>원</div>
+				<?php if ($totalFee > 0) : ?><div class="fs-8 text-muted">정산수수료 <?= number_format($totalFee) ?>원 차감</div><?php endif; ?>
 			</div></div>
 		</div>
 		<?php if ($isAgency) : ?>
@@ -84,21 +87,28 @@ $totalPayable = array_sum(array_map(static fn ($r) => (int) $r['balance'], $rows
 							<th>라이더</th>
 							<th>계좌</th>
 							<th class="text-center">적립</th>
-							<th class="text-end">지급액</th>
+							<th class="text-end">잔액</th>
+							<th class="text-end">정산수수료</th>
+							<th class="text-end">실지급액</th>
 							<?php if ($isAgency) : ?><th class="text-end">처리</th><?php endif; ?>
 						</tr>
 					</thead>
 					<tbody id="dp_tbody">
 						<?php if ($rows === []) : ?>
-						<tr><td colspan="7" class="text-center text-muted py-6">지급 대상이 없습니다.</td></tr>
+						<tr><td colspan="10" class="text-center text-muted py-6">지급 대상이 없습니다.</td></tr>
 						<?php else : foreach ($rows as $r) : ?>
-						<tr data-rid="<?= (int) $r['rider_id'] ?>" data-amount="<?= (int) $r['balance'] ?>">
+						<tr data-rid="<?= (int) $r['rider_id'] ?>" data-amount="<?= (int) $r['payout'] ?>">
 							<?php if ($isAgency) : ?><td><input type="checkbox" class="form-check-input dp-row-check" <?= $r['has_bank'] ? '' : 'disabled' ?> /></td><?php endif; ?>
 							<?php if (!$isAgency) : ?><td><?= htmlspecialchars($r['agency_name'], ENT_QUOTES, 'UTF-8') ?></td><?php endif; ?>
 							<td><span class="fw-bold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></span> <span class="text-muted">(<?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?>)</span></td>
 							<td class="text-muted"><?= $r['has_bank'] ? htmlspecialchars($r['bank_label'], ENT_QUOTES, 'UTF-8') : '<span class="badge badge-light-danger">계좌없음</span>' ?></td>
 							<td class="text-center"><?= (int) $r['accrued_days'] ?>일</td>
-							<td class="text-end fw-bold"><?= number_format((int) $r['balance']) ?>원</td>
+							<td class="text-end text-muted"><?= number_format((int) $r['balance']) ?>원</td>
+							<td class="text-end text-danger">
+								<?= (int) $r['fee'] > 0 ? '− ' . number_format((int) $r['fee']) . '원' : '—' ?>
+								<?php if ((int) $r['order_count'] > 0) : ?><div class="text-muted fs-9">배달 <?= (int) $r['order_count'] ?>건</div><?php endif; ?>
+							</td>
+							<td class="text-end fw-bold"><?= number_format((int) $r['payout']) ?>원</td>
 							<?php if ($isAgency) : ?><td class="text-end"><button type="button" class="btn btn-sm btn-light-primary dp-pay-one" <?= $r['has_bank'] ? '' : 'disabled' ?>>지급</button></td><?php endif; ?>
 						</tr>
 						<?php endforeach; endif; ?>

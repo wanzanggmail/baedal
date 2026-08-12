@@ -129,6 +129,31 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 									value="<?= (int) $config['fee_per_tx_long'] ?>" required />
 							</div>
 						</div>
+
+						<div class="separator separator-dashed my-6"></div>
+						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
+						<div class="text-muted fs-8 mb-4">
+							위에서 라이더에게 받은 정산수수료를 본사·총판·대리점이 나눠 갖습니다.
+							<strong>본사 몫은 배달 건당 정액</strong>이고, 남은 금액을 총판 비율만큼 떼고 <strong>나머지 전부가 대리점 몫</strong>입니다.
+						</div>
+						<div class="row g-4 mb-6">
+							<div class="col-md-6">
+								<label class="form-label" for="cfg_hq_per_order">본사 몫 — 배달 건당 (원)</label>
+								<input type="number" class="form-control form-control-solid" id="cfg_hq_per_order" min="0"
+									value="<?= (int) $config['hq_fee_per_order'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+								<div class="form-text fs-9">건당 수수료(<?= (int) min((int) $config['fee_per_tx_short'], (int) $config['fee_per_tx_long']) ?>원)보다 작아야 합니다. 0이면 배분 없이 전액 대리점.</div>
+							</div>
+							<div class="col-md-6">
+								<label class="form-label" for="cfg_dist_pct">총판 몫 — 본사 몫 제외 후 (%)</label>
+								<input type="number" class="form-control form-control-solid" id="cfg_dist_pct" min="0" max="100" step="0.01"
+									value="<?= htmlspecialchars((string) $config['fee_share_distributor_pct'], ENT_QUOTES, 'UTF-8') ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+								<div class="form-text fs-9">나머지는 대리점 몫입니다.</div>
+							</div>
+						</div>
+						<?php if ($isAgencySelf) : ?>
+						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
+						<?php endif; ?>
+
 						<button type="button" class="btn btn-primary" id="cfg_save_btn">저장</button>
 					</form>
 				</div>
@@ -166,6 +191,12 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
 			};
 			if (TARGET_AGENCY_ID > 0) { payload.agency_id = TARGET_AGENCY_ID; }
+			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.
+			var hqEl = document.getElementById('cfg_hq_per_order');
+			if (hqEl && !hqEl.disabled) {
+				payload.hq_fee_per_order = parseInt(hqEl.value, 10) || 0;
+				payload.fee_share_distributor_pct = parseFloat(document.getElementById('cfg_dist_pct').value) || 0;
+			}
 			fetch(API, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },

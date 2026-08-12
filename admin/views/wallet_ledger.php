@@ -265,7 +265,7 @@ $net = $sum['credit'] - $sum['debit'];
 	<?php if ($selectedWallet !== null && $selectedWallet['is_agency']) : ?>
 	<div class="card card-flush mb-6">
 		<div class="card-body py-5 d-flex flex-wrap gap-8 fs-7">
-			<div><span class="text-muted">라이더 채무</span> <span class="fw-bold ms-2"><?= $won($selectedWallet['rider_debt']) ?></span></div>
+			<div><span class="text-muted">라이더 정산금</span> <span class="fw-bold ms-2"><?= $won($selectedWallet['rider_debt']) ?></span></div>
 			<div><span class="text-muted">원천세 예수금</span> <span class="fw-bold ms-2"><?= $won($selectedWallet['withholding_reserve']) ?></span></div>
 			<div><span class="text-muted">인출가능액</span> <span class="fw-bold text-primary ms-2"><?= $won($selectedWallet['withdrawable']) ?></span></div>
 		</div>
