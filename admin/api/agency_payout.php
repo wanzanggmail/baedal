@@ -56,7 +56,7 @@ if ($method !== 'POST') {
 }
 
 // 인출 신청은 대리점 운영/정산 계정만 (승인 절차 없음 — LOGIC §5.5)
-if (!$isAgency || !in_array($myRole, ['operation', 'settlement'], true)) {
+if (!$isAgency || !in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
     $err('대리점 운영/정산 계정만 자체 인출을 신청할 수 있습니다.', 403);
 }
 

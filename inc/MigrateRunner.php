@@ -56,6 +56,7 @@ final class MigrateRunner
         self::migratePgPaymentFeeSplit();
         self::migrateLeaseProviderAndVin();
         self::migratePromotionDeductionColumns();
+        self::migrateOrgCeoBizColumns();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1234,6 +1235,45 @@ final class MigrateRunner
         // 기존에 지급 완료된(paid) 건은 net_amount가 비어 있으면 total_amount로 백필(공제 없이 전액
         // 지급됐던 과거 데이터 그대로 — 소급 재계산·재출금은 하지 않는다).
         db_execute("UPDATE promotion_entries SET net_amount = total_amount WHERE status = 'paid' AND net_amount = 0 AND total_amount > 0");
+    }
+
+    /**
+     * 총판·대리점 조직에 대표자 정보·사업자 정보 컬럼 추가.
+     */
+    private static function migrateOrgCeoBizColumns(): void
+    {
+        echo "== organizations 대표자·사업자 정보 컬럼 ==\n";
+
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+        $adds = [];
+        foreach ([
+            'ceo_name'     => ["VARCHAR(80)  NOT NULL DEFAULT ''", '대표자명'],
+            'ceo_phone'    => ["VARCHAR(30)  NOT NULL DEFAULT ''", '대표자 휴대폰'],
+            'ceo_birth'    => ["VARCHAR(10)  NOT NULL DEFAULT ''", '대표자 생년월일(YYMMDD, 자유 입력)'],
+            'biz_name'     => ["VARCHAR(120) NOT NULL DEFAULT ''", '사업자명(상호)'],
+            'biz_reg_no'   => ["VARCHAR(20)  NOT NULL DEFAULT ''", '사업자번호'],
+            'biz_type'     => ["VARCHAR(60)  NOT NULL DEFAULT ''", '업태'],
+            'biz_category' => ["VARCHAR(60)  NOT NULL DEFAULT ''", '업종(종목)'],
+            'biz_address'  => ["VARCHAR(200) NOT NULL DEFAULT ''", '사업장 주소'],
+        ] as $c => [$def, $label]) {
+            if (!in_array($c, $cols, true)) {
+                $adds[] = "ADD COLUMN {$c} {$def} COMMENT '{$label}'";
+            }
+        }
+
+        if ($adds === []) {
+            echo "SKIP  대표자·사업자 정보 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE organizations ' . implode(', ', $adds));
+        echo 'OK    organizations ' . count($adds) . "개 컬럼 추가\n";
     }
 
     private static function migratePgPaymentFeeSplit(): void

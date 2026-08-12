@@ -3,12 +3,32 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/WithdrawalConfig.php';
+require_once INC_PATH . '/Organization.php';
 
-// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
-$cfgOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+// 멀티테넌시: 대리점 계정=항상 자기 설정만 / 본사(super)=?agency=ID로 특정 대리점 지정, 없으면 전역 기본
+$isAgencySelf = admin_org_level() === Org::LEVEL_AGENCY;
+$isSuper      = admin_has_role('super');
+$agencyOptions = [];
+$targetAgency  = null;
+
+if ($isAgencySelf) {
+    $cfgOrgId = admin_org_id();
+} else {
+    $agencyOptions = Organization::agencyOptions();
+    $agencyIdParam = (int) ($_GET['agency'] ?? 0);
+    if ($agencyIdParam > 0) {
+        $targetAgency = Organization::find($agencyIdParam);
+        if ($targetAgency === null || $targetAgency['level'] !== Org::LEVEL_AGENCY) {
+            $targetAgency = null;
+        }
+    }
+    $cfgOrgId = $targetAgency !== null ? (int) $targetAgency['id'] : null;
+}
+
 $config  = WithdrawalConfig::get($cfgOrgId);
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 $listUrl = admin_url('withdrawal/list');
+$settingsBaseUrl = admin_url('withdrawal/settings');
 $needsMigrate = !db_table_exists('withdrawal_config');
 ?>
 <!--begin::Toolbar-->
@@ -43,6 +63,35 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 		</div>
 	</div>
 
+	<?php if (!$isAgencySelf) : ?>
+	<!--begin::본사용 대리점 선택-->
+	<div class="card card-flush mb-6">
+		<div class="card-body py-4">
+			<form method="get" action="<?= htmlspecialchars($settingsBaseUrl, ENT_QUOTES, 'UTF-8') ?>" class="d-flex flex-wrap align-items-center gap-3">
+				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
+					<input type="hidden" name="route" value="withdrawal/settings" />
+				<?php endif; ?>
+				<label class="form-label fw-bold m-0">대상</label>
+				<select name="agency" class="form-select form-select-solid w-250px" onchange="this.form.submit()">
+					<option value="0"<?= $targetAgency === null ? ' selected' : '' ?>>전역 기본값(대리점 미지정 폴백)</option>
+					<?php foreach ($agencyOptions as $opt) : ?>
+					<option value="<?= (int) $opt['id'] ?>"<?= $targetAgency !== null && (int) $targetAgency['id'] === (int) $opt['id'] ? ' selected' : '' ?>>
+						<?= htmlspecialchars($opt['name'] . ' (' . $opt['code'] . ')', ENT_QUOTES, 'UTF-8') ?>
+					</option>
+					<?php endforeach; ?>
+				</select>
+				<noscript><button type="submit" class="btn btn-sm btn-light-primary">이동</button></noscript>
+				<?php if ($targetAgency !== null) : ?>
+					<span class="badge badge-light-primary fs-7">이 대리점 전용값을 보는 중</span>
+				<?php else : ?>
+					<span class="badge badge-light-secondary fs-7">전역 기본값 — 대리점 전용 설정이 없는 곳에 적용됨</span>
+				<?php endif; ?>
+			</form>
+		</div>
+	</div>
+	<!--end::본사용 대리점 선택-->
+	<?php endif; ?>
+
 	<div id="wd_cfg_toast" class="alert alert-dismissible d-none mb-6" role="alert">
 		<span id="wd_cfg_toast_msg"></span>
 		<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
@@ -51,7 +100,9 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 	<div class="row g-6">
 		<div class="col-xl-7">
 			<div class="card card-flush">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">정책 값</h3></div>
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold">정책 값<?php if (!$isAgencySelf) : ?><span class="text-muted fs-7 fw-normal ms-2"><?= $targetAgency !== null ? htmlspecialchars((string) $targetAgency['name'], ENT_QUOTES, 'UTF-8') : '전역 기본값' ?></span><?php endif; ?></h3>
+				</div>
 				<div class="card-body pt-0">
 					<form id="wd_cfg_form" class="fs-7">
 						<div class="mb-6">
@@ -98,6 +149,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 	<script>
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
+		var TARGET_AGENCY_ID = <?= $targetAgency !== null ? (int) $targetAgency['id'] : 0 ?>;
 		var toast = document.getElementById('wd_cfg_toast');
 		var toastMsg = document.getElementById('wd_cfg_toast_msg');
 		function showToast(msg, ok) {
@@ -113,6 +165,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				fee_per_tx_short: parseInt(document.getElementById('cfg_fee_short').value, 10) || 0,
 				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
 			};
+			if (TARGET_AGENCY_ID > 0) { payload.agency_id = TARGET_AGENCY_ID; }
 			fetch(API, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },

@@ -78,6 +78,8 @@ final class Organization
         $rows = db_rows(
             "SELECT o.id, o.parent_id, o.level, o.code, o.name,
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
+                    o.ceo_name, o.ceo_phone, o.ceo_birth,
+                    o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -164,6 +166,8 @@ final class Organization
         $row = db_row(
             "SELECT o.id, o.parent_id, o.level, o.code, o.name,
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
+                    o.ceo_name, o.ceo_phone, o.ceo_birth,
+                    o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -305,6 +309,31 @@ final class Organization
     {
         self::assertManageable($id);
 
+        return self::saveFields($id, $data);
+    }
+
+    /**
+     * 조직 정보 셀프서비스 수정 — 총판·대리점 "대표계정"이 자기 조직 정보를 직접 수정.
+     * 호출부(`admin/api/org_accounts.php`)가 `admin_can_manage_team()`으로 대표계정 여부를 이미
+     * 확인하고 `admin_org_id()`로 orgId를 고정해 넘기므로 여기서는 `assertManageable`(HQ·총판의
+     * 하위조직 관리 스코프)을 거치지 않는다 — 자기 자신은 그 스코프에 포함되지 않기 때문.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public static function updateSelf(int $orgId, array $data): array
+    {
+        $org = Org::find($orgId);
+        if ($org === null || (string) $org['level'] === Org::LEVEL_ADMIN) {
+            throw new InvalidArgumentException('조직을 찾을 수 없습니다.');
+        }
+
+        return self::saveFields($orgId, $data);
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private static function saveFields(int $id, array $data): array
+    {
         $name = trim((string) ($data['name'] ?? ''));
         if ($name === '') {
             throw new InvalidArgumentException('조직 이름을 입력하세요.');
@@ -313,9 +342,28 @@ final class Organization
         $contactPhone = trim((string) ($data['contact_phone'] ?? ''));
         $memo         = mb_substr(trim((string) ($data['memo'] ?? '')), 0, 500);
 
+        $ceoName     = mb_substr(trim((string) ($data['ceo_name'] ?? '')), 0, 80);
+        $ceoPhone    = mb_substr(trim((string) ($data['ceo_phone'] ?? '')), 0, 30);
+        $ceoBirth    = mb_substr(trim((string) ($data['ceo_birth'] ?? '')), 0, 10);
+        $bizName     = mb_substr(trim((string) ($data['biz_name'] ?? '')), 0, 120);
+        $bizRegNo    = mb_substr(trim((string) ($data['biz_reg_no'] ?? '')), 0, 20);
+        $bizType     = mb_substr(trim((string) ($data['biz_type'] ?? '')), 0, 60);
+        $bizCategory = mb_substr(trim((string) ($data['biz_category'] ?? '')), 0, 60);
+        $bizAddress  = mb_substr(trim((string) ($data['biz_address'] ?? '')), 0, 200);
+
         db_execute(
-            'UPDATE organizations SET name = ?, contact_name = ?, contact_phone = ?, memo = ?, updated_at = NOW() WHERE id = ?',
-            [$name, $contactName, $contactPhone, $memo, $id]
+            'UPDATE organizations SET
+                name = ?, contact_name = ?, contact_phone = ?, memo = ?,
+                ceo_name = ?, ceo_phone = ?, ceo_birth = ?,
+                biz_name = ?, biz_reg_no = ?, biz_type = ?, biz_category = ?, biz_address = ?,
+                updated_at = NOW()
+             WHERE id = ?',
+            [
+                $name, $contactName, $contactPhone, $memo,
+                $ceoName, $ceoPhone, $ceoBirth,
+                $bizName, $bizRegNo, $bizType, $bizCategory, $bizAddress,
+                $id,
+            ]
         );
 
         Org::clearCache();
@@ -533,6 +581,14 @@ final class Organization
             'contact_name'         => (string) ($row['contact_name'] ?? ''),
             'contact_phone'        => (string) ($row['contact_phone'] ?? ''),
             'memo'                 => (string) ($row['memo'] ?? ''),
+            'ceo_name'             => (string) ($row['ceo_name'] ?? ''),
+            'ceo_phone'            => (string) ($row['ceo_phone'] ?? ''),
+            'ceo_birth'            => (string) ($row['ceo_birth'] ?? ''),
+            'biz_name'             => (string) ($row['biz_name'] ?? ''),
+            'biz_reg_no'           => (string) ($row['biz_reg_no'] ?? ''),
+            'biz_type'             => (string) ($row['biz_type'] ?? ''),
+            'biz_category'         => (string) ($row['biz_category'] ?? ''),
+            'biz_address'          => (string) ($row['biz_address'] ?? ''),
             'active'               => (int) ($row['is_active'] ?? 0) === 1,
             'account_count'        => (int) ($row['account_count'] ?? 0),
             'active_account_count' => (int) ($row['active_account_count'] ?? 0),

@@ -5,16 +5,38 @@ declare(strict_types=1);
 require_once INC_PATH . '/AgencyCard.php';
 require_once INC_PATH . '/BankAccount.php';
 require_once INC_PATH . '/AgencyWallet.php';
+require_once INC_PATH . '/Organization.php';
 
 $apiUrl   = ADMIN_BASE . '/api/payment_setup.php';
-$isAgency = admin_org_level() === Org::LEVEL_AGENCY;
-$agencyId = $isAgency ? admin_org_id() : 0;
 $needsMigrate = !AgencyCard::tableExists() || !BankAccount::tableExists();
 
-$cards   = ($isAgency && !$needsMigrate) ? AgencyCard::listForAgency($agencyId) : [];
-$account = ($isAgency && !$needsMigrate) ? BankAccount::get($agencyId) : null;
-$wallet  = ($isAgency && !$needsMigrate) ? AgencyWallet::withdrawable($agencyId) : ['balance' => 0];
+// 대리점 계정=자기 것만 / 본사(super)=?agency=ID 로 대상 대리점 선택해 대신 설정
+$isAgencySelf  = admin_org_level() === Org::LEVEL_AGENCY;
+$isSuper       = admin_has_role('super');
+$agencyOptions = [];
+$targetAgency  = null;
+$agencyId      = 0;
+
+if ($isAgencySelf) {
+    $agencyId = admin_org_id();
+} elseif ($isSuper) {
+    $agencyOptions = Organization::agencyOptions();
+    $selected = (int) ($_GET['agency'] ?? 0);
+    if ($selected > 0) {
+        $row = Organization::find($selected);
+        if ($row !== null && $row['level'] === Org::LEVEL_AGENCY) {
+            $targetAgency = $row;
+            $agencyId     = (int) $row['id'];
+        }
+    }
+}
+
+$canUse  = $agencyId > 0 && !$needsMigrate;
+$cards   = $canUse ? AgencyCard::listForAgency($agencyId) : [];
+$account = $canUse ? BankAccount::get($agencyId) : null;
+$wallet  = $canUse ? AgencyWallet::withdrawable($agencyId) : ['balance' => 0];
 $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM system_codes WHERE category = 'bank' AND is_active = 1 ORDER BY label ASC") : [];
+$setupBaseUrl = admin_url('withdrawal/payment-setup');
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -36,8 +58,39 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 
 	<?php if ($needsMigrate) : ?>
 	<div class="alert alert-warning mb-8">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
-	<?php elseif (!$isAgency) : ?>
-	<div class="alert alert-info mb-8">이 화면은 대리점 계정 전용입니다.</div>
+	<?php elseif (!$isAgencySelf && !$isSuper) : ?>
+	<div class="alert alert-info mb-8">이 화면은 대리점 계정과 본사 최고관리자만 사용할 수 있습니다.</div>
+	<?php else : ?>
+
+	<?php if (!$isAgencySelf) : ?>
+	<!--begin::본사용 대리점 선택-->
+	<div class="card card-flush mb-6">
+		<div class="card-body py-4">
+			<form method="get" action="<?= htmlspecialchars($setupBaseUrl, ENT_QUOTES, 'UTF-8') ?>" class="d-flex flex-wrap align-items-center gap-3">
+				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
+					<input type="hidden" name="route" value="withdrawal/payment-setup" />
+				<?php endif; ?>
+				<label class="form-label fw-bold m-0">대상 대리점</label>
+				<select name="agency" class="form-select form-select-solid w-250px" onchange="this.form.submit()">
+					<option value="0"<?= $targetAgency === null ? ' selected' : '' ?>>선택하세요…</option>
+					<?php foreach ($agencyOptions as $opt) : ?>
+					<option value="<?= (int) $opt['id'] ?>"<?= $targetAgency !== null && (int) $targetAgency['id'] === (int) $opt['id'] ? ' selected' : '' ?>>
+						<?= htmlspecialchars($opt['name'] . ' (' . $opt['code'] . ')', ENT_QUOTES, 'UTF-8') ?>
+					</option>
+					<?php endforeach; ?>
+				</select>
+				<noscript><button type="submit" class="btn btn-sm btn-light-primary">이동</button></noscript>
+				<?php if ($targetAgency !== null) : ?>
+					<span class="badge badge-light-warning fs-7">본사 대행 — 이 대리점 결제수단을 대신 설정합니다(감사로그 기록)</span>
+				<?php endif; ?>
+			</form>
+		</div>
+	</div>
+	<!--end::본사용 대리점 선택-->
+	<?php endif; ?>
+
+	<?php if (!$canUse) : ?>
+	<div class="alert alert-info mb-8">위에서 설정할 대리점을 선택하세요.</div>
 	<?php else : ?>
 
 	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 빌링키/핀테크번호는 모의 값으로 동작합니다. 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.</div>
@@ -73,14 +126,37 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 						</table>
 					</div>
 					<div class="separator separator-dashed mb-4"></div>
-					<div class="row g-3">
-						<div class="col-md-4"><input type="text" class="form-control form-control-sm form-control-solid" id="ps_alias" placeholder="별칭*" /></div>
-						<div class="col-md-3"><input type="text" class="form-control form-control-sm form-control-solid" id="ps_brand" placeholder="카드사" /></div>
-						<div class="col-md-2"><input type="text" class="form-control form-control-sm form-control-solid" id="ps_last4" placeholder="끝4자리" maxlength="4" /></div>
-						<div class="col-md-3"><input type="number" class="form-control form-control-sm form-control-solid" id="ps_priority" placeholder="우선순위" value="100" /></div>
-						<div class="col-md-4"><input type="number" class="form-control form-control-sm form-control-solid" id="ps_mocklimit" placeholder="모의 한도(0=무제한)" value="0" /></div>
-						<div class="col-md-4 d-flex align-items-center text-muted fs-8">빌링키는 실연동 전 자동(모의) 발급</div>
-						<div class="col-md-4 text-end"><button type="button" class="btn btn-sm btn-primary" id="ps_card_add">＋ 카드 등록</button></div>
+					<h4 class="fw-bold fs-7 mb-3">카드 추가</h4>
+					<div class="row g-4">
+						<div class="col-md-5">
+							<label class="form-label fs-8 required" for="ps_alias">별칭</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_alias" placeholder="예: 국민 법인카드" />
+						</div>
+						<div class="col-md-4">
+							<label class="form-label fs-8" for="ps_brand">카드사</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_brand" placeholder="예: 국민" />
+						</div>
+						<div class="col-md-3">
+							<label class="form-label fs-8" for="ps_last4">끝 4자리</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_last4" maxlength="4" inputmode="numeric" placeholder="1234" />
+						</div>
+						<div class="col-md-5">
+							<label class="form-label fs-8" for="ps_priority">우선순위</label>
+							<input type="number" class="form-control form-control-sm form-control-solid" id="ps_priority" min="0" max="9999" value="100" />
+							<div class="form-text fs-9">낮을수록 먼저 결제를 시도합니다.</div>
+						</div>
+						<div class="col-md-4">
+							<label class="form-label fs-8" for="ps_mocklimit">모의 한도</label>
+							<input type="number" class="form-control form-control-sm form-control-solid" id="ps_mocklimit" min="0" step="10000" value="0" />
+							<div class="form-text fs-9">0 = 무제한 · 대체결제 테스트용</div>
+						</div>
+						<div class="col-md-3 d-flex align-items-end">
+							<button type="button" class="btn btn-sm btn-primary w-100" id="ps_card_add">＋ 카드 등록</button>
+						</div>
+					</div>
+					<div class="text-muted fs-8 mt-3">
+						<i class="ki-duotone ki-information-5 fs-6 me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+						빌링키는 실 PG 연동 전까지 저장 시 자동으로 모의 발급됩니다.
 					</div>
 				</div>
 			</div>
@@ -102,7 +178,7 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 					</div>
 					<div class="mb-3"><label class="form-label required">계좌번호</label><input type="text" class="form-control form-control-solid" id="ps_account" value="<?= htmlspecialchars((string) ($account['account_no'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
 					<div class="mb-3"><label class="form-label">예금주</label><input type="text" class="form-control form-control-solid" id="ps_holder" value="<?= htmlspecialchars((string) ($account['holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
-					<div class="mb-4 text-muted fs-8">핀테크이용번호: <?= $account ? htmlspecialchars(substr((string) $account['fintech_use_num'], 0, 12), ENT_QUOTES, 'UTF-8') . '…' : '미발급(저장 시 모의 발급)' ?></div>
+					<div class="mb-4 text-muted fs-8">핀테크이용번호: <span id="ps_fintech"><?= $account ? htmlspecialchars(substr((string) $account['fintech_use_num'], 0, 12), ENT_QUOTES, 'UTF-8') . '…' : '미발급(저장 시 모의 발급)' ?></span></div>
 					<button type="button" class="btn btn-primary" id="ps_account_save">계좌 저장</button>
 				</div>
 			</div>
@@ -122,10 +198,22 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 	<script>
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
+		// 본사가 대리점을 대신 설정할 때만 값이 있다(대리점 자기 계정은 0 → 서버가 세션 조직으로 고정).
+		var TARGET_AGENCY_ID = <?= $targetAgency !== null ? (int) $targetAgency['id'] : 0 ?>;
 		var toast = document.getElementById('ps_toast'), toastMsg = document.getElementById('ps_toast_msg');
 		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger'); toastMsg.textContent = m; toast.classList.remove('d-none'); window.scrollTo(0, 0); }
-		function post(p) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) }).then(function (r) { return r.json(); }); }
+		function post(p) {
+			if (TARGET_AGENCY_ID > 0) { p.agency_id = TARGET_AGENCY_ID; }
+			return fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) }).then(function (r) { return r.json(); });
+		}
 		function reloadSoon() { setTimeout(function () { location.reload(); }, 700); }
+		// 마지막 카드를 지우면 빈 테이블만 남아 "카드가 없다"는 걸 알 수 없으므로 안내 행을 되돌린다.
+		function renderEmptyIfNone() {
+			var tbody = document.getElementById('ps_cards');
+			if (!tbody.querySelector('tr[data-id]')) {
+				tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>';
+			}
+		}
 
 		document.getElementById('ps_card_add').addEventListener('click', function () {
 			post({ action: 'card_add', alias: document.getElementById('ps_alias').value.trim(), brand: document.getElementById('ps_brand').value.trim(), last4: document.getElementById('ps_last4').value.trim(), priority: parseInt(document.getElementById('ps_priority').value, 10) || 100, mock_limit: parseInt(document.getElementById('ps_mocklimit').value, 10) || 0 })
@@ -133,7 +221,7 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 		});
 		document.getElementById('ps_cards').addEventListener('click', function (ev) {
 			var tr = ev.target.closest('tr'); if (!tr) return; var id = parseInt(tr.getAttribute('data-id'), 10);
-			if (ev.target.closest('.ps-del')) { if (!confirm('카드를 삭제할까요?')) return; post({ action: 'card_delete', id: id }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); tr.remove(); }).catch(function (e) { showToast(e.message, false); }); }
+			if (ev.target.closest('.ps-del')) { if (!confirm('카드를 삭제할까요?')) return; post({ action: 'card_delete', id: id }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); tr.remove(); renderEmptyIfNone(); }).catch(function (e) { showToast(e.message, false); }); }
 			if (ev.target.closest('.ps-toggle')) { var on = ev.target.textContent.trim() === '활성'; post({ action: 'card_toggle', id: id, active: !on }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); reloadSoon(); }).catch(function (e) { showToast(e.message, false); }); }
 		});
 		document.getElementById('ps_cards').addEventListener('change', function (ev) {
@@ -141,7 +229,14 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 		});
 		document.getElementById('ps_account_save').addEventListener('click', function () {
 			post({ action: 'account_save', bank_code: document.getElementById('ps_bank').value, account_no: document.getElementById('ps_account').value.trim(), holder: document.getElementById('ps_holder').value.trim() })
-				.then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); }).catch(function (e) { showToast(e.message, false); });
+				.then(function (r) {
+					if (!r.ok) throw new Error(r.message);
+					// 저장 직후에도 "미발급"이 그대로 떠 있으면 저장이 안 된 것처럼 보이므로 즉시 갱신한다.
+					if (r.account && r.account.fintech_use_num) {
+						document.getElementById('ps_fintech').textContent = String(r.account.fintech_use_num).slice(0, 12) + '…';
+					}
+					showToast(r.message, true);
+				}).catch(function (e) { showToast(e.message, false); });
 		});
 		document.getElementById('ps_charge').addEventListener('click', function () {
 			var amt = parseInt(document.getElementById('ps_charge_amt').value, 10) || 0;
@@ -150,6 +245,7 @@ $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM sy
 		});
 	})();
 	</script>
-	<?php endif; ?>
+	<?php endif; // $canUse — 대상 대리점 선택됨 ?>
+	<?php endif; // 마이그레이션 / 권한 ?>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

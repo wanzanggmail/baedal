@@ -10,6 +10,8 @@ $isAdmin     = $myLevel === Org::LEVEL_ADMIN;
 $roleLabels  = Organization::accountRoleLabels();
 $distOptions = $canManage ? Organization::distributorOptions() : [];
 $apiUrl      = ADMIN_BASE . '/api/orgs.php';
+$withdrawalSettingsUrl = admin_url('withdrawal/settings');
+$withdrawalSettingsSep = str_contains($withdrawalSettingsUrl, '?') ? '&agency=' : '?agency=';
 
 $listError = null;
 $orgs      = [];
@@ -331,6 +333,51 @@ foreach ($agencyByParent as $orphans) {
 							<label class="form-label" for="org_memo">메모</label>
 							<textarea class="form-control form-control-solid" id="org_memo" rows="2" maxlength="500" placeholder="내부 관리용 메모 (계약 정보, 특이사항 등)"></textarea>
 						</div>
+
+						<div class="separator separator-dashed my-6"></div>
+						<h4 class="fw-bold fs-6 mb-4">대표자 정보</h4>
+						<div class="row">
+							<div class="col-md-4 mb-5">
+								<label class="form-label" for="org_ceo_name">대표자명</label>
+								<input type="text" class="form-control form-control-solid" id="org_ceo_name" maxlength="80" />
+							</div>
+							<div class="col-md-4 mb-5">
+								<label class="form-label" for="org_ceo_phone">대표자 휴대폰</label>
+								<input type="text" class="form-control form-control-solid" id="org_ceo_phone" maxlength="30" placeholder="010-0000-0000" />
+							</div>
+							<div class="col-md-4 mb-5">
+								<label class="form-label" for="org_ceo_birth">생년월일</label>
+								<input type="text" class="form-control form-control-solid" id="org_ceo_birth" maxlength="10" placeholder="YYMMDD" />
+							</div>
+						</div>
+
+						<div class="separator separator-dashed my-6"></div>
+						<h4 class="fw-bold fs-6 mb-4">사업자 정보</h4>
+						<div class="row">
+							<div class="col-md-6 mb-5">
+								<label class="form-label" for="org_biz_name">사업자명</label>
+								<input type="text" class="form-control form-control-solid" id="org_biz_name" maxlength="120" />
+							</div>
+							<div class="col-md-6 mb-5">
+								<label class="form-label" for="org_biz_reg_no">사업자번호</label>
+								<input type="text" class="form-control form-control-solid" id="org_biz_reg_no" maxlength="20" placeholder="000-00-00000" />
+							</div>
+						</div>
+						<div class="row">
+							<div class="col-md-6 mb-5">
+								<label class="form-label" for="org_biz_type">업태</label>
+								<input type="text" class="form-control form-control-solid" id="org_biz_type" maxlength="60" />
+							</div>
+							<div class="col-md-6 mb-5">
+								<label class="form-label" for="org_biz_category">업종</label>
+								<input type="text" class="form-control form-control-solid" id="org_biz_category" maxlength="60" />
+							</div>
+						</div>
+						<div class="mb-5">
+							<label class="form-label" for="org_biz_address">사업장 주소</label>
+							<input type="text" class="form-control form-control-solid" id="org_biz_address" maxlength="200" />
+						</div>
+
 						<div class="alert bg-light-info fs-8 py-2 px-3 mb-0 d-none" id="org_edit_account_hint">
 							💡 로그인 계정(역할별 여러 개)은 <strong>상세 화면의 "소속 계정" 섹션</strong>에서 추가·관리할 수 있습니다.
 						</div>
@@ -380,6 +427,8 @@ foreach ($agencyByParent as $orphans) {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?>;
 		var CAN_MANAGE = <?= $canManage ? 'true' : 'false' ?>;
 		var RIDERS_URL = <?= json_encode(admin_url('riders/list'), JSON_UNESCAPED_UNICODE) ?>;
+		var WITHDRAWAL_SETTINGS_URL = <?= json_encode($withdrawalSettingsUrl, JSON_UNESCAPED_UNICODE) ?>;
+		var WITHDRAWAL_SETTINGS_SEP = <?= json_encode($withdrawalSettingsSep, JSON_UNESCAPED_UNICODE) ?>;
 		var toast = document.getElementById('org_toast');
 		var toastMsg = document.getElementById('org_toast_msg');
 		function $(id) { return document.getElementById(id); }
@@ -448,6 +497,29 @@ foreach ($agencyByParent as $orphans) {
 			h += kv('계정 수', o.account_count + '개 (활성 ' + o.active_account_count + ')');
 			h += '</div></div>';
 
+			if (o.ceo_name || o.ceo_phone || o.ceo_birth) {
+				h += '<div class="separator separator-dashed my-5"></div>';
+				h += '<h4 class="fw-bold fs-6 mb-3">대표자 정보</h4>';
+				h += '<div class="row"><div class="col-md-6">';
+				h += kv('대표자명', esc(o.ceo_name || '—'));
+				h += '</div><div class="col-md-6">';
+				h += kv('휴대폰', esc(o.ceo_phone || '—'));
+				h += kv('생년월일', esc(o.ceo_birth || '—'));
+				h += '</div></div>';
+			}
+
+			if (o.biz_name || o.biz_reg_no) {
+				h += '<div class="separator separator-dashed my-5"></div>';
+				h += '<h4 class="fw-bold fs-6 mb-3">사업자 정보</h4>';
+				h += '<div class="row"><div class="col-md-6">';
+				h += kv('사업자명', esc(o.biz_name || '—'));
+				h += kv('사업자번호', esc(o.biz_reg_no || '—'));
+				h += '</div><div class="col-md-6">';
+				h += kv('업태 / 업종', esc((o.biz_type || '—') + ' / ' + (o.biz_category || '—')));
+				h += kv('주소', esc(o.biz_address || '—'));
+				h += '</div></div>';
+			}
+
 			// 계정 목록 (역할별 여러 개 관리)
 			h += '<div class="separator separator-dashed my-5"></div>';
 			h += '<div class="d-flex align-items-center justify-content-between mb-3">';
@@ -490,6 +562,7 @@ foreach ($agencyByParent as $orphans) {
 				h += '</div></div>';
 				h += '<div class="row mt-2"><div class="col-md-6">';
 				if (ag.fee_config) {
+					h += kv('보증금', '<span class="fw-bold">' + won(ag.fee_config.reserve_amount) + '</span>');
 					h += kv('정산수수료(기준일/미만/이상)', ag.fee_config.fee_day_threshold + '일 / ' + ag.fee_config.fee_per_tx_short + '원 / ' + ag.fee_config.fee_per_tx_long + '원');
 				}
 				if (ag.pg_fee) {
@@ -499,6 +572,7 @@ foreach ($agencyByParent as $orphans) {
 				h += kv('등록 카드', ag.card_count + '개');
 				h += kv('오픈뱅킹 계좌', ag.has_bank_account ? '<span class="text-success">등록됨</span>' : '<span class="text-muted">미등록</span>');
 				h += '</div></div>';
+				h += '<div class="mt-3"><a href="' + WITHDRAWAL_SETTINGS_URL + WITHDRAWAL_SETTINGS_SEP + o.id + '" class="btn btn-sm btn-light-primary">보증금·정산수수료 수정</a></div>';
 			}
 
 			// 총판 상세
@@ -649,6 +723,14 @@ foreach ($agencyByParent as $orphans) {
 				$('org_contact_name').value = row.contact_name || '';
 				$('org_contact_phone').value = row.contact_phone || '';
 				$('org_memo').value = row.memo || '';
+				$('org_ceo_name').value = row.ceo_name || '';
+				$('org_ceo_phone').value = row.ceo_phone || '';
+				$('org_ceo_birth').value = row.ceo_birth || '';
+				$('org_biz_name').value = row.biz_name || '';
+				$('org_biz_reg_no').value = row.biz_reg_no || '';
+				$('org_biz_type').value = row.biz_type || '';
+				$('org_biz_category').value = row.biz_category || '';
+				$('org_biz_address').value = row.biz_address || '';
 				bootstrap.Modal.getOrCreateInstance($('kt_org_modal')).show();
 				return;
 			}
@@ -669,7 +751,15 @@ foreach ($agencyByParent as $orphans) {
 				name: $('org_name').value.trim(),
 				contact_name: $('org_contact_name').value.trim(),
 				contact_phone: $('org_contact_phone').value.trim(),
-				memo: $('org_memo').value.trim()
+				memo: $('org_memo').value.trim(),
+				ceo_name: $('org_ceo_name').value.trim(),
+				ceo_phone: $('org_ceo_phone').value.trim(),
+				ceo_birth: $('org_ceo_birth').value.trim(),
+				biz_name: $('org_biz_name').value.trim(),
+				biz_reg_no: $('org_biz_reg_no').value.trim(),
+				biz_type: $('org_biz_type').value.trim(),
+				biz_category: $('org_biz_category').value.trim(),
+				biz_address: $('org_biz_address').value.trim()
 			};
 			if (!payload.name) { showToast('조직 이름을 입력하세요.', false); return; }
 			if (!editId) {

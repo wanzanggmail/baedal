@@ -50,7 +50,7 @@ if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
 }
 
-if (!$isAgency || !in_array($myRole, ['operation', 'settlement'], true)) {
+if (!$isAgency || !in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
     $err('대리점 운영/정산 계정만 지급할 수 있습니다.', 403);
 }
 

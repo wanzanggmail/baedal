@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/OrgAccount.php';
+require_once INC_PATH . '/Organization.php';
 
 $apiUrl = ADMIN_BASE . '/api/org_accounts.php';
 $orgId  = admin_org_id();
 $org    = admin_org();
+$orgInfo = Organization::find($orgId); // 담당자·대표자·사업자 정보 포함 전체 필드(admin_org()는 축약본)
 $rows   = OrgAccount::listForOrg($orgId);
 $roleLabels = OrgAccount::roleLabels();
 ?>
@@ -32,6 +34,112 @@ $roleLabels = OrgAccount::roleLabels();
 	<div id="oa_toast" class="alert alert-dismissible d-none mb-6" role="alert">
 		<span id="oa_toast_msg"></span>
 		<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+	</div>
+
+	<!--begin::조직 정보 (셀프서비스)-->
+	<div class="card card-flush mb-6">
+		<div class="card-header pt-5">
+			<h3 class="card-title fw-bold">조직 정보</h3>
+			<div class="card-toolbar">
+				<button type="button" class="btn btn-sm btn-light-primary" id="oi_edit_btn">✎ 정보 수정</button>
+			</div>
+		</div>
+		<div class="card-body pt-2">
+			<div class="row">
+				<div class="col-md-6">
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">조직 이름</span><span class="fw-semibold text-gray-800" id="oi_v_name"><?= htmlspecialchars((string) ($orgInfo['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">담당자명</span><span class="fw-semibold text-gray-800" id="oi_v_contact_name"><?= htmlspecialchars((string) ($orgInfo['contact_name'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">담당자 연락처</span><span class="fw-semibold text-gray-800" id="oi_v_contact_phone"><?= htmlspecialchars((string) ($orgInfo['contact_phone'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">대표자명</span><span class="fw-semibold text-gray-800" id="oi_v_ceo_name"><?= htmlspecialchars((string) ($orgInfo['ceo_name'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">대표자 휴대폰</span><span class="fw-semibold text-gray-800" id="oi_v_ceo_phone"><?= htmlspecialchars((string) ($orgInfo['ceo_phone'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2"><span class="text-muted">대표자 생년월일</span><span class="fw-semibold text-gray-800" id="oi_v_ceo_birth"><?= htmlspecialchars((string) ($orgInfo['ceo_birth'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+				</div>
+				<div class="col-md-6">
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">사업자명</span><span class="fw-semibold text-gray-800" id="oi_v_biz_name"><?= htmlspecialchars((string) ($orgInfo['biz_name'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">사업자번호</span><span class="fw-semibold text-gray-800" id="oi_v_biz_reg_no"><?= htmlspecialchars((string) ($orgInfo['biz_reg_no'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">업태</span><span class="fw-semibold text-gray-800" id="oi_v_biz_type"><?= htmlspecialchars((string) ($orgInfo['biz_type'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">업종</span><span class="fw-semibold text-gray-800" id="oi_v_biz_category"><?= htmlspecialchars((string) ($orgInfo['biz_category'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2 border-bottom border-gray-200"><span class="text-muted">사업장 주소</span><span class="fw-semibold text-gray-800" id="oi_v_biz_address"><?= htmlspecialchars((string) ($orgInfo['biz_address'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+					<div class="d-flex justify-content-between py-2"><span class="text-muted">메모</span><span class="fw-semibold text-gray-800" id="oi_v_memo"><?= htmlspecialchars((string) ($orgInfo['memo'] ?? '') ?: '—', ENT_QUOTES, 'UTF-8') ?></span></div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::조직 정보-->
+
+	<!-- 조직 정보 수정 모달 -->
+	<div class="modal fade" id="oi_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-650px">
+			<div class="modal-content">
+				<div class="modal-header"><h3 class="modal-title">조직 정보 수정</h3><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+				<div class="modal-body fs-7">
+					<div class="mb-4">
+						<label class="form-label required">조직 이름</label>
+						<input type="text" class="form-control form-control-solid" id="oi_name" maxlength="120" />
+					</div>
+					<div class="row">
+						<div class="col-md-6 mb-4">
+							<label class="form-label">담당자명</label>
+							<input type="text" class="form-control form-control-solid" id="oi_contact_name" maxlength="80" />
+						</div>
+						<div class="col-md-6 mb-4">
+							<label class="form-label">담당자 연락처</label>
+							<input type="text" class="form-control form-control-solid" id="oi_contact_phone" maxlength="30" />
+						</div>
+					</div>
+					<div class="separator separator-dashed my-5"></div>
+					<h5 class="fw-bold fs-7 mb-3">대표자 정보</h5>
+					<div class="row">
+						<div class="col-md-4 mb-4">
+							<label class="form-label">대표자명</label>
+							<input type="text" class="form-control form-control-solid" id="oi_ceo_name" maxlength="80" />
+						</div>
+						<div class="col-md-4 mb-4">
+							<label class="form-label">대표자 휴대폰</label>
+							<input type="text" class="form-control form-control-solid" id="oi_ceo_phone" maxlength="30" placeholder="010-0000-0000" />
+						</div>
+						<div class="col-md-4 mb-4">
+							<label class="form-label">생년월일</label>
+							<input type="text" class="form-control form-control-solid" id="oi_ceo_birth" maxlength="10" placeholder="YYMMDD" />
+						</div>
+					</div>
+					<div class="separator separator-dashed my-5"></div>
+					<h5 class="fw-bold fs-7 mb-3">사업자 정보</h5>
+					<div class="row">
+						<div class="col-md-6 mb-4">
+							<label class="form-label">사업자명</label>
+							<input type="text" class="form-control form-control-solid" id="oi_biz_name" maxlength="120" />
+						</div>
+						<div class="col-md-6 mb-4">
+							<label class="form-label">사업자번호</label>
+							<input type="text" class="form-control form-control-solid" id="oi_biz_reg_no" maxlength="20" placeholder="000-00-00000" />
+						</div>
+					</div>
+					<div class="row">
+						<div class="col-md-6 mb-4">
+							<label class="form-label">업태</label>
+							<input type="text" class="form-control form-control-solid" id="oi_biz_type" maxlength="60" />
+						</div>
+						<div class="col-md-6 mb-4">
+							<label class="form-label">업종</label>
+							<input type="text" class="form-control form-control-solid" id="oi_biz_category" maxlength="60" />
+						</div>
+					</div>
+					<div class="mb-4">
+						<label class="form-label">사업장 주소</label>
+						<input type="text" class="form-control form-control-solid" id="oi_biz_address" maxlength="200" />
+					</div>
+					<div class="mb-1">
+						<label class="form-label">메모</label>
+						<textarea class="form-control form-control-solid" id="oi_memo" rows="2" maxlength="500"></textarea>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
+					<button type="button" class="btn btn-primary" id="oi_save">저장</button>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<div class="card card-flush">
@@ -114,6 +222,30 @@ $roleLabels = OrgAccount::roleLabels();
 		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger'); toastMsg.textContent = m; toast.classList.remove('d-none'); }
 		function modal() { return bootstrap.Modal.getOrCreateInstance(document.getElementById('oa_modal')); }
 		function post(p) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) }).then(function (r) { return r.json(); }); }
+
+		// ── 조직 정보(셀프서비스) ──────────────────
+		var ORG_INFO = <?= json_encode($orgInfo, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?>;
+		var oiFields = ['name', 'contact_name', 'contact_phone', 'ceo_name', 'ceo_phone', 'ceo_birth', 'biz_name', 'biz_reg_no', 'biz_type', 'biz_category', 'biz_address', 'memo'];
+		function oiModal() { return bootstrap.Modal.getOrCreateInstance(document.getElementById('oi_modal')); }
+		document.getElementById('oi_edit_btn').addEventListener('click', function () {
+			oiFields.forEach(function (f) { document.getElementById('oi_' + f).value = ORG_INFO[f] || ''; });
+			oiModal().show();
+		});
+		document.getElementById('oi_save').addEventListener('click', function () {
+			var payload = { action: 'update_org_info' };
+			oiFields.forEach(function (f) { payload[f] = document.getElementById('oi_' + f).value.trim(); });
+			if (!payload.name) { showToast('조직 이름을 입력하세요.', false); return; }
+			post(payload).then(function (res) {
+				if (!res.ok) throw new Error(res.message);
+				ORG_INFO = res.row;
+				oiFields.forEach(function (f) {
+					var el = document.getElementById('oi_v_' + f);
+					if (el) el.textContent = res.row[f] || '—';
+				});
+				showToast(res.message, true);
+				oiModal().hide();
+			}).catch(function (e) { showToast(e.message, false); });
+		});
 
 		function openCreate() {
 			document.getElementById('oa_modal_title').textContent = '서브계정 추가';

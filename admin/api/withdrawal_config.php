@@ -20,10 +20,9 @@ if (!admin_is_logged_in()) {
     exit;
 }
 
-// 멀티테넌시: 본사(super)=전역 기본 / 대리점=자기 설정
+// 멀티테넌시: 본사(super)=전역 기본, 또는 특정 대리점 지정 시 그 대리점 값 / 대리점 계정=항상 자기 설정만
 require_once INC_PATH . '/Org.php';
 $isAgency  = admin_org_level() === Org::LEVEL_AGENCY;
-$cfgOrgId  = $isAgency ? admin_org_id() : null;
 $myRole    = (string) (admin_user()['role'] ?? '');
 
 if (!admin_has_role('super') && !$isAgency) {
@@ -40,12 +39,45 @@ $err = static function (string $msg, int $code = 422): never {
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+$body = [];
+if ($method === 'POST') {
+    $raw  = file_get_contents('php://input');
+    $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
+    $body = str_contains($ct, 'application/json')
+        ? (array) json_decode($raw ?: '{}', true)
+        : $_POST;
+}
+
+// 조회/수정 대상 조직 결정
+// - 대리점 계정: 요청에 뭐가 오든 항상 자기 조직 고정(다른 대리점 값을 절대 못 봄/못 고침)
+// - 본사(super): agency_id 파라미터가 있으면 그 대리점, 없으면 전역 기본(org_id NULL)
+$agencyParam  = $method === 'GET' ? ($_GET['agency_id'] ?? null) : ($body['agency_id'] ?? null);
+$targetAgency = null;
+if ($isAgency) {
+    $cfgOrgId = admin_org_id();
+    $scope    = 'agency';
+} else {
+    $agencyId = (int) ($agencyParam ?? 0);
+    if ($agencyId > 0) {
+        $targetAgency = Org::find($agencyId);
+        if ($targetAgency === null || (string) $targetAgency['level'] !== Org::LEVEL_AGENCY) {
+            $err('대상 대리점을 찾을 수 없습니다.', 404);
+        }
+        $cfgOrgId = $agencyId;
+        $scope    = 'agency_override';
+    } else {
+        $cfgOrgId = null;
+        $scope    = 'global';
+    }
+}
+
 if ($method === 'GET') {
     try {
         echo json_encode([
             'ok'     => true,
             'config' => WithdrawalConfig::get($cfgOrgId),
-            'scope'  => $isAgency ? 'agency' : 'global',
+            'scope'  => $scope,
+            'agency' => $targetAgency !== null ? ['id' => (int) $targetAgency['id'], 'name' => (string) $targetAgency['name'], 'code' => (string) $targetAgency['code']] : null,
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         $err('조회 실패: ' . $e->getMessage(), 500);
@@ -57,16 +89,12 @@ if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
 }
 
-// 쓰기 권한: 본사(super) 또는 대리점 운영/정산 역할
-if (!admin_has_role('super') && !($isAgency && in_array($myRole, ['operation', 'settlement'], true))) {
+// 쓰기 권한: 본사(super) 또는 대리점 운영/정산/총괄관리자(manager) 역할
+// manager는 자기 조직 범위 내 전체 화면 조회·쓰기가 원칙(admin_can_write() 규칙과 동일하게 맞춤,
+// 대표계정이 흔히 manager 역할이라 이 목록에서 빠지면 자기 조직 설정조차 못 고치는 사고가 남)
+if (!admin_has_role('super') && !($isAgency && in_array($myRole, ['operation', 'settlement', 'manager'], true))) {
     $err('출금 정책을 저장할 권한이 없습니다.', 403);
 }
-
-$raw  = file_get_contents('php://input');
-$ct   = $_SERVER['CONTENT_TYPE'] ?? '';
-$body = str_contains($ct, 'application/json')
-    ? (array) json_decode($raw ?: '{}', true)
-    : $_POST;
 
 if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
     $err('action=save', 400);
@@ -75,18 +103,20 @@ if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
     $cfg = WithdrawalConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
+    $scopeLabel = $targetAgency !== null ? ('대리점 ' . (string) $targetAgency['name'] . '(' . (string) $targetAgency['code'] . ')') : ($isAgency ? '자기 대리점' : '전역 기본');
     AuditLog::record(
         'withdrawal.config.save',
         'withdrawal_config',
         sprintf(
-            '보증금 %s · %d일 미만 %d원 / 이상 %d원(건당)',
+            '[%s] 보증금 %s · %d일 미만 %d원 / 이상 %d원(건당)',
+            $scopeLabel,
             number_format($cfg['reserve_amount']),
             $cfg['fee_day_threshold'],
             $cfg['fee_per_tx_short'],
             $cfg['fee_per_tx_long']
         )
     );
-    echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg, 'scope' => $scope], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     $err('저장 실패: ' . $e->getMessage(), 500);
 }

@@ -51,12 +51,19 @@ final class BankAccount
         if ($bankCode === '' || $account === '') {
             throw new InvalidArgumentException('은행과 계좌번호를 입력하세요.');
         }
-        // 실 연동 전: 핀테크이용번호 미입력 시 모의 값 자동 발급
+
+        $exists = self::get($agencyId);
+
+        // 핀테크이용번호는 개설기관이 계좌에 발급한 식별자다(이체 실행 키 — Disbursement::transfer).
+        // 입력이 비었다고 매번 새로 만들면 예금주명만 고쳐도 번호가 바뀌어 이체가 끊기므로,
+        // 기존 값이 있으면 그대로 유지하고 정말 없을 때만 (실 연동 전) 모의 값을 발급한다.
+        if ($fintech === '') {
+            $fintech = (string) ($exists['fintech_use_num'] ?? '');
+        }
         if ($fintech === '') {
             $fintech = 'MOCK-FT-' . strtoupper(bin2hex(random_bytes(6)));
         }
 
-        $exists = self::get($agencyId);
         if ($exists !== null) {
             db_execute(
                 'UPDATE agency_bank_accounts SET bank_code = ?, account_no = ?, holder = ?, fintech_use_num = ?, updated_at = NOW() WHERE agency_id = ?',

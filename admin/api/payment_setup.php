@@ -12,7 +12,8 @@ declare(strict_types=1);
  *      { action:'account_save', bank_code, account_no, holder, fintech_use_num? }
  *      { action:'pg_charge', amount }   — 카드로 대리점 잔액 충전(대체결제 포함)
  *
- * 권한: 대리점(agency) 운영/정산 계정만.
+ * 권한: 대리점(agency) 운영·정산·총괄(manager) 계정 = 자기 대리점만.
+ *       본사(super) = agency_id 로 대상 대리점을 지정해 대신 설정(감사로그에 「본사 대행」 표기).
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
@@ -37,14 +38,38 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
-$isAgency = admin_org_level() === Org::LEVEL_AGENCY;
+$isAgencySelf = admin_org_level() === Org::LEVEL_AGENCY;
 $myRole   = (string) (admin_user()['role'] ?? '');
-$agencyId = $isAgency ? admin_org_id() : 0;
 $adminId  = (int) ($_SESSION['admin_id'] ?? 0);
 $method   = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-if (!$isAgency || !in_array($myRole, ['operation', 'settlement'], true)) {
-    $err('대리점 운영/정산 계정만 사용할 수 있습니다.', 403);
+$body = [];
+if ($method === 'POST') {
+    $raw  = file_get_contents('php://input');
+    $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
+    $body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}', true) : $_POST;
+}
+
+// 대상 대리점 결정
+// - 대리점 계정: 요청에 뭐가 오든 항상 자기 조직 고정(남의 카드·계좌를 절대 못 봄/못 고침)
+// - 본사(super): agency_id 로 대상 대리점을 지정해 대신 설정(지원 업무)
+$targetAgency = null;
+if ($isAgencySelf) {
+    if (!in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
+        $err('대리점 운영·정산·총괄 계정만 사용할 수 있습니다.', 403);
+    }
+    $agencyId = admin_org_id();
+} elseif (admin_has_role('super')) {
+    $agencyId = (int) ($method === 'GET' ? ($_GET['agency_id'] ?? 0) : ($body['agency_id'] ?? 0));
+    if ($agencyId < 1) {
+        $err('대상 대리점을 선택하세요.');
+    }
+    $targetAgency = Org::find($agencyId);
+    if ($targetAgency === null || (string) $targetAgency['level'] !== Org::LEVEL_AGENCY) {
+        $err('대상 대리점을 찾을 수 없습니다.', 404);
+    }
+} else {
+    $err('대리점 계정 또는 본사 최고관리자만 사용할 수 있습니다.', 403);
 }
 
 if ($method === 'GET') {
@@ -60,16 +85,16 @@ if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
 }
 
-$raw  = file_get_contents('php://input');
-$ct   = $_SERVER['CONTENT_TYPE'] ?? '';
-$body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}', true) : $_POST;
 $action = trim((string) ($body['action'] ?? ''));
+
+// 본사가 남의 대리점을 대신 설정한 기록은 감사로그에 대상을 남긴다(누가 어느 대리점 것을 건드렸는지).
+$onBehalf = $targetAgency !== null ? sprintf(' [본사 대행 · %s]', (string) $targetAgency['name']) : '';
 
 try {
     switch ($action) {
         case 'card_add':
             $card = AgencyCard::create($agencyId, $body);
-            AuditLog::record('org.card_add', (string) $agencyId, '카드 등록 · ' . (string) $card['alias']);
+            AuditLog::record('org.card_add', (string) $agencyId, '카드 등록 · ' . (string) $card['alias'] . $onBehalf);
             $msg = '카드가 등록되었습니다.';
             break;
         case 'card_toggle':
@@ -86,7 +111,7 @@ try {
             break;
         case 'account_save':
             BankAccount::save($agencyId, $body);
-            AuditLog::record('org.bank_account', (string) $agencyId, '오픈뱅킹 계좌 저장');
+            AuditLog::record('org.bank_account', (string) $agencyId, '오픈뱅킹 계좌 저장' . $onBehalf);
             $msg = '계좌가 저장되었습니다.';
             break;
         case 'pg_charge':
@@ -98,7 +123,7 @@ try {
             if (!$r['success']) {
                 $err('PG 결제 실패(전 카드): ' . $r['fail_reason']);
             }
-            AuditLog::record('org.pg_charge', (string) $agencyId, sprintf('PG 충전 %s원(수수료 %s, %d회 시도)', number_format($r['net']), number_format($r['fee']), $r['attempts']));
+            AuditLog::record('org.pg_charge', (string) $agencyId, sprintf('PG 충전 %s원(수수료 %s, %d회 시도)', number_format($r['net']), number_format($r['fee']), $r['attempts']) . $onBehalf);
             $msg = sprintf('%s원 충전 완료 (플랫폼 수수료 %s원 포함 %s원 결제, %d번째 카드 승인)', number_format($r['net']), number_format($r['fee']), number_format($r['total']), $r['attempts']);
             break;
         default:
