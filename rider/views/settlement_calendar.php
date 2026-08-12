@@ -86,7 +86,7 @@ if ($riderId > 0 && SettlementLedger::tableExists()) {
 
 		<div class="d-flex flex-wrap gap-2 px-4 py-4">
 			<a href="<?= htmlspecialchars(rider_url('settlement/list'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">목록 보기</a>
-			<a href="<?= htmlspecialchars(rider_url('settlement/detail'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">상세 샘플</a>
+			<a href="<?= htmlspecialchars(rider_url('settlement/detail'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">정산 상세</a>
 		</div>
 	</div>
 </div>

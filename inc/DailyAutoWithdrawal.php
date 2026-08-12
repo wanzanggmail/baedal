@@ -147,7 +147,9 @@ final class DailyAutoWithdrawal
             // 계좌 미등록·출금보류·보증금 미달 등은 **정상적인 건너뜀**이다. 정산 반영 자체는
             // 이미 성공했으므로 여기서 예외를 위로 던져 전체를 실패시키면 안 된다.
             try {
-                $req = Withdrawal::applyForRider($riderId);
+                // 선정산 라이더 전용 자동출금 경로다 — 라이더 앱에는 막혀 있는 신청을
+                // 여기서만 허용해 같은 코드(수수료·사이클 점유)를 재사용한다.
+                $req = Withdrawal::applyForRider($riderId, null, true);
             } catch (Throwable $e) {
                 $out['skipped']++;
                 $out['results'][] = [

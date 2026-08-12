@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/RiderWallet.php';
 require_once INC_PATH . '/WithdrawalFeeShare.php';
+require_once INC_PATH . '/AgencyWallet.php';
 
 /**
  * 출금 신청 조회·상태 변경·라이더 신청
@@ -320,9 +321,11 @@ final class Withdrawal
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $rows = db_rows(
-            "SELECT id, rider_id, kind, amount, withhold_other, withhold_min_retain, status
-               FROM withdrawal_requests
-              WHERE id IN ({$placeholders}) AND status = 'downloaded'",
+            "SELECT wr.id, wr.rider_id, wr.kind, wr.amount, wr.withhold_other, wr.withhold_min_retain, wr.status,
+                    COALESCE(wr.agency_id, r.agency_id) AS agency_id, r.rider_code
+               FROM withdrawal_requests wr
+               LEFT JOIN riders r ON r.id = wr.rider_id
+              WHERE wr.id IN ({$placeholders}) AND wr.status = 'downloaded'",
             $ids
         );
         if ($rows === []) {
@@ -350,6 +353,20 @@ final class Withdrawal
                         (int) $row['rider_id'],
                         (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
                     );
+                    // 실지급액을 대리점 지갑에서도 차감한다. 이 경로는 관리자가 은행에서 직접
+                    // 이체를 끝낸 뒤 누르는 백업 흐름이라, 돈은 이미 나갔으므로 잔액이 음수가
+                    // 되더라도 그대로 기록한다(음수 자체가 정산이 어긋났다는 신호다).
+                    $agencyId = (int) ($row['agency_id'] ?? 0);
+                    if ($agencyId > 0) {
+                        AgencyWallet::debit(
+                            $agencyId,
+                            (int) ($row['amount'] ?? 0),
+                            'rider_payout',
+                            $id,
+                            trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급(수동 완료)',
+                            null
+                        );
+                    }
                     // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
                     WithdrawalFeeShare::distribute(
                         $id,
@@ -425,6 +442,27 @@ final class Withdrawal
             $amount   = (int) ($row['amount'] ?? 0);
             $agencyId = (int) ($row['agency_id'] ?: $row['rider_agency_id'] ?: 0);
 
+            // 라이더에게 나가는 돈은 대리점 지갑에서 조달된다 — 잔액이 모자라면 **이체 전에** 막는다.
+            // (이체부터 하고 나면 실제 돈은 나갔는데 지갑은 음수가 되어 되돌릴 수 없다.)
+            if ((string) ($row['kind'] ?? '') === 'rider_manual' && $agencyId > 0) {
+                $agencyBalance = AgencyWallet::get($agencyId)['balance'];
+                if ($agencyBalance < $amount) {
+                    $msg = sprintf(
+                        '대리점 잔액 부족(잔액 %s원 < 지급 %s원). PG 충전 후 재시도하세요.',
+                        number_format($agencyBalance),
+                        number_format($amount)
+                    );
+                    db_execute(
+                        "UPDATE withdrawal_requests SET status = 'failed', fail_reason = ?
+                          WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+                        [mb_substr($msg, 0, 300), $id]
+                    );
+                    $out['failed']++;
+                    $out['results'][] = ['id' => $id, 'ok' => false, 'message' => $msg];
+                    continue;
+                }
+            }
+
             try {
                 $res = $gateway->transfer(
                     $agencyId,
@@ -453,7 +491,7 @@ final class Withdrawal
 
             // 성공 — 이 건만 단독으로 커밋한다(위 ⚠️ 참고).
             $note = '펌뱅킹 이체 완료 · ' . $gateway->providerLabel() . ' · 거래번호 ' . $res->txId;
-            db_transaction(static function () use ($id, $row, $note): void {
+            db_transaction(static function () use ($id, $row, $note, $agencyId): void {
                 $n = db_execute(
                     // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
                     "UPDATE withdrawal_requests
@@ -471,6 +509,18 @@ final class Withdrawal
                         (int) $row['rider_id'],
                         (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
                     );
+                    // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
+                    // (정산수수료는 대리점에 남았다가 아래 배분에서 본사·총판 몫만 빠져나간다.)
+                    if ($agencyId > 0) {
+                        AgencyWallet::debit(
+                            $agencyId,
+                            (int) ($row['amount'] ?? 0),
+                            'rider_payout',
+                            $id,
+                            trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급',
+                            null
+                        );
+                    }
                     // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
                     WithdrawalFeeShare::distribute(
                         $id,
@@ -675,7 +725,13 @@ final class Withdrawal
      *
      * @return array<string, mixed>
      */
-    public static function applyForRider(int $riderId, ?string $toDate = null): array
+    /**
+     * @param bool $allowDailySettlement 선정산(일일지급) 라이더도 허용할지.
+     *   업무 정책상 선정산 라이더는 **대리점의 일일정산 지급**으로만 돈을 받는다(§5.4). 라이더가
+     *   앱에서 따로 신청하면 같은 정산분이 두 경로로 나갈 수 있으므로 기본값은 차단이다.
+     *   내부 자동출금(`DailyAutoWithdrawal`)만 true로 넘겨 이 경로를 재사용한다.
+     */
+    public static function applyForRider(int $riderId, ?string $toDate = null, bool $allowDailySettlement = false): array
     {
         if ($riderId < 1) {
             throw new InvalidArgumentException('라이더 정보가 없습니다.');
@@ -692,7 +748,8 @@ final class Withdrawal
         }
 
         $rider = db_row(
-            'SELECT id, name, status, withdrawal_hold, bank_code, bank_account, account_holder
+            'SELECT id, name, status, withdrawal_hold, is_daily_settlement, agency_id,
+                    bank_code, bank_account, account_holder
              FROM riders WHERE id = ? LIMIT 1',
             [$riderId]
         );
@@ -701,6 +758,10 @@ final class Withdrawal
         }
         if ((string) ($rider['status'] ?? '') !== 'active') {
             throw new InvalidArgumentException('활동 중인 라이더만 출금 신청할 수 있습니다.');
+        }
+        // 선정산 라이더는 대리점의 일일정산 지급으로만 받는다 — 앱에서 따로 신청하면 중복 지급 위험.
+        if (!$allowDailySettlement && (int) ($rider['is_daily_settlement'] ?? 0) === 1) {
+            throw new InvalidArgumentException('선정산(일일지급) 대상 라이더입니다. 정산분은 대리점에서 매일 자동으로 지급되므로 별도 출금 신청이 필요하지 않습니다.');
         }
         if ((int) ($rider['withdrawal_hold'] ?? 0) === 1) {
             throw new InvalidArgumentException('출금 보류 상태입니다. 관리자에게 문의하세요.');
@@ -766,16 +827,17 @@ final class Withdrawal
             if ($hasAccruedCol) {
                 $id = db_insert(
                     'INSERT INTO withdrawal_requests
-                        (rider_id, kind, amount, gross_amount,
+                        (rider_id, agency_id, kind, amount, gross_amount,
                          withhold_min_retain, withhold_other, accrued_days,
                          bank_code, bank_account, account_holder,
                          status, note, requested_at)
-                     VALUES (?, \'rider_manual\', ?, ?,
+                     VALUES (?, ?, \'rider_manual\', ?, ?,
                              ?, ?, ?,
                              ?, ?, ?,
                              \'pending\', ?, NOW())',
                     [
                         $riderId,
+                        (int) ($rider['agency_id'] ?? 0) ?: null,
                         $payout,
                         $balance,
                         $reserve,
@@ -790,16 +852,17 @@ final class Withdrawal
             } else {
                 $id = db_insert(
                     'INSERT INTO withdrawal_requests
-                        (rider_id, kind, amount, gross_amount,
+                        (rider_id, agency_id, kind, amount, gross_amount,
                          withhold_min_retain, withhold_other,
                          bank_code, bank_account, account_holder,
                          status, note, requested_at)
-                     VALUES (?, \'rider_manual\', ?, ?,
+                     VALUES (?, ?, \'rider_manual\', ?, ?,
                              ?, ?,
                              ?, ?, ?,
                              \'pending\', ?, NOW())',
                     [
                         $riderId,
+                        (int) ($rider['agency_id'] ?? 0) ?: null,
                         $payout,
                         $balance,
                         $reserve,
