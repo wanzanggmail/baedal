@@ -8,6 +8,27 @@ require_once INC_PATH . '/WithdrawalCycles.php';
 
 $riderUser = rider_current_user();
 $riderId   = $riderUser ? (int) $riderUser['id'] : 0;
+
+// 선정산(일일지급) 라이더는 대리점이 매일 자동으로 지급하므로 앱 출금 신청 대상이 아니다.
+// 신청 자체는 Withdrawal::applyForRider()가 막지만, 폼을 다 채운 뒤에 거절당하면
+// 이유를 알기 어려우므로 화면 진입 시점에 안내한다.
+if ($riderId > 0 && !empty($riderUser['is_daily_settlement'])) {
+    ?>
+	<div class="card card-flush shadow-sm">
+		<div class="card-body text-center py-10">
+			<i class="ki-duotone ki-check-circle fs-3x text-success mb-3"><span class="path1"></span><span class="path2"></span></i>
+			<div class="fs-5 fw-bold text-gray-900 mb-2">출금 신청이 필요하지 않습니다</div>
+			<div class="fs-7 text-gray-600">
+				선정산(일일지급) 대상이라 정산분이 <strong>대리점에서 매일 자동으로 지급</strong>됩니다.<br />
+				지급 내역은 정산 달력에서 확인하세요.
+			</div>
+			<a href="<?= htmlspecialchars(rider_url('settlement/calendar'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary mt-4">정산 달력 보기</a>
+		</div>
+	</div>
+    <?php
+    return;
+}
+
 $preview   = $riderId > 0 ? RiderWallet::previewWithdrawal($riderId) : [];
 $hasOpen   = $riderId > 0 && Withdrawal::hasOpenRiderRequest($riderId);
 $canApply  = $riderId > 0 && (bool) ($preview['can_apply'] ?? false) && !$hasOpen;
