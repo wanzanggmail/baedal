@@ -5,9 +5,12 @@ declare(strict_types=1);
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/Organization.php';
 
-// 멀티테넌시: 대리점 계정=항상 자기 설정만 / 본사(super)=?agency=ID로 특정 대리점 지정, 없으면 전역 기본
+// 멀티테넌시: 대리점=자기 설정 편집 / 본사=대리점 지정해 편집 / 총판=하위 대리점 조회만
 $isAgencySelf = admin_org_level() === Org::LEVEL_AGENCY;
 $isSuper      = admin_has_role('super');
+$isDistributor = admin_org_level() === Org::LEVEL_DISTRIBUTOR;
+// 총판은 저장 불가(API에서도 차단) — 대리점 정책은 대리점 본인 또는 본사가 정한다.
+$canEdit      = $isAgencySelf || $isSuper;
 $agencyOptions = [];
 $targetAgency  = null;
 
@@ -154,7 +157,13 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
 						<?php endif; ?>
 
+						<?php if ($canEdit) : ?>
 						<button type="button" class="btn btn-primary" id="cfg_save_btn">저장</button>
+						<?php else : ?>
+						<div class="alert bg-light-secondary fs-8 p-3 mb-0">
+							총판 계정은 <strong>조회만</strong> 가능합니다. 대리점 정책은 해당 대리점 또는 본사가 설정합니다.
+						</div>
+						<?php endif; ?>
 					</form>
 				</div>
 			</div>
@@ -182,7 +191,9 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			toastMsg.textContent = msg;
 			toast.classList.remove('d-none');
 		}
-		document.getElementById('cfg_save_btn').addEventListener('click', function () {
+		var saveBtn = document.getElementById('cfg_save_btn');
+		if (!saveBtn) return; // 조회 전용(총판)이면 저장 버튼이 아예 없다.
+		saveBtn.addEventListener('click', function () {
 			var payload = {
 				action: 'save',
 				reserve_amount: parseInt(document.getElementById('cfg_reserve').value, 10) || 0,

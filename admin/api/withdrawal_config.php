@@ -25,9 +25,11 @@ require_once INC_PATH . '/Org.php';
 $isAgency  = admin_org_level() === Org::LEVEL_AGENCY;
 $myRole    = (string) (admin_user()['role'] ?? '');
 
-if (!admin_has_role('super') && !$isAgency) {
+// 총판은 하위 대리점 정책을 **조회**할 수 있다(GET). 쓰기는 아래 POST 구간에서 다시 막는다.
+$isDistributor = admin_org_level() === Org::LEVEL_DISTRIBUTOR;
+if (!admin_has_role('super') && !$isAgency && !$isDistributor) {
     http_response_code(403);
-    echo json_encode(['ok' => false, 'message' => '출금 정책을 변경할 권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => false, 'message' => '출금 정책을 조회할 권한이 없습니다.'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -63,6 +65,10 @@ if ($isAgency) {
         if ($targetAgency === null || (string) $targetAgency['level'] !== Org::LEVEL_AGENCY) {
             $err('대상 대리점을 찾을 수 없습니다.', 404);
         }
+        // 총판이 남의 총판 소속 대리점을 들여다보지 못하게 스코프를 확인한다.
+        if (!Org::canAccessAgency($agencyId)) {
+            $err('이 대리점에 접근할 권한이 없습니다.', 403);
+        }
         $cfgOrgId = $agencyId;
         $scope    = 'agency_override';
     } else {
@@ -87,6 +93,11 @@ if ($method === 'GET') {
 
 if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
+}
+
+// 총판은 조회 전용 — 대리점 정책은 대리점 본인 또는 본사가 정한다.
+if ($isDistributor) {
+    $err('총판 계정은 출금 정책을 변경할 수 없습니다. (조회만 가능)', 403);
 }
 
 // 쓰기 권한: 본사(super) 또는 대리점 운영/정산/총괄관리자(manager) 역할

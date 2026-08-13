@@ -256,7 +256,7 @@ $route = $route ?? '';
 												</div>
 												<?php endif; ?>
 												<?php // 결제 설정은 대리점 본인 + 본사(대리점 대신 설정·지원)에게 노출 ?>
-												<?php if (admin_org_level() === Org::LEVEL_AGENCY || admin_has_role('super')) : ?>
+												<?php if (admin_can_access_route('withdrawal/payment-setup')) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/payment-setup') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/payment-setup'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet">

@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/AgencyFeeConfig.php';
 
-// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
-$cfgOrgId     = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+// 멀티테넌시: 대리점=자기 설정 / 본사=전역 기본 / 총판=전역 기본 조회만
+$level        = admin_org_level();
+$isAgencySelf = $level === Org::LEVEL_AGENCY;
+$isHq         = $level === Org::LEVEL_ADMIN;
+$cfgOrgId     = $isAgencySelf ? admin_org_id() : null;
 $config       = AgencyFeeConfig::get($cfgOrgId);
 $apiUrl       = ADMIN_BASE . '/api/agency_fee_config.php';
 $needsMigrate = !AgencyFeeConfig::tableReady();
-$canWrite     = admin_can_write('deduction');
+// 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
+$canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
+$readOnlyNote = (!$isAgencySelf && !$isHq);
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -77,6 +82,10 @@ $canWrite     = admin_can_write('deduction');
 						</div>
 						<?php if ($canWrite) : ?>
 						<button type="button" class="btn btn-primary" id="cfg_save_btn">저장</button>
+						<?php elseif ($readOnlyNote) : ?>
+						<p class="text-muted mb-0">
+							총판 계정은 <strong>조회만</strong> 가능합니다. 전역 기본값은 본사가, 대리점별 설정은 해당 대리점이 관리합니다.
+						</p>
 						<?php else : ?>
 						<p class="text-muted mb-0">조회 전용 계정은 설정을 변경할 수 없습니다.</p>
 						<?php endif; ?>

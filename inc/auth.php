@@ -177,9 +177,16 @@ function admin_can_access_route(string $route): bool
         return false;
     }
 
-    // 멀티테넌시: 출금 정책 — 본사(전역) 또는 대리점(자기 설정)
+    // 결제 설정(카드·계좌) — 대리점 본인 + 본사(대행 설정)만. 총판은 대상이 아니라서
+    // 라우트에서 막는다(열어두면 화면에 "쓸 수 없습니다" 안내만 뜨는 빈 화면이 된다).
+    if (str_starts_with($route, 'withdrawal/payment-setup')) {
+        return admin_org_level() === Org::LEVEL_AGENCY || admin_has_role('super');
+    }
+
+    // 멀티테넌시: 출금 정책 — 대리점(자기 설정 편집) · 본사(대리점 지정 편집) · 총판(하위 조회만).
+    // 총판을 아예 막아두면 자기 하위 대리점의 보증금·수수료 정책을 확인할 방법이 없어진다.
     if ($route === 'withdrawal/settings') {
-        return admin_org_level() === Org::LEVEL_AGENCY;
+        return in_array(admin_org_level(), [Org::LEVEL_AGENCY, Org::LEVEL_DISTRIBUTOR, Org::LEVEL_ADMIN], true);
     }
 
     $map = admin_route_area_map();

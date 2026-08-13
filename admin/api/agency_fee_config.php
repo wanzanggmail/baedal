@@ -32,11 +32,26 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
-// 멀티테넌시: 대리점=자기 설정 / 그 외=전역 기본
+// 멀티테넌시: 대리점=자기 설정 / 본사=전역 기본 / 총판=전역 기본을 "조회만"
 require_once INC_PATH . '/Org.php';
-$cfgOrgId = admin_org_level() === Org::LEVEL_AGENCY ? admin_org_id() : null;
+$level    = admin_org_level();
+$isAgency = $level === Org::LEVEL_AGENCY;
+$isHq     = $level === Org::LEVEL_ADMIN;
+$cfgOrgId = $isAgency ? admin_org_id() : null;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+// ⚠️ 전역 기본값(org_id NULL)은 **본사만** 바꾼다.
+// 총판도 이 화면의 라우트·쓰기 권한을 통과하는데, 저장 대상이 NULL이라 그대로 두면
+// 총판이 누른 저장이 **전용 설정이 없는 모든 대리점**의 기본값을 덮어쓴다(테넌시 유출).
+if ($method === 'POST' && !$isAgency && !$isHq) {
+    http_response_code(403);
+    echo json_encode([
+        'ok'      => false,
+        'message' => '총판 계정은 대행수수료 기본값을 변경할 수 없습니다. (조회만 가능 — 전역 기본은 본사, 대리점별 설정은 해당 대리점이 관리)',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 if ($method === 'GET') {
     try {
