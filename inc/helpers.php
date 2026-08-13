@@ -355,6 +355,27 @@ function nav_accordion_show(string $prefix): string
     return str_starts_with($r, $prefix) ? ' show' : '';
 }
 
+/**
+ * 메뉴 그룹이 접두사 하나로 안 떨어질 때 쓰는 버전 — 라우트를 직접 나열한다.
+ * (예: 「정산」과 「수수료·채권」이 둘 다 `settlement/`로 시작해서 접두사로는 구분이 안 된다.)
+ *
+ * @param list<string> $routes
+ */
+function nav_accordion_show_any(array $routes): string
+{
+    global $route;
+
+    return in_array($route ?? '', $routes, true) ? ' show' : '';
+}
+
+/** 여러 라우트 중 하나면 활성 (목록↔상세처럼 한 메뉴가 여러 라우트를 대표할 때) */
+function nav_active_any(array $routes): string
+{
+    global $route;
+
+    return in_array($route ?? '', $routes, true) ? ' active' : '';
+}
+
 /** 라이더 앱: 현재 라우트와 일치 */
 function rider_nav_active(string $key): string
 {

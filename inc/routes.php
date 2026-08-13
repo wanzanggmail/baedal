@@ -17,7 +17,6 @@ return [
     'promotion' => ['title' => '프로모션 지급', 'view' => 'promotion'],
     'promotion/detail' => ['title' => '프로모션 지급 상세', 'view' => 'promotion_detail'],
     'deduction/agency-fee' => ['title' => '선공제(대행 수수료) 설정', 'view' => 'deduction_agency_fee'],
-    'deduction/advance' => ['title' => '선지급(대여금) 입력', 'view' => 'advance_input'],
     'deduction/debts' => ['title' => '미수금 원장', 'view' => 'debt_list'],
     'deduction/lease-fees' => ['title' => '리스 수수료 배분', 'view' => 'lease_fee_report'],
     'withdrawal/list' => ['title' => '출금 신청 목록', 'view' => 'withdrawal_list'],
