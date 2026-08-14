@@ -43,6 +43,49 @@ if ($isAgency) {
 
 $cfg     = WithdrawalConfig::get($agencyId > 0 ? $agencyId : null);
 $reserve = (int) $cfg['reserve_amount'];
+
+// 행별 상태를 미리 계산한다 — 보증금 미달은 서버에서 바로 판정해 API 호출조차 하지 않는다.
+// (잔액 ≤ 보증금이면 출금 가능액이 0이라 계산해 볼 것도 없다.)
+$prepared = [];
+foreach ($rows as $r) {
+    $balance = (int) $r['balance'];
+    $hasBank = trim((string) $r['bank_code']) !== '' && trim((string) $r['bank_account']) !== '';
+    $below   = $balance <= $reserve;
+
+    // 사유는 **겹쳐서** 보여준다. 하나만 보여주면 "보증금 미달이라 숨겼다"고 해놓고
+    // 화면엔 계좌 미등록만 떠서, 왜 감춰졌는지 알 수 없게 된다.
+    $reasons = [];
+    if ((int) $r['withdrawal_hold'] === 1) {
+        $reasons[] = '출금 보류 상태';
+    }
+    if ((int) $r['open_req'] > 0) {
+        $reasons[] = '처리 중인 신청 있음';
+    }
+    if (!$hasBank) {
+        $reasons[] = '출금 계좌 미등록';
+    }
+    if ($below) {
+        $reasons[] = sprintf(
+            '보증금 미달(잔액 %s / 보증금 %s · %s원 더 필요)',
+            number_format($balance),
+            number_format($reserve),
+            number_format(max(0, $reserve - $balance) + 1)
+        );
+    }
+
+    $prepared[] = [
+        'r'        => $r,
+        'balance'  => $balance,
+        'has_bank' => $hasBank,
+        'below'    => $below,
+        'blocked'  => $reasons !== [],
+        'reason'   => implode(' · ', $reasons),
+    ];
+}
+
+$cntAll   = count($prepared);
+$cntBelow = count(array_filter($prepared, static fn (array $p): bool => $p['below']));
+$cntReady = $cntAll - $cntBelow;
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -82,9 +125,26 @@ $reserve = (int) $cfg['reserve_amount'];
 	</div>
 
 	<div class="card card-flush">
-		<div class="card-header pt-5">
-			<h3 class="card-title fw-bold">주정산 라이더 <span class="text-muted fs-7 ms-1"><?= count($rows) ?>명</span></h3>
-			<div class="card-toolbar">
+		<div class="card-header pt-5 flex-wrap gap-3">
+			<h3 class="card-title fw-bold m-0">
+				주정산 라이더
+				<span class="text-muted fs-7 ms-1">출금 가능 <?= number_format($cntReady) ?>명 / 전체 <?= number_format($cntAll) ?>명</span>
+			</h3>
+			<div class="card-toolbar gap-3 flex-wrap">
+				<?php // 보증금 미달자는 기본으로 감춘다 — 목록 대부분이 "출금 불가"로 차면 정작 처리할 사람이 안 보인다. ?>
+				<div class="d-flex align-items-center gap-4">
+					<label class="form-check form-check-sm form-check-custom form-check-solid m-0">
+						<input class="form-check-input wp-filter" type="radio" name="wp_scope" value="ready" checked />
+						<span class="form-check-label fs-8 fw-semibold">출금 가능만</span>
+					</label>
+					<label class="form-check form-check-sm form-check-custom form-check-solid m-0">
+						<input class="form-check-input wp-filter" type="radio" name="wp_scope" value="all" />
+						<span class="form-check-label fs-8 fw-semibold">
+							전체 보기
+							<?php if ($cntBelow > 0) : ?><span class="text-muted">(보증금 미달 <?= number_format($cntBelow) ?>명 포함)</span><?php endif; ?>
+						</span>
+					</label>
+				</div>
 				<div class="d-flex align-items-center position-relative">
 					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
 					<input type="text" id="wp_search" class="form-control form-control-sm form-control-solid w-200px ps-11" placeholder="이름·코드 검색" />
@@ -105,16 +165,16 @@ $reserve = (int) $cfg['reserve_amount'];
 						</tr>
 					</thead>
 					<tbody id="wp_tbody">
-						<?php if ($rows === []) : ?>
+						<?php if ($prepared === []) : ?>
 						<tr><td colspan="6" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
-						<?php else : foreach ($rows as $r) :
-						    $hasBank = trim((string) $r['bank_code']) !== '' && trim((string) $r['bank_account']) !== '';
-						    $blocked = !$hasBank
-						        || (int) $r['withdrawal_hold'] === 1
-						        || (int) $r['open_req'] > 0
-						        || (int) $r['balance'] <= 0;
+						<?php else : foreach ($prepared as $p) :
+						    $r       = $p['r'];
+						    $hasBank = $p['has_bank'];
+						    $blocked = $p['blocked'];
 						    ?>
 						<tr data-rid="<?= (int) $r['id'] ?>"
+							data-below="<?= $p['below'] ? '1' : '0' ?>"
+							class="<?= $p['below'] ? 'd-none' : '' ?>"
 							data-search="<?= htmlspecialchars(mb_strtolower($r['name'] . ' ' . $r['rider_code']), ENT_QUOTES, 'UTF-8') ?>">
 							<td>
 								<span class="fw-bold text-gray-900"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span>
@@ -133,14 +193,8 @@ $reserve = (int) $cfg['reserve_amount'];
 									value="<?= htmlspecialchars($today, ENT_QUOTES, 'UTF-8') ?>" max="<?= htmlspecialchars($today, ENT_QUOTES, 'UTF-8') ?>" />
 							</td>
 							<td class="wp-info text-muted fs-8">
-								<?php if ((int) $r['withdrawal_hold'] === 1) : ?>
-									<span class="text-danger">출금 보류 상태</span>
-								<?php elseif ((int) $r['open_req'] > 0) : ?>
-									<span class="text-danger">처리 중인 신청이 있습니다</span>
-								<?php elseif (!$hasBank) : ?>
-									<span class="text-danger">출금 계좌 미등록</span>
-								<?php elseif ((int) $r['balance'] <= 0) : ?>
-									잔액 없음
+								<?php if ($p['reason'] !== '') : ?>
+									<span class="<?= $p['below'] ? 'text-muted' : 'text-danger' ?>"><?= htmlspecialchars($p['reason'], ENT_QUOTES, 'UTF-8') ?></span>
 								<?php else : ?>
 									<span class="text-muted">조회 중…</span>
 								<?php endif; ?>
@@ -153,7 +207,9 @@ $reserve = (int) $cfg['reserve_amount'];
 					</tbody>
 				</table>
 			</div>
-			<div id="wp_noresult" class="text-center text-muted py-6 d-none">검색 결과가 없습니다.</div>
+			<div id="wp_noresult" class="text-center text-muted py-6 d-none">
+				<span id="wp_noresult_msg">검색 결과가 없습니다.</span>
+			</div>
 		</div>
 	</div>
 
@@ -272,17 +328,35 @@ $reserve = (int) $cfg['reserve_amount'];
 				});
 		});
 
-		// 검색
+		// 검색 + 범위(라디오)를 함께 적용한다. 둘 중 하나만 보고 d-none을 토글하면
+		// 검색했다가 지웠을 때 감춰뒀던 보증금 미달자가 같이 튀어나온다.
 		var search = document.getElementById('wp_search');
-		search.addEventListener('input', function () {
+		function currentScope() {
+			var checked = document.querySelector('.wp-filter:checked');
+			return checked ? checked.value : 'ready';
+		}
+		function applyFilter() {
 			var q = search.value.trim().toLowerCase();
+			var scope = currentScope();
 			var shown = 0;
 			tbody.querySelectorAll('tr[data-rid]').forEach(function (tr) {
-				var ok = !q || tr.getAttribute('data-search').indexOf(q) !== -1;
+				var matchQ = !q || tr.getAttribute('data-search').indexOf(q) !== -1;
+				var matchScope = scope === 'all' || tr.getAttribute('data-below') !== '1';
+				var ok = matchQ && matchScope;
 				tr.classList.toggle('d-none', !ok);
 				if (ok) shown++;
 			});
 			document.getElementById('wp_noresult').classList.toggle('d-none', shown !== 0);
+			// 검색 때문인지, "출금 가능만" 필터 때문인지 구분해서 안내한다.
+			document.getElementById('wp_noresult_msg').textContent = q
+				? '검색 결과가 없습니다.'
+				: (scope === 'ready'
+					? '지금 출금할 수 있는 라이더가 없습니다. (보증금 미달자는 「전체 보기」에서 확인)'
+					: '표시할 라이더가 없습니다.');
+		}
+		search.addEventListener('input', applyFilter);
+		document.querySelectorAll('.wp-filter').forEach(function (el) {
+			el.addEventListener('change', applyFilter);
 		});
 	})();
 	</script>
