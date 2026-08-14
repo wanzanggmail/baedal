@@ -7,6 +7,7 @@ declare(strict_types=1);
  *
  * GET  ?rider_id=N&to=YYYY-MM-DD  — 그 일자까지 출금하면 얼마·수수료 얼마인지 미리보기
  * POST { action:'apply', rider_id, to }  — 신청 + 즉시 이체까지 실행
+ * POST { action:'apply_bulk', items:[{rider_id,to},…] } — 일괄. 건별 처리, 실패해도 계속(부분 성공)
  *
  * 권한: 대리점(agency) 운영·정산·총괄 계정만. 자기 소속 라이더만 대상.
  *
@@ -147,29 +148,34 @@ $raw  = file_get_contents('php://input');
 $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
 $body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}', true) : $_POST;
 
-if (trim((string) ($body['action'] ?? '')) !== 'apply') {
-    $err('action=apply', 400);
+$action = trim((string) ($body['action'] ?? ''));
+if (!in_array($action, ['apply', 'apply_bulk'], true)) {
+    $err('action=apply 또는 apply_bulk', 400);
 }
 
-$riderId = (int) ($body['rider_id'] ?? 0);
-if ($riderId < 1) {
-    $err('라이더를 선택하세요.');
-}
-$rider  = $assertMine($riderId);
-$toDate = $normDate($body['to'] ?? null);
+/**
+ * 라이더 1명 출금 대행 — 신청 + 즉시 이체.
+ *
+ * 단건과 일괄이 **같은 함수**를 쓴다. 일괄만 따로 구현하면 수수료·보증금·사이클 점유
+ * 규칙이 갈라질 수 있어서다.
+ *
+ * @return array{ok:bool, name:string, amount:int, request_id:int, message:string}
+ */
+$payOne = static function (int $riderId, ?string $toDate) use ($assertMine): array {
+    $rider = $assertMine($riderId);
 
-try {
     // 1) 신청 — 라이더 본인 신청과 동일 경로(수수료·보증금·사이클 점유 일치)
     $req   = Withdrawal::applyForRider($riderId, $toDate);
     $reqId = (int) ($req['db_id'] ?? 0);
     if ($reqId < 1) {
-        $err('출금 신청 ID를 확인할 수 없습니다.', 500);
+        throw new RuntimeException('출금 신청 ID를 확인할 수 없습니다.');
     }
 
     // 2) 즉시 이체 — 대리점이 「출금하기」를 누른 것이므로 확정까지 진행한다.
-    $res   = Withdrawal::executeTransfers([$reqId]);
-    $first = $res['results'][0] ?? null;
-    $paid  = (int) $res['completed'] > 0;
+    $res    = Withdrawal::executeTransfers([$reqId]);
+    $first  = $res['results'][0] ?? null;
+    $paid   = (int) $res['completed'] > 0;
+    $amount = (int) ($req['amount'] ?? 0);
 
     AuditLog::record(
         'withdrawal.proxy',
@@ -179,25 +185,101 @@ try {
             (string) $rider['name'],
             (string) $rider['rider_code'],
             $toDate !== null ? $toDate . '까지' : '전액',
-            number_format((int) ($req['amount'] ?? 0)),
+            number_format($amount),
             $paid ? '이체 완료' : '이체 실패'
         )
     );
 
-    if (!$paid) {
-        echo json_encode([
-            'ok'      => false,
-            'message' => '이체 실패: ' . (string) ($first['message'] ?? '사유 미상') . ' (신청 #' . $reqId . ' 은 남아 있어 재시도할 수 있습니다)',
-        ], JSON_UNESCAPED_UNICODE);
+    return [
+        'ok'         => $paid,
+        'name'       => (string) $rider['name'],
+        'amount'     => $amount,
+        'request_id' => $reqId,
+        'message'    => $paid
+            ? sprintf('%s님에게 %s원 지급 완료', (string) $rider['name'], number_format($amount))
+            : '이체 실패: ' . (string) ($first['message'] ?? '사유 미상') . ' (신청 #' . $reqId . ' 은 남아 있어 재시도할 수 있습니다)',
+    ];
+};
+
+// ── 일괄 출금 ────────────────────────────────────────────────
+// 건별로 처리하고 **실패해도 멈추지 않는다**(부분 성공 허용, LOGIC §5.4).
+// 한 명이 막혔다고 나머지를 못 받으면 대행의 의미가 없다.
+if ($action === 'apply_bulk') {
+    $items = (array) ($body['items'] ?? []);
+    if ($items === []) {
+        $err('출금할 라이더를 선택하세요.');
+    }
+    if (count($items) > 200) {
+        $err('한 번에 200명까지만 처리할 수 있습니다.');
+    }
+
+    $paidCount = 0;
+    $paidTotal = 0;
+    $errors    = [];
+
+    foreach ($items as $it) {
+        $rid = (int) ($it['rider_id'] ?? 0);
+        if ($rid < 1) {
+            continue;
+        }
+        try {
+            $r = $payOne($rid, $normDate($it['to'] ?? null));
+            if ($r['ok']) {
+                $paidCount++;
+                $paidTotal += $r['amount'];
+            } else {
+                $errors[] = $r['name'] . ': ' . $r['message'];
+            }
+        } catch (Throwable $e) {
+            // 이름을 못 가져오는 경우까지 고려해 id로라도 남긴다.
+            $nm = (string) (db_row('SELECT name FROM riders WHERE id = ? LIMIT 1', [$rid])['name'] ?? ('#' . $rid));
+            $errors[] = $nm . ': ' . $e->getMessage();
+        }
+    }
+
+    $msg = sprintf('%d명 지급 완료 (합계 %s원)', $paidCount, number_format($paidTotal));
+    if ($errors !== []) {
+        $msg .= sprintf(' · 실패 %d명', count($errors));
+    }
+
+    AuditLog::record('withdrawal.proxy_bulk', 'bulk', sprintf(
+        '출금 대행 일괄 — 대상 %d명 · 지급 %d명(%s원) · 실패 %d명',
+        count($items),
+        $paidCount,
+        number_format($paidTotal),
+        count($errors)
+    ));
+
+    echo json_encode([
+        'ok'      => true,
+        'message' => $msg,
+        'paid'    => $paidCount,
+        'amount'  => $paidTotal,
+        'failed'  => count($errors),
+        'errors'  => $errors,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ── 단건 출금 ────────────────────────────────────────────────
+$riderId = (int) ($body['rider_id'] ?? 0);
+if ($riderId < 1) {
+    $err('라이더를 선택하세요.');
+}
+
+try {
+    $r = $payOne($riderId, $normDate($body['to'] ?? null));
+
+    if (!$r['ok']) {
+        echo json_encode(['ok' => false, 'message' => $r['message']], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     echo json_encode([
         'ok'         => true,
-        'message'    => sprintf('%s님에게 %s원 지급 완료', (string) $rider['name'], number_format((int) ($req['amount'] ?? 0))),
-        'request_id' => $reqId,
-        'amount'     => (int) ($req['amount'] ?? 0),
-        'fee'        => (int) ($req['withdrawal_fee'] ?? 0),
+        'message'    => $r['message'],
+        'request_id' => $r['request_id'],
+        'amount'     => $r['amount'],
     ], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);

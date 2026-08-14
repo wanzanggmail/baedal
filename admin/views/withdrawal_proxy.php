@@ -149,6 +149,7 @@ $cntReady = $cntAll - $cntBelow;
 					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
 					<input type="text" id="wp_search" class="form-control form-control-sm form-control-solid w-200px ps-11" placeholder="이름·코드 검색" />
 				</div>
+				<button type="button" class="btn btn-sm btn-primary" id="wp_bulk" disabled>선택 일괄 출금</button>
 			</div>
 		</div>
 		<div class="card-body pt-2">
@@ -156,6 +157,9 @@ $cntReady = $cntAll - $cntBelow;
 				<table class="table table-row-bordered align-middle fs-7 gy-3">
 					<thead>
 						<tr class="fw-bold text-muted">
+							<th class="w-40px">
+								<input class="form-check-input" type="checkbox" id="wp_check_all" title="보이는 출금 가능 건 전체 선택" />
+							</th>
 							<th class="min-w-140px">라이더</th>
 							<th class="min-w-100px">계좌</th>
 							<th class="min-w-100px text-end">지갑 잔액</th>
@@ -166,7 +170,7 @@ $cntReady = $cntAll - $cntBelow;
 					</thead>
 					<tbody id="wp_tbody">
 						<?php if ($prepared === []) : ?>
-						<tr><td colspan="6" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
+						<tr><td colspan="7" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
 						<?php else : foreach ($prepared as $p) :
 						    $r       = $p['r'];
 						    $hasBank = $p['has_bank'];
@@ -176,6 +180,10 @@ $cntReady = $cntAll - $cntBelow;
 							data-below="<?= $p['below'] ? '1' : '0' ?>"
 							class="<?= $p['below'] ? 'd-none' : '' ?>"
 							data-search="<?= htmlspecialchars(mb_strtolower($r['name'] . ' ' . $r['rider_code']), ENT_QUOTES, 'UTF-8') ?>">
+							<td>
+								<?php // 차단 사유가 있으면 애초에 고를 수 없다. 미리보기 결과에 따라 JS가 다시 잠근다. ?>
+								<input class="form-check-input wp-check" type="checkbox" <?= $blocked ? 'disabled' : '' ?> />
+							</td>
 							<td>
 								<span class="fw-bold text-gray-900"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span>
 								<div class="text-muted fs-8"><?= htmlspecialchars((string) $r['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
@@ -230,6 +238,19 @@ $cntReady = $cntAll - $cntBelow;
 			});
 		}
 
+		// 출금 가능 여부가 바뀔 때 버튼과 체크박스를 함께 맞춘다.
+		// 불가로 바뀌면 이미 켜둔 체크도 풀어야 한다 — 안 그러면 일괄 출금에 섞여 들어간다.
+		function setRowPayable(tr, ok) {
+			var btn = tr.querySelector('.wp-pay');
+			var chk = tr.querySelector('.wp-check');
+			btn.disabled = !ok;
+			if (chk) {
+				chk.disabled = !ok;
+				if (!ok) chk.checked = false;
+			}
+			syncSelection();
+		}
+
 		// 선택한 일자 기준으로 "얼마 나가고 수수료가 얼마인지"를 서버에서 받아 그 행에 표시한다.
 		function loadPreview(tr) {
 			var rid = tr.getAttribute('data-rid');
@@ -246,7 +267,7 @@ $cntReady = $cntAll - $cntBelow;
 
 					if (res.block) {
 						cell.innerHTML = '<span class="text-danger">' + esc(res.block) + '</span>';
-						btn.disabled = true;
+						setRowPayable(tr, false);
 						return;
 					}
 
@@ -256,7 +277,7 @@ $cntReady = $cntAll - $cntBelow;
 							msg = '보증금(' + won(p.reserve_amount) + ') 때문에 ' + won(p.blocked_shortfall) + ' 더 쌓여야 출금됩니다.';
 						}
 						cell.innerHTML = '<span class="text-muted">' + esc(msg) + '</span>';
-						btn.disabled = true;
+						setRowPayable(tr, false);
 						return;
 					}
 
@@ -276,20 +297,61 @@ $cntReady = $cntAll - $cntBelow;
 					   + won(p.payout_amount) + '</span>'
 					   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
 					cell.innerHTML = h;
-					btn.disabled = false;
 					btn.setAttribute('data-amount', p.payout_amount);
+					setRowPayable(tr, true);
 				})
 				.catch(function (e) {
 					cell.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
-					btn.disabled = true;
+					setRowPayable(tr, false);
 				});
 		}
 
 		var tbody = document.getElementById('wp_tbody');
+		var bulkBtn = document.getElementById('wp_bulk');
+		var checkAll = document.getElementById('wp_check_all');
+
+		/** 지금 화면에 보이면서 고를 수 있는 행 (숨겨진 행은 일괄 대상에서 제외한다) */
+		function selectableRows() {
+			return Array.from(tbody.querySelectorAll('tr[data-rid]')).filter(function (tr) {
+				var chk = tr.querySelector('.wp-check');
+				return chk && !chk.disabled && !tr.classList.contains('d-none');
+			});
+		}
+		function checkedRows() {
+			return selectableRows().filter(function (tr) { return tr.querySelector('.wp-check').checked; });
+		}
+
+		/** 선택 개수·합계 표시와 전체선택 체크박스의 상태(부분선택 포함)를 갱신 */
+		function syncSelection() {
+			var sel = checkedRows();
+			var total = sel.reduce(function (s, tr) {
+				return s + Number(tr.querySelector('.wp-pay').getAttribute('data-amount') || 0);
+			}, 0);
+
+			bulkBtn.disabled = sel.length === 0;
+			bulkBtn.textContent = sel.length
+				? '선택 일괄 출금 ' + sel.length + '명 · ' + won(total)
+				: '선택 일괄 출금';
+
+			var avail = selectableRows();
+			checkAll.checked = avail.length > 0 && sel.length === avail.length;
+			checkAll.indeterminate = sel.length > 0 && sel.length < avail.length;
+			checkAll.disabled = avail.length === 0;
+		}
 
 		// 최초 진입 시 오늘 날짜 기준으로 전부 조회(막힌 행은 건너뜀)
 		tbody.querySelectorAll('tr[data-rid]').forEach(function (tr) {
 			if (!tr.querySelector('.wp-pay').disabled) loadPreview(tr);
+		});
+		syncSelection();
+
+		checkAll.addEventListener('change', function () {
+			var on = checkAll.checked;
+			selectableRows().forEach(function (tr) { tr.querySelector('.wp-check').checked = on; });
+			syncSelection();
+		});
+		tbody.addEventListener('change', function (ev) {
+			if (ev.target.classList.contains('wp-check')) syncSelection();
 		});
 
 		tbody.addEventListener('change', function (ev) {
@@ -344,8 +406,14 @@ $cntReady = $cntAll - $cntBelow;
 				var matchScope = scope === 'all' || tr.getAttribute('data-below') !== '1';
 				var ok = matchQ && matchScope;
 				tr.classList.toggle('d-none', !ok);
+				// 숨겨지는 행의 체크는 푼다 — 안 보이는 사람이 일괄 출금에 딸려 나가면 안 된다.
+				if (!ok) {
+					var chk = tr.querySelector('.wp-check');
+					if (chk) chk.checked = false;
+				}
 				if (ok) shown++;
 			});
+			syncSelection();
 			document.getElementById('wp_noresult').classList.toggle('d-none', shown !== 0);
 			// 검색 때문인지, "출금 가능만" 필터 때문인지 구분해서 안내한다.
 			document.getElementById('wp_noresult_msg').textContent = q
@@ -357,6 +425,59 @@ $cntReady = $cntAll - $cntBelow;
 		search.addEventListener('input', applyFilter);
 		document.querySelectorAll('.wp-filter').forEach(function (el) {
 			el.addEventListener('change', applyFilter);
+		});
+
+		// ── 일괄 출금 ──────────────────────────────
+		// 서버가 건별로 이체하고 실패해도 다음 건을 계속한다(부분 성공 허용, LOGIC §5.4).
+		bulkBtn.addEventListener('click', function () {
+			var rows = checkedRows();
+			if (rows.length === 0) return;
+
+			var items = rows.map(function (tr) {
+				return {
+					rider_id: Number(tr.getAttribute('data-rid')),
+					to: tr.querySelector('.wp-date').value,
+					name: tr.querySelector('.fw-bold').textContent.trim(),
+					amount: Number(tr.querySelector('.wp-pay').getAttribute('data-amount') || 0),
+				};
+			});
+			var total = items.reduce(function (s, i) { return s + i.amount; }, 0);
+
+			var preview = items.slice(0, 5).map(function (i) { return '· ' + i.name + ' ' + won(i.amount); }).join('\n');
+			if (items.length > 5) preview += '\n… 외 ' + (items.length - 5) + '명';
+
+			if (!confirm(items.length + '명에게 합계 ' + won(total) + '을 지금 이체합니다.\n\n'
+				+ preview + '\n\n되돌릴 수 없습니다. 진행할까요?')) return;
+
+			bulkBtn.disabled = true;
+			bulkBtn.textContent = '처리 중… (0/' + items.length + ')';
+			rows.forEach(function (tr) { tr.querySelector('.wp-pay').disabled = true; });
+
+			fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify({
+					action: 'apply_bulk',
+					items: items.map(function (i) { return { rider_id: i.rider_id, to: i.to }; }),
+				}),
+			})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '일괄 출금 실패');
+					showToast(res.message, (res.failed || 0) === 0);
+					if (res.errors && res.errors.length) {
+						alert('처리하지 못한 건:\n\n' + res.errors.slice(0, 15).join('\n')
+							+ (res.errors.length > 15 ? '\n… 외 ' + (res.errors.length - 15) + '건' : ''));
+					}
+					setTimeout(function () { location.reload(); }, 1200);
+				})
+				.catch(function (e) {
+					showToast(e.message, false);
+					bulkBtn.disabled = false;
+					syncSelection();
+					rows.forEach(function (tr) { loadPreview(tr); });
+				});
 		});
 	})();
 	</script>
