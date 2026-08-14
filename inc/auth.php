@@ -177,6 +177,12 @@ function admin_can_access_route(string $route): bool
         return false;
     }
 
+    // 출금 대행 — 대리점이 소속 라이더 출금을 대신 실행하는 화면이라 대리점 전용.
+    // (본사·총판은 남의 라이더 돈을 직접 빼는 일이 없어야 한다.)
+    if (str_starts_with($route, 'withdrawal/proxy')) {
+        return admin_org_level() === Org::LEVEL_AGENCY;
+    }
+
     // 결제 설정(카드·계좌) — 대리점 본인 + 본사(대행 설정)만. 총판은 대상이 아니라서
     // 라우트에서 막는다(열어두면 화면에 "쓸 수 없습니다" 안내만 뜨는 빈 화면이 된다).
     if (str_starts_with($route, 'withdrawal/payment-setup')) {

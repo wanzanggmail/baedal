@@ -149,7 +149,7 @@ $route = $route ?? '';
 										<!--begin:지급·출금-->
 										<?php if (admin_can_access_route('withdrawal/list')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
-										    'withdrawal/list', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
+										    'withdrawal/list', 'withdrawal/proxy', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
 										    'withdrawal/wallet-ledger', 'withdrawal/download', 'withdrawal/complete',
 										    'promotion', 'promotion/detail',
 										]) ?>">
@@ -167,7 +167,15 @@ $route = $route ?? '';
 														<span class="menu-title">출금 신청 목록</span>
 													</a>
 												</div>
+												<?php // 화면·API 모두 대리점 전용이라 레벨로 직접 판단한다. admin_can_access_route()는
+											      // super를 무조건 통과시켜서, 본사에 "대리점 계정만" 안내만 뜨는 빈 메뉴가 생긴다. ?>
 												<?php if (admin_org_level() === Org::LEVEL_AGENCY) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/proxy') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/proxy'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">출금 대행</span>
+													</a>
+												</div>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/daily-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/daily-payout'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>

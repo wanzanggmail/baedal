@@ -26,6 +26,7 @@ return [
     'withdrawal/wallet-ledger' => ['title' => '지갑 입출금', 'view' => 'wallet_ledger'],
     'withdrawal/agency-payout' => ['title' => '대리점 자체 인출', 'view' => 'agency_payout'],
     'withdrawal/daily-payout' => ['title' => '일일정산 지급 리스트', 'view' => 'daily_payout'],
+    'withdrawal/proxy' => ['title' => '출금 대행', 'view' => 'withdrawal_proxy'],
     'withdrawal/payment-setup' => ['title' => '결제 설정(카드·계좌)', 'view' => 'payment_setup'],
     'content/notices' => ['title' => '공지 관리', 'view' => 'content_notices'],
     'content/banners' => ['title' => '광고 배너', 'view' => 'content_banners'],
