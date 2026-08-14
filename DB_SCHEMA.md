@@ -248,6 +248,14 @@ PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 �
 `Disbursement::transfer()`가 이 계좌 기준으로 이체(현재 `MockOpenBankingGateway`).
 
 > **Mock→Real 교체 지점:** `inc/PgGateway.php`(`PgGatewayFactory::make()`), `inc/OpenBankingGateway.php`(`OpenBankingGatewayFactory::make()`) — 실 스펙 도착 시 이 두 팩토리만 교체하면 스키마·상위 로직은 그대로 재사용.
+>
+> 🆕 **(2026-08-14 · 08-15 정밀 재검토) PG사 확정 — 위루트(weroutefincorp.com), 빌링 API 기반.** 분석 전문은 [REF_PG_WEROUTE.md](REF_PG_WEROUTE.md). **분석만 완료, 코드 미착수.**
+>
+> 🔴 **가장 중요 — 자금 모델 충돌:** 위루트 **대사 API**(`/docs/reconciliation`, 별도 문서)의 정산 응답을 보면 승인액 1,000원 → 실입금 `settle_amount` 960~967원이고 `settle_dt`/`deposit_dt`/`deposit_status`가 따로 있다. 즉 **PG가 약 3.3% 수수료를 떼고 며칠 뒤 입금**한다. 그런데 `PgPayment`는 결제 성공 즉시 `AgencyWallet::credit(net)`으로 전액을 지갑에 올리고 라이더 이체가 그 잔액을 근거로 나간다 → **금액 부족 + 실제 은행잔고 도착 전 이체 실패** 위험. 코드가 아니라 **정책 결정 사항**(누가 PG 수수료를 부담하고 지갑은 언제 올릴지).
+>
+> **그 밖의 갭:** 인증 체계가 2종(거래=`Authorization: {pay_key}` 원문 / 대사=`External-Api: Bearer {API_KEY}` + 로그인 `access_token` 30h) → **자격증명 6개** 저장소 필요. `pg_payments.ord_num` 컬럼 신설 필수(위루트는 결제 *전에* 주문번호를 요구하는데 우리는 결제 후에 id가 생김). `agency_cards`에 `bill_code`/`issuer_code` 없음. 카드 등록 폼이 카드번호·유효기간·비번·생년월일을 안 받음(자체 `MOCK-BK-` 생성 중). 웹훅 수신 엔드포인트 자체가 없음(`sign_key` 발급처 문서에 없음).
+>
+> ✅ **확인된 호환성:** `system_codes(category='bank')` 13종이 위루트 은행코드표와 **전부 일치**. 단, 발급사코드(`issuer_code`: 01비씨/02국민…)와 은행코드(`acct_bank_code`: 003기업/004국민…)는 **다른 체계**라 혼동 주의.
 
 ---
 

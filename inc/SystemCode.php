@@ -10,6 +10,7 @@ final class SystemCode
     /** @var list<string> */
     public const CATEGORIES = [
         'bank',
+        'card_issuer',
         'vehicle',
         'rider_status',
         'settlement_status',
@@ -23,6 +24,7 @@ final class SystemCode
     {
         return [
             'bank'              => '은행 코드',
+            'card_issuer'       => '카드 발급사/매입사 코드(PG)',
             'vehicle'           => '차량 유형',
             'rider_status'      => '라이더 상태',
             'settlement_status' => '정산 처리 상태',
@@ -30,6 +32,44 @@ final class SystemCode
             'platform'          => '배달 플랫폼',
             'deduction_kind'    => '차감 종류',
         ];
+    }
+
+    /**
+     * ⚠️ `bank`(은행)와 `card_issuer`(카드사)는 **서로 다른 코드 체계**다.
+     * PG(위루트) 기준으로 같은 숫자가 다른 뜻을 갖는다 — 예: `004`는 은행이면 국민은행,
+     * 발급사면 삼성카드(`04`). 필드도 다르다:
+     *   - `acct_bank_code`  → `bank`        (정산 입금계좌·라이더 출금계좌)
+     *   - `issuer_code` / `acquirer_code` → `card_issuer` (카드 결제 승인 결과)
+     * 섞어 쓰면 조용히 틀리므로 조회 헬퍼를 분리해 둔다.
+     */
+    public static function bankLabel(string $code): string
+    {
+        return self::labelOf('bank', $code);
+    }
+
+    public static function cardIssuerLabel(string $code): string
+    {
+        // PG는 2자리(`04`)로 주는데 우리 저장이 3자리일 수 있어 양쪽을 본다.
+        $code = trim($code);
+        $label = self::labelOf('card_issuer', $code);
+        if ($label === '' && $code !== '' && strlen($code) < 3) {
+            $label = self::labelOf('card_issuer', str_pad($code, 2, '0', STR_PAD_LEFT));
+        }
+
+        return $label;
+    }
+
+    private static function labelOf(string $category, string $code): string
+    {
+        if ($code === '' || !db_table_exists('system_codes')) {
+            return '';
+        }
+        $row = db_row(
+            'SELECT label FROM system_codes WHERE category = ? AND code = ? LIMIT 1',
+            [$category, $code]
+        );
+
+        return (string) ($row['label'] ?? '');
     }
 
     /**

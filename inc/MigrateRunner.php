@@ -58,6 +58,7 @@ final class MigrateRunner
         self::migratePromotionDeductionColumns();
         self::migrateOrgCeoBizColumns();
         self::migrateWithdrawalFeeShare();
+        self::migrateCardIssuerCodes();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1310,6 +1311,60 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
         echo 'OK    withdrawal_config ' . count($adds) . "개 컬럼 추가\n";
+    }
+
+    /**
+     * PG(위루트) 발급사/매입사 코드 마스터 — `issuer_code`·`acquirer_code` 해석용.
+     *
+     * ⚠️ 은행코드(`bank`)와 **다른 체계**다. 같은 숫자가 다른 뜻(04=삼성카드 vs 004=국민은행).
+     * 우리 `bank` 13종은 위루트 은행코드표와 이미 전부 일치해 손댈 것이 없다(2026-08-15 대조).
+     */
+    private static function migrateCardIssuerCodes(): void
+    {
+        echo "== system_codes: card_issuer(PG 발급사/매입사) ==\n";
+
+        if (!db_table_exists('system_codes')) {
+            echo "SKIP  system_codes (테이블 없음)\n";
+
+            return;
+        }
+
+        // 위루트 「발급사/매입사 정의」 전문(2025-12-10 기준)
+        $codes = [
+            '01' => '비씨',   '02' => '국민',   '03' => '외환',   '04' => '삼성',
+            '06' => '신한',   '07' => '현대',   '08' => '롯데',   '09' => '한미',
+            '10' => '신세계', '11' => '씨티',   '12' => '농협',   '13' => '수협',
+            '14' => '평화',   '15' => '우리',   '16' => '하나',   '17' => '동남',
+            '18' => '주택',   '19' => '조흥',   '20' => '축협',   '21' => '광주',
+            '22' => '전북',   '23' => '제주',   '24' => '산은',   '25' => '해외비자',
+            '26' => '해외마스터', '27' => '해외다이너스', '28' => '해외AMX', '29' => '해외JCB',
+            '30' => '해외',   '31' => 'SK-OKCashBag', '32' => '우체국', '33' => 'MG새마을체크',
+            '34' => '중국은행체크', '38' => '은련', '39' => '해외DISCOVER', '46' => '카카오',
+            '47' => '강원',   '48' => '토스',   '49' => '신협',   '50' => 'IBK기업',
+            '51' => '케이뱅크', '99' => '기타',
+        ];
+
+        $added = 0;
+        $sort  = 0;
+        foreach ($codes as $code => $label) {
+            $sort += 10;
+            $exists = db_row(
+                'SELECT id FROM system_codes WHERE category = ? AND code = ? LIMIT 1',
+                ['card_issuer', $code]
+            );
+            if ($exists !== null) {
+                continue;
+            }
+            db_insert(
+                'INSERT INTO system_codes (category, code, label, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
+                ['card_issuer', $code, $label, $sort]
+            );
+            $added++;
+        }
+
+        echo $added > 0
+            ? "OK    card_issuer {$added}건 추가\n"
+            : "SKIP  card_issuer (이미 있음)\n";
     }
 
     private static function migratePgPaymentFeeSplit(): void
