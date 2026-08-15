@@ -87,7 +87,7 @@ $riderDetailUrl = static function (int $riderId): string {
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
-	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
+	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-column flex-md-row flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
 			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">대시보드</h1>
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
@@ -100,7 +100,8 @@ $riderDetailUrl = static function (int $riderId): string {
 				<li class="breadcrumb-item text-gray-900">요약</li>
 			</ul>
 		</div>
-		<div class="d-flex align-items-center gap-2 gap-lg-3">
+		<?php // 모바일: 기간 버튼·업로드 버튼을 제목 아래 줄로 내리고, 기간 버튼은 폭을 꽉 채워 날짜가 잘리지 않게 한다. ?>
+		<div class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center gap-2 gap-lg-3 mt-4 mt-md-0">
 			<?php $periodFrom = $period['from']; $periodTo = $period['to']; require INC_PATH . '/dashboard_range_picker.php'; ?>
 			<a href="<?= htmlspecialchars(admin_url('settlement/upload'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm fw-bold btn-primary">
 				<i class="ki-duotone ki-file-up fs-3"><span class="path1"></span><span class="path2"></span></i>

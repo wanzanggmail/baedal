@@ -20,7 +20,7 @@ $rangeDisplayText = $periodFrom === $periodTo ? $periodFrom : ($periodFrom . ' ~
 	data-kt-dashboard-range-from="<?= htmlspecialchars($periodFrom, ENT_QUOTES, 'UTF-8') ?>"
 	data-kt-dashboard-range-to="<?= htmlspecialchars($periodTo, ENT_QUOTES, 'UTF-8') ?>"
 	data-kt-dashboard-range-url="<?= htmlspecialchars($rangeBaseUrl, ENT_QUOTES, 'UTF-8') ?>"
-	class="btn btn-sm fw-bold btn-secondary d-flex align-items-center px-4" role="button">
+	class="btn btn-sm fw-bold btn-secondary d-flex align-items-center justify-content-between px-4" role="button">
 	<span class="text-gray-700 fw-bold" data-kt-dashboard-range-display><?= htmlspecialchars($rangeDisplayText, ENT_QUOTES, 'UTF-8') ?></span>
 	<i class="ki-duotone ki-calendar-8 fs-2 ms-2 me-0 text-gray-600">
 		<span class="path1"></span><span class="path2"></span><span class="path3"></span>

@@ -76,7 +76,7 @@ $chartData = [
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
-	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
+	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-column flex-md-row flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
 			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">
 				<?= $isHq ? '본사 대시보드' : '총판 대시보드' ?>
@@ -89,7 +89,8 @@ $chartData = [
 				<li class="breadcrumb-item text-gray-900">대리점 현황</li>
 			</ul>
 		</div>
-		<div class="d-flex align-items-center gap-2 gap-lg-3">
+		<?php // 모바일: 기간 버튼·조직관리 버튼을 제목 아래 줄로 내리고, 기간 버튼은 폭을 꽉 채워 날짜가 잘리지 않게 한다. ?>
+		<div class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center gap-2 gap-lg-3 mt-4 mt-md-0">
 			<?php $periodFrom = $period['from']; $periodTo = $period['to']; require INC_PATH . '/dashboard_range_picker.php'; ?>
 			<?php if ($isHq && admin_can_access_route('system/orgs')) : ?>
 			<a href="<?= $esc(admin_url('system/orgs')) ?>" class="btn btn-sm fw-bold btn-primary">
