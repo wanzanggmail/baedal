@@ -712,3 +712,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 </script>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
+
+<?php require_once INC_PATH . '/app_content_close.php'; ?>
+
+<?php require_once INC_PATH . '/app_content_close.php'; ?>

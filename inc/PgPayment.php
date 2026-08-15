@@ -41,9 +41,13 @@ final class PgPayment
         $fee   = PgFeeConfig::feeAmount($netAmount, $agencyId);
         $total = $netAmount + $fee;
 
+        // 주문번호는 **결제 전에** 채번한다 — 위루트가 요청 시점에 요구하는데 pg_payments.id는
+        // 결제가 성공해야 생기기 때문(순서 역전). 웹훅·대사·취소에서 우리 레코드를 찾는 키다.
+        $ordNum = self::makeOrderNo($agencyId);
+
         $cards = AgencyCard::activeForAgency($agencyId);
         if ($cards === []) {
-            $pgId = self::record($agencyId, $riderId, $uploadId, null, $netAmount, $fee, $total, 'failed', '', '등록된 카드가 없습니다.', 0, $adminId);
+            $pgId = self::record($agencyId, $riderId, $uploadId, null, $netAmount, $fee, $total, 'failed', '', '등록된 카드가 없습니다.', 0, $adminId, $ordNum);
 
             return self::result(false, $pgId, $netAmount, $fee, $total, '', '등록된 카드가 없습니다.', 0, null);
         }
@@ -51,14 +55,29 @@ final class PgPayment
         $gateway  = PgGatewayFactory::make();
         $attempts = 0;
         $lastFail = '';
+        $rider    = $riderId !== null && $riderId > 0
+            ? db_row('SELECT name, phone FROM riders WHERE id = ? LIMIT 1', [$riderId])
+            : null;
 
         foreach ($cards as $card) {
             $attempts++;
-            $res = $gateway->charge((string) $card['billing_key'], $total, ['mock_limit' => (int) ($card['mock_limit'] ?? 0)]);
+            // 카드를 바꿔 재시도할 때마다 주문번호도 새로 딴다 — 같은 ord_num으로 두 번 승인
+            // 요청이 나가면 PG 쪽에서 중복 주문으로 막히거나 대사가 꼬인다.
+            $tryOrdNum = $attempts === 1 ? $ordNum : self::makeOrderNo($agencyId);
+            $res = $gateway->charge(new PgChargeRequest(
+                billingKey: (string) $card['billing_key'],
+                amount: $total,
+                orderNo: $tryOrdNum,
+                buyerName: (string) ($rider['name'] ?? ''),
+                buyerPhone: preg_replace('/\D/', '', (string) ($rider['phone'] ?? '')) ?? '',
+                itemName: '라이더 정산금 조달',
+                installment: 0,
+                meta: ['mock_limit' => (int) ($card['mock_limit'] ?? 0)],
+            ));
             if ($res->success) {
                 $cardId = (int) $card['id'];
-                $pgId = db_transaction(static function () use ($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, $res, $attempts, $adminId): int {
-                    $id = self::record($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, 'success', $res->tid, '', $attempts, $adminId);
+                $pgId = db_transaction(static function () use ($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, $res, $attempts, $adminId, $tryOrdNum): int {
+                    $id = self::record($agencyId, $riderId, $uploadId, $cardId, $netAmount, $fee, $total, 'success', $res->tid, '', $attempts, $adminId, $tryOrdNum);
                     // 조달된 자금(net)을 대리점 잔액에 충전. 카드에는 net+수수료가 청구되지만
                     // 지갑에 들어가는 건 **수수료를 제외한 순액**이다(2026-08-12 갑 확정 ②).
                     AgencyWallet::credit($agencyId, $netAmount, 'pg_fund', $id, 'PG 카드결제 충전', $adminId);
@@ -78,9 +97,33 @@ final class PgPayment
         }
 
         // 전 카드 실패
-        $pgId = self::record($agencyId, $riderId, $uploadId, null, $netAmount, $fee, $total, 'failed', '', $lastFail, $attempts, $adminId);
+        $pgId = self::record($agencyId, $riderId, $uploadId, null, $netAmount, $fee, $total, 'failed', '', $lastFail, $attempts, $adminId, $ordNum);
 
         return self::result(false, $pgId, $netAmount, $fee, $total, '', $lastFail, $attempts, null);
+    }
+
+    /**
+     * PG 주문번호 채번 — 위루트 `ord_num` 최대 **30 byte** 제약을 지킨다.
+     *
+     * 형식: `PG{agency}-{YmdHis}-{rand4}`  (예: PG13-20260815093012-A1B2 = 24자)
+     * 같은 초에 여러 건이 나갈 수 있어 난수를 붙이고, 그래도 겹치면 다시 뽑는다.
+     */
+    public static function makeOrderNo(int $agencyId): string
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $no = sprintf('PG%d-%s-%s', $agencyId, date('YmdHis'), strtoupper(bin2hex(random_bytes(2))));
+            $no = substr($no, 0, 30);
+            if (!db_table_exists('pg_payments')) {
+                return $no;
+            }
+            $dup = db_row('SELECT id FROM pg_payments WHERE ord_num = ? LIMIT 1', [$no]);
+            if ($dup === null) {
+                return $no;
+            }
+        }
+
+        // 여기까지 오면 난수가 5번 연속 겹친 것 — 사실상 없지만 조용히 중복을 쓰진 않는다.
+        return substr(sprintf('PG%d-%s-%s', $agencyId, date('YmdHis'), strtoupper(bin2hex(random_bytes(5)))), 0, 30);
     }
 
     /**
@@ -302,7 +345,7 @@ final class PgPayment
      *    대리점이 카드로 더 낸 돈). 둘을 같은 규칙으로 착각하지 말 것.
      */
 
-    private static function record(int $agencyId, ?int $riderId, ?int $uploadId, ?int $cardId, int $net, int $fee, int $total, string $status, string $tid, string $failReason, int $attempts, ?int $adminId): int
+    private static function record(int $agencyId, ?int $riderId, ?int $uploadId, ?int $cardId, int $net, int $fee, int $total, string $status, string $tid, string $failReason, int $attempts, ?int $adminId, string $ordNum = ''): int
     {
         // 결제 시점 본사/총판/대리점 분배를 스냅샷으로 남긴다 — 나중에 org_fee_config
         // 요율이 바뀌어도 이 건의 실제 분배 내역은 그대로 보존된다.
@@ -312,39 +355,35 @@ final class PgPayment
         $distAmount = (int) $sp['distributor'];
         $agyAmount  = (int) $sp['agency'];
 
-        $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
+        $cols     = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
         $hasSplit = in_array('hq_amount', $cols, true);
+        $hasOrd   = in_array('ord_num', $cols, true);
 
+        // 컬럼 유무에 따라 INSERT를 4가지로 나누지 않도록 동적으로 조립한다.
+        $fields = ['agency_id', 'rider_id', 'upload_id', 'card_id', 'net_amount', 'service_fee',
+            'total_charged', 'status', 'pg_tid', 'fail_reason', 'attempts', 'created_by'];
+        $values = [
+            $agencyId,
+            ($riderId !== null && $riderId > 0) ? $riderId : null,
+            ($uploadId !== null && $uploadId > 0) ? $uploadId : null,
+            ($cardId !== null && $cardId > 0) ? $cardId : null,
+            $net, $fee, $total, $status, $tid, mb_substr($failReason, 0, 300), max(1, $attempts),
+            ($adminId !== null && $adminId > 0) ? $adminId : null,
+        ];
+
+        if ($hasOrd) {
+            $fields[] = 'ord_num';
+            $values[] = mb_substr($ordNum, 0, 30);
+        }
         if ($hasSplit) {
-            return db_insert(
-                'INSERT INTO pg_payments
-                    (agency_id, rider_id, upload_id, card_id, net_amount, service_fee, total_charged, status, pg_tid, fail_reason, attempts, created_by,
-                     hq_pct, distributor_pct, agency_pct, hq_amount, distributor_amount, agency_amount)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    $agencyId,
-                    ($riderId !== null && $riderId > 0) ? $riderId : null,
-                    ($uploadId !== null && $uploadId > 0) ? $uploadId : null,
-                    ($cardId !== null && $cardId > 0) ? $cardId : null,
-                    $net, $fee, $total, $status, $tid, mb_substr($failReason, 0, 300), max(1, $attempts),
-                    ($adminId !== null && $adminId > 0) ? $adminId : null,
-                    $bd['hq'], $bd['distributor'], $bd['agency'], $hqAmount, $distAmount, $agyAmount,
-                ]
-            );
+            array_push($fields, 'hq_pct', 'distributor_pct', 'agency_pct', 'hq_amount', 'distributor_amount', 'agency_amount');
+            array_push($values, $bd['hq'], $bd['distributor'], $bd['agency'], $hqAmount, $distAmount, $agyAmount);
         }
 
         return db_insert(
-            'INSERT INTO pg_payments
-                (agency_id, rider_id, upload_id, card_id, net_amount, service_fee, total_charged, status, pg_tid, fail_reason, attempts, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [
-                $agencyId,
-                ($riderId !== null && $riderId > 0) ? $riderId : null,
-                ($uploadId !== null && $uploadId > 0) ? $uploadId : null,
-                ($cardId !== null && $cardId > 0) ? $cardId : null,
-                $net, $fee, $total, $status, $tid, mb_substr($failReason, 0, 300), max(1, $attempts),
-                ($adminId !== null && $adminId > 0) ? $adminId : null,
-            ]
+            'INSERT INTO pg_payments (' . implode(', ', $fields) . ')
+             VALUES (' . implode(', ', array_fill(0, count($fields), '?')) . ')',
+            $values
         );
     }
 

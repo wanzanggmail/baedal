@@ -6,6 +6,7 @@ require_once INC_PATH . '/AgencyCard.php';
 require_once INC_PATH . '/BankAccount.php';
 require_once INC_PATH . '/AgencyWallet.php';
 require_once INC_PATH . '/Organization.php';
+require_once INC_PATH . '/PgGateway.php';
 
 $apiUrl   = ADMIN_BASE . '/api/payment_setup.php';
 $needsMigrate = !AgencyCard::tableExists() || !BankAccount::tableExists();
@@ -126,7 +127,11 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 						</table>
 					</div>
 					<div class="separator separator-dashed mb-4"></div>
-					<h4 class="fw-bold fs-7 mb-3">카드 추가</h4>
+					<h4 class="fw-bold fs-7 mb-1">카드 추가</h4>
+					<div class="text-muted fs-8 mb-4">
+						카드 정보는 <strong>PG사로 전달만 하고 저장하지 않습니다.</strong>
+						저장되는 건 PG가 발급한 결제키와 표시용 끝 4자리뿐입니다.
+					</div>
 					<div class="row g-4">
 						<div class="col-md-5">
 							<label class="form-label fs-8 required" for="ps_alias">별칭</label>
@@ -134,29 +139,56 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 						</div>
 						<div class="col-md-4">
 							<label class="form-label fs-8" for="ps_brand">카드사</label>
-							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_brand" placeholder="예: 국민" />
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_brand" placeholder="비우면 PG 응답값 사용" />
 						</div>
 						<div class="col-md-3">
-							<label class="form-label fs-8" for="ps_last4">끝 4자리</label>
-							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_last4" maxlength="4" inputmode="numeric" placeholder="1234" />
-						</div>
-						<div class="col-md-5">
 							<label class="form-label fs-8" for="ps_priority">우선순위</label>
 							<input type="number" class="form-control form-control-sm form-control-solid" id="ps_priority" min="0" max="9999" value="100" />
-							<div class="form-text fs-9">낮을수록 먼저 결제를 시도합니다.</div>
+							<div class="form-text fs-9">낮을수록 먼저 시도</div>
 						</div>
+
+						<div class="col-12"><div class="separator separator-dashed my-1"></div></div>
+
+						<div class="col-md-5">
+							<label class="form-label fs-8 required" for="ps_cardnum">카드번호</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_cardnum"
+								inputmode="numeric" maxlength="19" autocomplete="off" placeholder="숫자만 입력" />
+						</div>
+						<div class="col-md-2">
+							<label class="form-label fs-8 required" for="ps_yymm">유효기간</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_yymm"
+								inputmode="numeric" maxlength="4" autocomplete="off" placeholder="YYMM" />
+							<div class="form-text fs-9">예: 2509</div>
+						</div>
+						<div class="col-md-3">
+							<label class="form-label fs-8" for="ps_authnum">생년월일/사업자번호</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_authnum"
+								inputmode="numeric" maxlength="12" autocomplete="off" placeholder="YYMMDD 또는 사업자번호" />
+						</div>
+						<div class="col-md-2">
+							<label class="form-label fs-8" for="ps_cardpw">카드 비번</label>
+							<input type="password" class="form-control form-control-sm form-control-solid" id="ps_cardpw"
+								inputmode="numeric" maxlength="2" autocomplete="new-password" placeholder="앞 2자리" />
+						</div>
+
+						<?php if (PgGatewayFactory::isMock()) : ?>
 						<div class="col-md-4">
 							<label class="form-label fs-8" for="ps_mocklimit">모의 한도</label>
 							<input type="number" class="form-control form-control-sm form-control-solid" id="ps_mocklimit" min="0" step="10000" value="0" />
 							<div class="form-text fs-9">0 = 무제한 · 대체결제 테스트용</div>
 						</div>
+						<?php endif; ?>
 						<div class="col-md-3 d-flex align-items-end">
 							<button type="button" class="btn btn-sm btn-primary w-100" id="ps_card_add">＋ 카드 등록</button>
 						</div>
 					</div>
 					<div class="text-muted fs-8 mt-3">
 						<i class="ki-duotone ki-information-5 fs-6 me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
-						빌링키는 실 PG 연동 전까지 저장 시 자동으로 모의 발급됩니다.
+						<?php if (PgGatewayFactory::isMock()) : ?>
+							현재 <strong>모의 모드</strong>라 실제 카드 승인 없이 모의 결제키가 발급됩니다. (카드번호 <code>0000…</code>으로 시작하면 실패 시뮬레이션)
+						<?php else : ?>
+							PG사(<?= htmlspecialchars(PgGatewayFactory::make()->label(), ENT_QUOTES, 'UTF-8') ?>)에 결제키 발급을 요청합니다.
+						<?php endif; ?>
 					</div>
 				</div>
 			</div>
@@ -216,8 +248,33 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 		}
 
 		document.getElementById('ps_card_add').addEventListener('click', function () {
-			post({ action: 'card_add', alias: document.getElementById('ps_alias').value.trim(), brand: document.getElementById('ps_brand').value.trim(), last4: document.getElementById('ps_last4').value.trim(), priority: parseInt(document.getElementById('ps_priority').value, 10) || 100, mock_limit: parseInt(document.getElementById('ps_mocklimit').value, 10) || 0 })
-				.then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); reloadSoon(); }).catch(function (e) { showToast(e.message, false); });
+			var mockLimitEl = document.getElementById('ps_mocklimit');
+			var payload = {
+				action: 'card_add',
+				alias: document.getElementById('ps_alias').value.trim(),
+				brand: document.getElementById('ps_brand').value.trim(),
+				priority: parseInt(document.getElementById('ps_priority').value, 10) || 100,
+				mock_limit: mockLimitEl ? (parseInt(mockLimitEl.value, 10) || 0) : 0,
+				// 카드 정보 — 서버가 PG로 전달만 하고 저장하지 않는다.
+				card_num: document.getElementById('ps_cardnum').value.trim(),
+				yymm: document.getElementById('ps_yymm').value.trim(),
+				auth_num: document.getElementById('ps_authnum').value.trim(),
+				card_pw: document.getElementById('ps_cardpw').value.trim(),
+			};
+			if (!payload.alias) { showToast('카드 별칭을 입력하세요.', false); return; }
+			if (!payload.card_num || !payload.yymm) { showToast('카드번호와 유효기간을 입력하세요.', false); return; }
+
+			post(payload)
+				.then(function (r) {
+					if (!r.ok) throw new Error(r.message);
+					// 등록 성공 여부와 무관하게 입력칸의 카드정보는 즉시 지운다(화면 잔류 방지).
+					['ps_cardnum', 'ps_yymm', 'ps_authnum', 'ps_cardpw'].forEach(function (id) { document.getElementById(id).value = ''; });
+					showToast(r.message, true); reloadSoon();
+				})
+				.catch(function (e) {
+					['ps_cardnum', 'ps_yymm', 'ps_authnum', 'ps_cardpw'].forEach(function (id) { document.getElementById(id).value = ''; });
+					showToast(e.message, false);
+				});
 		});
 		document.getElementById('ps_cards').addEventListener('click', function (ev) {
 			var tr = ev.target.closest('tr'); if (!tr) return; var id = parseInt(tr.getAttribute('data-id'), 10);

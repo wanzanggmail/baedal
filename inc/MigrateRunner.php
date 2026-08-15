@@ -59,6 +59,7 @@ final class MigrateRunner
         self::migrateOrgCeoBizColumns();
         self::migrateWithdrawalFeeShare();
         self::migrateCardIssuerCodes();
+        self::migratePgIntegrationSchema();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1365,6 +1366,82 @@ final class MigrateRunner
         echo $added > 0
             ? "OK    card_issuer {$added}건 추가\n"
             : "SKIP  card_issuer (이미 있음)\n";
+    }
+
+    /**
+     * PG 실연동(위루트) 준비 스키마 — REF_PG_WEROUTE.md §8 의 1~3번.
+     *
+     * ① `pg_config`  : 자격증명 1세트. 갑 확정(2026-08-15) "결제하는 상점은 하나"에 따라
+     *                  대리점별이 아니라 **시스템 전역 단일 행**(id=1)으로 둔다.
+     * ② `pg_payments.ord_num` : 위루트는 결제 **요청 시** 주문번호를 요구하는데 우리는 결제가
+     *                  성공해야 id가 생긴다(순서 역전). 사전 채번한 값을 저장해야 웹훅·대사·취소에서
+     *                  우리 레코드를 찾을 수 있다.
+     * ③ `agency_cards.bill_code`/`issuer_code` : 빌키 생성 응답 보관.
+     */
+    private static function migratePgIntegrationSchema(): void
+    {
+        echo "== PG 실연동 준비 스키마 ==\n";
+
+        // ① 자격증명 저장소
+        if (!db_table_exists('pg_config')) {
+            db_execute(
+                "CREATE TABLE `pg_config` (
+                    `id`               TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                    `driver`           VARCHAR(20)  NOT NULL DEFAULT 'mock' COMMENT 'mock | weroute',
+                    `mid`              VARCHAR(50)  NOT NULL DEFAULT '' COMMENT '가맹점 ID',
+                    `tid`              VARCHAR(50)  NOT NULL DEFAULT '' COMMENT '단말기 ID(없으면 빈값)',
+                    `pay_key`          VARCHAR(255) NOT NULL DEFAULT '' COMMENT '거래 API 인증(Authorization 원문, Bearer 아님)',
+                    `sign_key`         VARCHAR(255) NOT NULL DEFAULT '' COMMENT '결제통지 서명 검증용',
+                    `api_key`          VARCHAR(255) NOT NULL DEFAULT '' COMMENT '대사 API External-Api 키',
+                    `login_id`         VARCHAR(190) NOT NULL DEFAULT '' COMMENT '대사 API 로그인 ID',
+                    `login_pw`         VARCHAR(190) NOT NULL DEFAULT '' COMMENT '대사 API 로그인 PW(로그인에 원문 필요)',
+                    `access_token`     VARCHAR(255) NOT NULL DEFAULT '' COMMENT '대사 API 토큰 캐시',
+                    `token_expires_at` DATETIME     NULL COMMENT '토큰 만료(발급 후 30시간)',
+                    `updated_by`       INT UNSIGNED NULL,
+                    `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                  COMMENT='PG(위루트) 연동 자격증명 — 단일 가맹점이라 1행만 사용'"
+            );
+            db_execute("INSERT INTO pg_config (id, driver) VALUES (1, 'mock')");
+            echo "OK    pg_config 생성 + 기본행(mock)\n";
+        } else {
+            db_execute("INSERT IGNORE INTO pg_config (id, driver) VALUES (1, 'mock')");
+            echo "SKIP  pg_config (이미 있음)\n";
+        }
+
+        // ② pg_payments.ord_num
+        if (db_table_exists('pg_payments')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
+            if (!in_array('ord_num', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE pg_payments
+                     ADD COLUMN ord_num VARCHAR(30) NOT NULL DEFAULT '' COMMENT 'PG 주문번호(결제 전 사전 채번)' AFTER upload_id,
+                     ADD KEY idx_pg_ord_num (ord_num)"
+                );
+                echo "OK    pg_payments.ord_num\n";
+            } else {
+                echo "SKIP  pg_payments.ord_num (이미 있음)\n";
+            }
+        }
+
+        // ③ agency_cards 빌키 응답 보관
+        if (db_table_exists('agency_cards')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM agency_cards'), 'Field');
+            $adds = [];
+            if (!in_array('bill_code', $cols, true)) {
+                $adds[] = "ADD COLUMN bill_code VARCHAR(50) NOT NULL DEFAULT '' COMMENT '빌키 코드(위루트 응답)'";
+            }
+            if (!in_array('issuer_code', $cols, true)) {
+                $adds[] = "ADD COLUMN issuer_code VARCHAR(3) NOT NULL DEFAULT '' COMMENT '발급사 코드(system_codes.card_issuer)'";
+            }
+            if ($adds !== []) {
+                db_execute('ALTER TABLE agency_cards ' . implode(', ', $adds));
+                echo 'OK    agency_cards ' . count($adds) . "개 컬럼 추가\n";
+            } else {
+                echo "SKIP  agency_cards 빌키 컬럼 (이미 있음)\n";
+            }
+        }
     }
 
     private static function migratePgPaymentFeeSplit(): void

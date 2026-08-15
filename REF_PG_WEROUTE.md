@@ -296,18 +296,38 @@ cardIssuerLabel("6") = "06" = 신한 (혼용 흡수)
 | # | 작업 | 상태 / 선행조건 |
 |---|---|---|
 | 0 | §9 확인사항 | 🟡 **3건 해소, 4건 남음**(전부 PG사 문의) |
-| — | **코드체계(`card_issuer`) 정비** | ✅ **2026-08-15 완료** (§6) |
-| 1 | 자격증명 6종 저장소 + 토큰 30h 캐시 | **본사 단일 확정** → org별 불필요. 신규 `pg_config` 1행 또는 `.env`. `user_pw`는 로그인에 원문이 필요해 암호화 저장 검토 |
-| 2 | `pg_payments.ord_num` 컬럼 + 채번 규칙 | 바로 가능 |
-| 3 | 카드 등록 폼 신설 + `agency_cards`에 `bill_code`/`issuer_code` | 바로 가능 |
-| 4 | `PgGateway` 인터페이스 확장(DTO) + Mock 동반 수정 | 바로 가능 |
-| 5 | `RealPgGateway` 구현(cURL) | 1~4 + 자격증명 실물 |
-| 6 | 웹훅 엔드포인트 + 서명검증 + **멱등 처리** | §9-2(sign_key) |
-| 7 | 망상취소(타임아웃 방어) | 5 |
-| 8 | 카드 삭제를 위루트 호출 후로 변경 | 5 |
+| — | 코드체계(`card_issuer`) 정비 | ✅ **완료** (§6) |
+| 1 | 자격증명 저장소 + 토큰 30h 캐시 | ✅ **완료** — `pg_config` 단일행 + `inc/PgConfig.php` |
+| 2 | `pg_payments.ord_num` + 채번 규칙 | ✅ **완료** — `PgPayment::makeOrderNo()` |
+| 3 | 카드 등록 폼 + `agency_cards.bill_code`/`issuer_code` | ✅ **완료** |
+| 4 | `PgGateway` 인터페이스 확장(DTO) + Mock 동반 수정 | ✅ **완료** |
+| 8 | 카드 삭제를 PG 호출 후로 변경 | ✅ **완료** — `AgencyCard::delete()`가 해지 성공해야 DB 삭제 |
+| 10 | `PgGatewayFactory::make()` 설정 기반 분기 | ✅ **골격 완료** — `driver`·`realAvailable()`·`isMock()` |
+| **5** | **`RealPgGateway` 구현(cURL)** | ⛔ **자격증명 실물 + §9-5·9-6** |
+| **6** | **웹훅 엔드포인트 + 서명검증 + 멱등 처리** | ⛔ **§9-2(sign_key)·§9-4(Noti URL)** |
+| **7** | 망상취소(타임아웃 방어) | 5 이후 |
 | ~~9~~ | ~~정산대사 배치(`deposit_status` 추적)~~ | ❌ **불필요** — 입금 즉시 + 본사 선충전 확정 |
-| 10 | `PgGatewayFactory::make()` 설정 기반 분기 | 전부 |
-| 11 | `agency_bank_accounts` 단일계좌 전제 반영 검토 | 대리점마다 다른 계좌를 넣을 수 있는 현 스키마가 오설정 위험(§3-0) |
+| 11 | `agency_bank_accounts` 단일계좌 전제 반영 검토 | 🟡 미착수 — 대리점마다 다른 계좌를 넣을 수 있는 현 스키마가 오설정 위험(§3-0) |
+
+### 2026-08-15 구현 상세 (1~4·8·10)
+
+**자격증명 (`pg_config` · `inc/PgConfig.php`)**
+단일 가맹점 확정에 따라 **전역 1행(id=1)**. `driver`(mock|weroute)·mid·tid·pay_key·sign_key·api_key·login_id/pw + `access_token`/`token_expires_at`(30h 캐시, 만료 5분 전부터 재발급 유도). 엔드포인트 경로도 상수화(`EP_*`) — 폼 전송형만 `/api`가 없고 대사는 `/api/v1`이라 하드코딩하면 반드시 틀린다.
+- 비밀값은 `publicView()`로 **마스킹만 노출**하고, 저장 시 **빈 값이면 기존 값 유지**(마스킹된 화면값으로 덮어쓰는 사고 방지).
+- 🔒 현재 **평문 저장**. 대사 로그인에 비밀번호 원문이 필요해 해시가 불가하고, 키 관리 체계 없는 양방향 암호화는 실효가 없어 보류했다. **운영 전환 시 재검토 대상.**
+
+**주문번호 (`PgPayment::makeOrderNo()`)**
+`PG{agency}-{YmdHis}-{rand4}` (24byte, 위루트 30byte 제한 내). 중복 시 최대 5회 재추첨.
+⚠️ **카드를 바꿔 재시도할 때마다 새로 채번**한다 — 같은 `ord_num`으로 두 번 승인 요청이 나가면 PG가 중복 주문으로 막거나 대사가 꼬인다.
+
+**인터페이스 (`inc/PgGateway.php`)**
+`charge(PgChargeRequest)` / `issueBillingKey(PgBillingKeyRequest)` / `deleteBillingKey()` / `label()`.
+`PgChargeResult`에 `apprNum`·`issuer`·`issuerCode`·`cardNum` 추가(대사·리포트용).
+
+**카드 등록**
+카드번호·유효기간·생년월일/사업자번호·카드비번을 받아 **PG로 전달만 하고 저장하지 않는다.** DB에는 `bill_key`·`bill_code`·`issuer_code`·끝4자리·카드사명만 남는다. 성공/실패와 무관하게 화면 입력칸도 즉시 비운다.
+
+**검증**: 모의 발급→저장 확인(카드번호 미저장), 필수값·유효기간 형식·PG 실패 거부 3종, 삭제 시 해지 선행, 결제 시 `ord_num` 기록(24byte)·지갑 충전·원장 정합성.
 
 ---
 

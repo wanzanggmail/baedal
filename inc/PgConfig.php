@@ -1,0 +1,190 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * PG(위루트) 연동 자격증명 — REF_PG_WEROUTE.md §2.
+ *
+ * 갑 확정(2026-08-15) **"결제하는 상점은 하나"** 이므로 대리점별이 아니라 **시스템 전역 1행**이다.
+ * (대리점 지갑은 이 단일 가맹점 계좌를 조직별로 나눠 보여주는 내부 장부일 뿐이다.)
+ *
+ * ⚠️ 인증이 **두 갈래**라는 점이 이 클래스의 존재 이유다.
+ *   - 거래(결제) API : `Authorization: {pay_key}`      ← Bearer 아님, 키 원문
+ *   - 대사(정산) API : `External-Api: Bearer {api_key}` + `Authorization: Bearer {access_token}`
+ *     `access_token`은 `POST /api/v1/sign-in`으로 받고 **30시간** 유효 → 여기 캐시해 재사용한다.
+ *
+ * 🔒 비밀값(pay_key·sign_key·api_key·login_pw)은 현재 **평문 저장**이다. 대사 API 로그인에
+ *    비밀번호 원문이 필요해 단방향 해시를 쓸 수 없고, 양방향 암호화는 키 관리 체계가 없으면
+ *    실효가 없어서 지금은 도입하지 않았다. 대신 화면에는 마스킹만 내보낸다(`publicView()`).
+ *    운영 전환 시 키 보관 방식을 다시 정할 것.
+ */
+final class PgConfig
+{
+    public const DRIVER_MOCK    = 'mock';
+    public const DRIVER_WEROUTE = 'weroute';
+
+    /** 위루트 API 호스트 */
+    public const HOST = 'https://api.weroutefincorp.com';
+
+    /**
+     * ⚠️ 경로 함정 — 폼 전송형(인증·간편결제)만 `/api` 접두어가 없고, 대사는 버전도 다르다.
+     * 하드코딩하지 말고 여기서 가져다 쓸 것.
+     */
+    public const EP_BILL_KEY     = '/api/v2/pay/bill-key';        // POST 생성 · DELETE 삭제
+    public const EP_BILL_PAY     = '/api/v2/pay/bill-key/hand';   // POST 빌키 결제
+    public const EP_CANCEL       = '/api/v2/pay/cancel';          // POST 결제취소
+    public const EP_NET_CANCEL   = '/api/v2/pay/net-cancel';      // POST 망상취소(타임아웃 방어)
+    public const EP_TRANSACTIONS = '/api/v2/transactions/';       // GET  + {ord_num}
+    public const EP_SIGN_IN      = '/api/v1/sign-in';             // POST 대사 로그인
+
+    public static function tableExists(): bool
+    {
+        return db_table_exists('pg_config');
+    }
+
+    /** @return array<string,mixed> */
+    public static function get(): array
+    {
+        $defaults = [
+            'driver' => self::DRIVER_MOCK, 'mid' => '', 'tid' => '',
+            'pay_key' => '', 'sign_key' => '', 'api_key' => '',
+            'login_id' => '', 'login_pw' => '',
+            'access_token' => '', 'token_expires_at' => null,
+        ];
+        if (!self::tableExists()) {
+            return $defaults;
+        }
+        $row = db_row('SELECT * FROM pg_config WHERE id = 1 LIMIT 1');
+
+        return $row === null ? $defaults : array_merge($defaults, $row);
+    }
+
+    /**
+     * 실 연동을 켤 수 있는 상태인가 — 거래 API에 필요한 최소값이 다 있는지.
+     * (대사 API 값은 없어도 결제는 된다.)
+     */
+    public static function isReady(): bool
+    {
+        $c = self::get();
+
+        return (string) $c['driver'] === self::DRIVER_WEROUTE
+            && trim((string) $c['mid']) !== ''
+            && trim((string) $c['pay_key']) !== '';
+    }
+
+    /** 웹훅 서명 검증이 가능한 상태인가 (sign_key 필요 — PG사 발급 대기 중) */
+    public static function canVerifyWebhook(): bool
+    {
+        return trim((string) self::get()['sign_key']) !== '';
+    }
+
+    /**
+     * 화면에 내보낼 수 있는 형태 — 비밀값은 앞 4자리만 남기고 가린다.
+     *
+     * @return array<string,mixed>
+     */
+    public static function publicView(): array
+    {
+        $c    = self::get();
+        $mask = static function (string $v): string {
+            $v = trim($v);
+            if ($v === '') {
+                return '';
+            }
+
+            return mb_substr($v, 0, 4) . str_repeat('•', max(4, min(12, mb_strlen($v) - 4)));
+        };
+
+        return [
+            'driver'           => (string) $c['driver'],
+            'mid'              => (string) $c['mid'],
+            'tid'              => (string) $c['tid'],
+            'pay_key_masked'   => $mask((string) $c['pay_key']),
+            'sign_key_masked'  => $mask((string) $c['sign_key']),
+            'api_key_masked'   => $mask((string) $c['api_key']),
+            'login_id'         => (string) $c['login_id'],
+            'login_pw_masked'  => $mask((string) $c['login_pw']),
+            'has_pay_key'      => trim((string) $c['pay_key']) !== '',
+            'has_sign_key'     => trim((string) $c['sign_key']) !== '',
+            'has_api_key'      => trim((string) $c['api_key']) !== '',
+            'is_ready'         => self::isReady(),
+            'token_expires_at' => $c['token_expires_at'],
+        ];
+    }
+
+    /**
+     * 저장. 비밀값은 **빈 문자열로 오면 기존 값을 유지**한다 —
+     * 화면이 마스킹된 값을 보여주므로, 사용자가 안 건드린 필드를 빈값으로 덮어쓰면 안 된다.
+     *
+     * @param array<string,mixed> $data
+     */
+    public static function save(array $data, ?int $adminId = null): void
+    {
+        if (!self::tableExists()) {
+            throw new RuntimeException('pg_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
+        }
+
+        $cur    = self::get();
+        $driver = (string) ($data['driver'] ?? $cur['driver']);
+        if (!in_array($driver, [self::DRIVER_MOCK, self::DRIVER_WEROUTE], true)) {
+            throw new InvalidArgumentException('driver 값이 올바르지 않습니다.');
+        }
+
+        $keep = static function (string $key) use ($data, $cur): string {
+            $v = trim((string) ($data[$key] ?? ''));
+
+            return $v !== '' ? $v : (string) $cur[$key];
+        };
+
+        $mid    = trim((string) ($data['mid'] ?? $cur['mid']));
+        $payKey = $keep('pay_key');
+
+        // 실 연동으로 전환하려면 최소값이 있어야 한다 — 켜놓고 안 되는 상태를 만들지 않는다.
+        if ($driver === self::DRIVER_WEROUTE && ($mid === '' || $payKey === '')) {
+            throw new InvalidArgumentException('위루트 연동을 켜려면 가맹점 ID(MID)와 결제 KEY가 필요합니다.');
+        }
+
+        db_execute(
+            'UPDATE pg_config
+                SET driver = ?, mid = ?, tid = ?, pay_key = ?, sign_key = ?, api_key = ?,
+                    login_id = ?, login_pw = ?, updated_by = ?, updated_at = NOW()
+              WHERE id = 1',
+            [
+                $driver,
+                $mid,
+                trim((string) ($data['tid'] ?? $cur['tid'])),
+                $payKey,
+                $keep('sign_key'),
+                $keep('api_key'),
+                trim((string) ($data['login_id'] ?? $cur['login_id'])),
+                $keep('login_pw'),
+                ($adminId !== null && $adminId > 0) ? $adminId : null,
+            ]
+        );
+    }
+
+    /** 대사 API 토큰 캐시 저장(발급 후 30시간 유효) */
+    public static function storeAccessToken(string $token, int $ttlHours = 30): void
+    {
+        if (!self::tableExists()) {
+            return;
+        }
+        db_execute(
+            'UPDATE pg_config SET access_token = ?, token_expires_at = DATE_ADD(NOW(), INTERVAL ? HOUR) WHERE id = 1',
+            [$token, max(1, $ttlHours)]
+        );
+    }
+
+    /** 아직 유효한 토큰이 있으면 반환, 없으면 빈 문자열(재로그인 필요) */
+    public static function validAccessToken(): string
+    {
+        $c = self::get();
+        $t = trim((string) $c['access_token']);
+        if ($t === '' || $c['token_expires_at'] === null) {
+            return '';
+        }
+
+        // 만료 직전 호출이 실패하지 않도록 5분 여유를 둔다.
+        return strtotime((string) $c['token_expires_at']) > (time() + 300) ? $t : '';
+    }
+}
