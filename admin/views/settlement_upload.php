@@ -93,7 +93,7 @@ $platformLabels = [
 		<div class="tab-pane fade show active" id="kt_tab_daily" role="tabpanel">
 			<div class="row g-5 g-xl-10">
 				<!--begin::업로드 폼-->
-				<div class="col-xl-5">
+				<div class="col-xl-12">
 					<div class="card card-flush h-xl-100">
 						<div class="card-header pt-7">
 							<h3 class="card-title align-items-start flex-column">
@@ -107,6 +107,7 @@ $platformLabels = [
 								<div class="d-flex flex-column">
 									<span class="fw-bold">플랫폼에서 받은 일간 정산서(.xlsx)를 그대로 올려 주세요.</span>
 									<span class="text-gray-700 fs-7 mt-1">파일명에 날짜가 포함된 경우(예: 팀도깨비_서울_강서남부_<strong>20260225</strong>.xlsx) 귀속일이 자동 추출됩니다.</span>
+									<span class="text-gray-700 fs-7 mt-1">「차감내역」시트도 함께 파싱됩니다 — 오배달 등 차감 항목이 있으면 자동으로 함께 저장됩니다.</span>
 								</div>
 							</div>
 
@@ -191,64 +192,6 @@ $platformLabels = [
 				</div>
 				<!--end::업로드 폼-->
 
-				<!--begin::파싱 컬럼 안내-->
-				<div class="col-xl-7">
-					<div class="card card-flush h-xl-100">
-						<div class="card-header pt-7">
-							<h3 class="card-title">파싱 대상 항목 (「일별」시트)</h3>
-						</div>
-						<div class="card-body pt-0">
-							<div class="table-responsive">
-								<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-3">
-									<thead>
-										<tr class="fw-bold text-muted">
-											<th class="min-w-50px">컬럼</th>
-											<th class="min-w-180px">항목명</th>
-											<th>비고</th>
-										</tr>
-									</thead>
-									<tbody>
-										<?php
-										$cols = [
-											['B','라이선스 ID','쿠팡이츠 라이더 ID'],
-											['C','이름','라이더명+코드'],
-											['E','총 정산예정 금액','(원)'],
-											['F','총 정산 오더수','건'],
-											['G','픽업 비용 합',''],
-											['H','배달 비용 합',''],
-											['I','지역 단가 합',''],
-											['J','배달거리 할증 건수',''],
-											['K','배달거리 할증 금액',''],
-											['L','픽업지 할증 건수',''],
-											['M','픽업지 할증 금액',''],
-											['N','도착지 할증 건수',''],
-											['O','도착지 할증 금액',''],
-											['P','기상 할증 건수',''],
-											['Q','기상 할증 금액',''],
-											['…','기타 프로모션1~4',''],
-											['끝','보수액','저장만 함 · 정산 계산에 미사용'],
-										];
-										foreach ($cols as $c): ?>
-										<tr>
-											<td class="fw-bold text-gray-700"><?= htmlspecialchars($c[0], ENT_QUOTES, 'UTF-8') ?></td>
-											<td><?= htmlspecialchars($c[1], ENT_QUOTES, 'UTF-8') ?></td>
-											<td class="text-gray-600 fs-7"><?= htmlspecialchars($c[2], ENT_QUOTES, 'UTF-8') ?></td>
-										</tr>
-										<?php endforeach; ?>
-									</tbody>
-								</table>
-							</div>
-							<div class="notice d-flex bg-light-warning rounded border-warning border border-dashed p-5 mt-5">
-								<i class="ki-duotone ki-information fs-2tx text-warning me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
-								<div class="d-flex flex-column">
-									<span class="fw-bold">「차감내역」시트도 함께 파싱됩니다.</span>
-									<span class="text-gray-700 fs-7">오배달 등 차감 항목이 있으면 차감 내역 테이블에 함께 저장됩니다.</span>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-				<!--end::파싱 컬럼 안내-->
 			</div>
 
 			<!--begin::업로드 이력-->
