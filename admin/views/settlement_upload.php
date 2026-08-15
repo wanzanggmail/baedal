@@ -204,7 +204,25 @@ $platformLabels = [
 					<?php if ($recentUploads === []) : ?>
 					<div class="text-center text-muted py-10">아직 업로드 이력이 없습니다.</div>
 					<?php else : ?>
-					<div class="table-responsive">
+					<?php
+					// 8개 컬럼짜리 표는 좁은 화면에서 가로 스크롤이 생겨 알아보기 어렵다.
+					// md 이상은 기존 표 그대로, 그 아래는 핵심 정보(귀속일·상태·건수)만 카드로 쌓아 보여준다.
+					$rows = [];
+					foreach ($recentUploads as $up) {
+						$detailUrl = admin_url('settlement/upload-detail');
+						$detailUrl .= (str_contains($detailUrl, '?') ? '&' : '?') . 'id=' . (int) $up['id'];
+						$meta = json_decode((string) ($up['stored_path'] ?? ''), true);
+						$rows[] = [
+							'up'        => $up,
+							'detailUrl' => $detailUrl,
+							'st'        => $statusLabels[$up['status']] ?? ['label' => $up['status'], 'badge' => 'badge-light'],
+							'team'      => is_array($meta) ? trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? '')) : '',
+							'plat'      => $platformLabels[$up['platform']] ?? $up['platform'],
+						];
+					}
+					?>
+					<!--begin::표(md 이상)-->
+					<div class="table-responsive d-none d-md-block">
 						<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-3">
 							<thead>
 								<tr class="fw-bold text-muted">
@@ -219,36 +237,47 @@ $platformLabels = [
 								</tr>
 							</thead>
 							<tbody>
-							<?php foreach ($recentUploads as $up) :
-								$detailUrl = admin_url('settlement/upload-detail');
-								$detailUrl .= (str_contains($detailUrl, '?') ? '&' : '?') . 'id=' . (int) $up['id'];
-								$st = $statusLabels[$up['status']] ?? ['label' => $up['status'], 'badge' => 'badge-light'];
-								$meta = json_decode((string) ($up['stored_path'] ?? ''), true);
-								$teamLabel = is_array($meta)
-									? trim(($meta['team'] ?? '') . ' ' . ($meta['region'] ?? ''))
-									: '';
-								$platLabel = $platformLabels[$up['platform']] ?? $up['platform'];
-							?>
+							<?php foreach ($rows as $r) : $up = $r['up']; $st = $r['st']; ?>
 								<tr>
 									<td class="fw-bold"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
-									<td><?= htmlspecialchars($teamLabel !== '' ? $teamLabel : '-', ENT_QUOTES, 'UTF-8') ?></td>
+									<td><?= htmlspecialchars($r['team'] !== '' ? $r['team'] : '-', ENT_QUOTES, 'UTF-8') ?></td>
 									<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?></td>
 									<td><?= number_format((int) $up['total_rows']) ?>명
 										<span class="text-muted fs-8">(매칭 <?= number_format((int) $up['ok_rows']) ?>)</span>
 									</td>
 									<td><span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
-										<span class="text-muted fs-8 ms-1"><?= htmlspecialchars($platLabel, ENT_QUOTES, 'UTF-8') ?></span>
+										<span class="text-muted fs-8 ms-1"><?= htmlspecialchars($r['plat'], ENT_QUOTES, 'UTF-8') ?></span>
 									</td>
 									<td><?= htmlspecialchars($up['uploaded_by_name'] ?? '-', ENT_QUOTES, 'UTF-8') ?></td>
 									<td class="text-gray-600 fs-7"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
 									<td>
-										<a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">상세</a>
+										<a href="<?= htmlspecialchars($r['detailUrl'], ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">상세</a>
 									</td>
 								</tr>
 							<?php endforeach; ?>
 							</tbody>
 						</table>
 					</div>
+					<!--end::표(md 이상)-->
+
+					<!--begin::카드 목록(모바일)-->
+					<div class="d-md-none">
+						<?php foreach ($rows as $r) : $up = $r['up']; $st = $r['st']; ?>
+						<a href="<?= htmlspecialchars($r['detailUrl'], ENT_QUOTES, 'UTF-8') ?>" class="d-block text-gray-900 border border-gray-300 rounded p-4 mb-3">
+							<div class="d-flex justify-content-between align-items-center mb-1">
+								<span class="fw-bold fs-6"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></span>
+								<span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
+							</div>
+							<div class="text-gray-700 fs-7 mb-1"><?= htmlspecialchars($r['team'] !== '' ? $r['team'] : '-', ENT_QUOTES, 'UTF-8') ?></div>
+							<div class="text-muted fs-8">
+								<?= number_format((int) $up['total_rows']) ?>명(매칭 <?= number_format((int) $up['ok_rows']) ?>)
+								· <?= htmlspecialchars($r['plat'], ENT_QUOTES, 'UTF-8') ?>
+								· <?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?>
+							</div>
+						</a>
+						<?php endforeach; ?>
+					</div>
+					<!--end::카드 목록(모바일)-->
 					<?php endif; ?>
 				</div>
 			</div>
