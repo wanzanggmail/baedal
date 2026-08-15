@@ -248,9 +248,10 @@ if ($name === '') {
 // 🔧 2026-08-15 휴대전화 필수화 — 로그인 ID를 손으로 받지 않고 항상 전화번호 기반으로
 // 자동 생성한다(RiderLoginId::generate, 겹치면 접미사 부여). 전화번호가 없으면 로그인
 // ID가 임의 문자열이 되어 라이더가 자기 계정을 못 외우므로 여기서 막는다.
+// 국번 010/011/016~019 + 7~8자리(총 10~11자리)만 허용 — 유선전화·엉터리 숫자는 거른다.
 $phoneDigits = preg_replace('/\D/', '', $phone) ?? '';
-if (!preg_match('/^0\d{8,10}$/', $phoneDigits)) {
-    $err('휴대전화를 정확히 입력하세요(로그인 ID로 그대로 쓰입니다).');
+if (!preg_match('/^01[016789]\d{7,8}$/', $phoneDigits)) {
+    $err('휴대전화 번호 형식이 올바르지 않습니다(예: 01012345678).');
 }
 require_once INC_PATH . '/RiderLoginId.php';
 $loginId = RiderLoginId::generate($phone);

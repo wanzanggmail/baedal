@@ -744,7 +744,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				force: document.getElementById('qrForce').value === '1',
 			};
 			if (!payload.name) { al.className = 'alert alert-danger mb-4'; al.textContent = '이름을 입력하세요.'; return; }
-			if (!/^0\d{8,10}$/.test(payload.phone.replace(/\D/g, ''))) { al.className = 'alert alert-danger mb-4'; al.textContent = '휴대전화를 정확히 입력하세요(로그인 ID로 그대로 쓰입니다).'; return; }
+			if (!/^01[016789]\d{7,8}$/.test(payload.phone.replace(/\D/g, ''))) { al.className = 'alert alert-danger mb-4'; al.textContent = '휴대전화 번호 형식이 올바르지 않습니다(예: 01012345678).'; return; }
 			if (isDaily && (!payload.bank_code || !payload.bank_account)) { al.className = 'alert alert-danger mb-4'; al.textContent = '일정산 라이더는 출금 대행을 위해 은행·계좌번호가 필요합니다.'; return; }
 			if (payload.force && !confirm('현재 매칭을 새로 등록하는 라이더로 교정할까요?')) return;
 			var submitBtn = this;
