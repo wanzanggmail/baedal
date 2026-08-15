@@ -152,7 +152,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
-	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
+	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-column flex-md-row flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
 			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">
 				정산 업로드 상세
@@ -169,17 +169,18 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				<li class="breadcrumb-item text-gray-900"><?= htmlspecialchars((string) $upload['settlement_date'], ENT_QUOTES, 'UTF-8') ?></li>
 			</ul>
 		</div>
-		<div class="d-flex align-items-center gap-2">
+		<?php // 모바일: 버튼 줄을 제목 아래로 내리고(flex-column), 폭을 넘으면 줄바꿈되게(flex-wrap). 엑셀 다운로드·수수료 내역은 자주 안 써서 숨긴다. ?>
+		<div class="d-flex flex-wrap align-items-center gap-2 mt-4 mt-md-0">
 			<?php if (in_array(($upload['status'] ?? ''), ['parsed', 'applied'], true) && SettlementLedger::tableExists()) : ?>
 			<button type="button" class="btn btn-sm btn-success fw-bold" id="btn_settlement_apply" data-upload-id="<?= (int) $uploadId ?>">
 				<?= ($upload['status'] ?? '') === 'applied' ? '정산 재반영 (신규 매칭분)' : '정산 반영 · 수수료·지갑' ?>
 			</button>
 			<?php endif; ?>
-			<a href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload_export.php?id=' . $uploadId, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-success fw-bold">
+			<a href="<?= htmlspecialchars(rtrim(ADMIN_BASE, '/') . '/api/settlement_upload_export.php?id=' . $uploadId, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-success fw-bold d-none d-md-inline-flex">
 				<i class="ki-duotone ki-file-down fs-3"><span class="path1"></span><span class="path2"></span></i>
 				엑셀 다운로드
 			</a>
-			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold">수수료 내역</a>
+			<a href="<?= htmlspecialchars(admin_url('settlement/fees'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary fw-bold d-none d-md-inline-flex">수수료 내역</a>
 			<a href="<?= htmlspecialchars($uploadListUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">업로드</a>
 			<a href="<?= htmlspecialchars($historyUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">전체 이력</a>
 		</div>
