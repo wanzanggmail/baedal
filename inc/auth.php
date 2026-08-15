@@ -177,6 +177,13 @@ function admin_can_access_route(string $route): bool
         return false;
     }
 
+    // 🔧 2026-08-15 펌뱅킹 즉시이체 전환 후 남은 구 경로(백업용) — 장애 대비로만 남겨두고
+    // 신규 사용자가 기본 동선으로 오해하면 안 되므로 최고관리자 전용으로 좁힌다.
+    // (이 지점에 오면 이미 super가 아니므로 항상 거부.)
+    if (str_starts_with($route, 'withdrawal/download') || str_starts_with($route, 'withdrawal/complete')) {
+        return false;
+    }
+
     // 출금 대행 — 대리점이 소속 라이더 출금을 대신 실행하는 화면이라 대리점 전용.
     // (본사·총판은 남의 라이더 돈을 직접 빼는 일이 없어야 한다.)
     if (str_starts_with($route, 'withdrawal/proxy')) {

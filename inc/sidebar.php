@@ -203,8 +203,9 @@ $route = $route ?? '';
 														<span class="menu-title">지갑 입출금</span>
 													</a>
 												</div>
-												<?php // 펌뱅킹 즉시이체로 전환된 뒤 남은 구 경로 — 장애 대비 백업이라 [백업]으로 표기해
-												      // 신규 사용자가 기본 동선으로 오해하지 않게 한다(LOGIC §5.4). ?>
+												<?php // 펌뱅킹 즉시이체로 전환된 뒤 남은 구 경로 — 장애 대비 백업이라 [백업]으로 표기하고
+												      // 최고관리자에게만 보인다(2026-08-15, auth.php에서 접근도 함께 막음). ?>
+												<?php if (admin_has_role('super')) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/download') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/download'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
@@ -217,6 +218,7 @@ $route = $route ?? '';
 														<span class="menu-title text-muted">[백업] 처리 완료</span>
 													</a>
 												</div>
+												<?php endif; ?>
 											</div>
 										</div>
 										<?php endif; ?>
