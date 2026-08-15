@@ -149,15 +149,12 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 						저장되는 건 PG가 발급한 결제키와 표시용 끝 4자리뿐입니다.
 					</div>
 					<div class="row g-4">
-						<div class="col-md-5">
+						<?php // 카드사는 입력받지 않는다 — PG가 빌키 발급 응답으로 돌려주는 발급사를 그대로 쓴다(표기 흔들림 방지). ?>
+						<div class="col-md-8">
 							<label class="form-label fs-8 required" for="ps_alias">별칭</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_alias" placeholder="예: 국민 법인카드" />
 						</div>
 						<div class="col-md-4">
-							<label class="form-label fs-8" for="ps_brand">카드사</label>
-							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_brand" placeholder="비우면 PG 응답값 사용" />
-						</div>
-						<div class="col-md-3">
 							<label class="form-label fs-8" for="ps_priority">우선순위</label>
 							<input type="number" class="form-control form-control-sm form-control-solid" id="ps_priority" min="0" max="9999" value="100" />
 							<div class="form-text fs-9">낮을수록 먼저 시도</div>
@@ -289,7 +286,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 			var payload = {
 				action: 'card_add',
 				alias: document.getElementById('ps_alias').value.trim(),
-				brand: document.getElementById('ps_brand').value.trim(),
+				// brand(카드사)는 보내지 않는다 — 서버가 PG 응답의 발급사로 채운다.
 				priority: parseInt(document.getElementById('ps_priority').value, 10) || 100,
 				mock_limit: mockLimitEl ? (parseInt(mockLimitEl.value, 10) || 0) : 0,
 				// 카드 정보 — 서버가 PG로 전달만 하고 저장하지 않는다.

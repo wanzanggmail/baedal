@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * 대리점 결제 설정 API — 카드(PG) · 오픈뱅킹 계좌 · PG 잔액 충전 (LOGIC §5.4 · §7 #8·#10)
  * GET  — 카드 목록 + 계좌 + 지갑
- * POST { action:'card_add', alias, brand, priority, mock_limit,
+ * POST { action:'card_add', alias, priority, mock_limit,
  *        card_num, yymm, auth_num, card_pw }  — PG에 빌키 발급 요청
  *        ⚠️ 카드번호·비밀번호는 PG로 전달만 하고 **저장하지 않는다**(PCI-DSS).
  *        (이미 발급받은 키가 있으면 billing_key 로 직접 등록 가능)

@@ -69,6 +69,7 @@ final class AgencyCard
         require_once __DIR__ . '/PgPayment.php';
 
         $alias     = trim((string) ($data['alias'] ?? ''));
+        // 화면에서는 입력받지 않는다. 빌키를 직접 넣는 경로에서만 값이 올 수 있다.
         $brand     = trim((string) ($data['brand'] ?? ''));
         $priority  = (int) ($data['priority'] ?? 100);
         $mockLimit = (int) ($data['mock_limit'] ?? 0);
@@ -115,8 +116,14 @@ final class AgencyCard
             $billingKey = $res->billKey;
             $billCode   = $res->billCode;
             $issuerCode = $res->issuerCode;
-            if ($brand === '' && $res->issuer !== '') {
+            // 카드사는 입력받지 않는다(2026-08-15) — 사람이 "국민"/"KB"/"국민카드"를 제각각 적어
+            // 표기가 흔들리므로 PG 응답을 그대로 쓴다. 이름이 안 오면 발급사 코드로 라벨을 찾는다.
+            if ($brand === '') {
                 $brand = $res->issuer;
+            }
+            if ($brand === '' && $issuerCode !== '') {
+                require_once __DIR__ . '/SystemCode.php';
+                $brand = SystemCode::cardIssuerLabel($issuerCode);
             }
             if ($last4 === '') {
                 $last4 = substr($cardNum, -4);
