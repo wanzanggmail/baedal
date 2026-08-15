@@ -315,7 +315,8 @@ $platformLabels = [
 				<div class="modal-body py-lg-8 px-lg-8">
 					<div id="previewSummary" class="mb-4"></div>
 					<div id="previewDupWarn" class="alert alert-warning d-none fs-7 py-3"></div>
-					<div class="table-responsive" style="max-height:52vh;overflow:auto">
+					<!--begin::표(md 이상)-->
+					<div class="table-responsive d-none d-md-block" style="max-height:52vh;overflow:auto">
 						<table class="table table-row-bordered align-middle gs-0 gy-2 fs-7 mb-0">
 							<thead class="position-sticky top-0 bg-white">
 								<tr class="fw-bold text-muted">
@@ -329,6 +330,10 @@ $platformLabels = [
 							<tbody id="previewTbody"></tbody>
 						</table>
 					</div>
+					<!--end::표(md 이상)-->
+					<!--begin::카드 목록(모바일) — 5컬럼 표는 좁은 화면에서 가로 스크롤이 심해 항목당 카드로 대신 보여준다-->
+					<div id="previewCards" class="d-md-none" style="max-height:52vh;overflow:auto"></div>
+					<!--end::카드 목록(모바일)-->
 				</div>
 				<div class="modal-footer flex-center">
 					<button type="button" class="btn btn-light me-3" data-bs-dismiss="modal">취소</button>
@@ -597,6 +602,7 @@ $platformLabels = [
 	const previewModalEl = document.getElementById('kt_settlement_preview_modal');
 	const quickModalEl   = document.getElementById('kt_quick_rider_modal');
 	const previewTbody   = document.getElementById('previewTbody');
+	const previewCards   = document.getElementById('previewCards');
 	const previewSummary = document.getElementById('previewSummary');
 	const previewDupWarn = document.getElementById('previewDupWarn');
 	const confirmBtn     = document.getElementById('confirmUploadBtn');
@@ -673,21 +679,41 @@ $platformLabels = [
 			previewDupWarn.classList.add('d-none');
 		}
 		previewTbody.innerHTML = data.rows.map((r, i) => rowHtml(r, i)).join('');
+		previewCards.innerHTML = data.rows.map((r, i) => cardHtml(r, i)).join('');
 		updateConfirmBtn();
 		bootstrap.Modal.getOrCreateInstance(previewModalEl).show();
 	}
 
-	function rowHtml(r, i) {
-		const matchCell = r.matched
+	function matchCellHtml(r, i) {
+		return r.matched
 			? `<span class="badge badge-light-success">${escHtml(r.rider_name)} <span class="text-muted">${escHtml(r.rider_code)}</span></span>`
 			: `<button type="button" class="btn btn-sm btn-light-danger py-1 btn-reg" data-i="${i}" data-license="${escHtml(r.match_key || r.license_id)}" data-name="${escHtml(r.name_raw)}">미매칭 · 연결/등록</button>`;
+	}
+
+	function rowHtml(r, i) {
 		return `<tr data-i="${i}">
 			<td class="font-monospace">${escHtml((r.match_key || r.license_id) || '-')}</td>
 			<td>${escHtml(r.name_raw)}</td>
 			<td class="text-end">${won(r.order_count)}</td>
 			<td class="text-end fw-bold">${won(r.gross_amount)}</td>
-			<td class="match-cell">${matchCell}</td>
+			<td class="match-cell">${matchCellHtml(r, i)}</td>
 		</tr>`;
+	}
+
+	function cardHtml(r, i) {
+		return `<div class="border border-gray-300 rounded p-3 mb-2" data-i="${i}">
+			<div class="d-flex justify-content-between align-items-start mb-1">
+				<div>
+					<div class="fw-bold">${escHtml(r.name_raw)}</div>
+					<div class="text-muted fs-8 font-monospace">${escHtml((r.match_key || r.license_id) || '-')}</div>
+				</div>
+				<div class="text-end">
+					<div class="fw-bold">${won(r.gross_amount)}원</div>
+					<div class="text-muted fs-8">${won(r.order_count)}건</div>
+				</div>
+			</div>
+			<div class="match-cell mt-2">${matchCellHtml(r, i)}</div>
+		</div>`;
 	}
 
 	function updateConfirmBtn() {
@@ -695,8 +721,8 @@ $platformLabels = [
 		if (label) label.textContent = `확정 업로드 (${previewState.total}명${previewState.unmatched > 0 ? ` · 미매칭 ${previewState.unmatched}명 포함` : ''})`;
 	}
 
-	// 미매칭 행 → 빠른 등록 모달
-	previewTbody.addEventListener('click', function (ev) {
+	// 미매칭 행 → 빠른 등록 모달 (표·카드 둘 다에서 뜬다 — 모달 전체에 한 번만 건다)
+	previewModalEl.addEventListener('click', function (ev) {
 		const b = ev.target.closest('.btn-reg');
 		if (!b) return;
 		activeRegRow = Number(b.getAttribute('data-i'));
@@ -801,11 +827,11 @@ $platformLabels = [
 	});
 
 	function markRowMatched(i, rider, badgeLabel) {
-		const tr = previewTbody.querySelector(`tr[data-i="${i}"]`);
-		if (tr) {
-			const cell = tr.querySelector('.match-cell');
+		// 같은 i가 표(행)·카드(모바일) 양쪽에 다 있을 수 있으니 둘 다 갱신한다.
+		document.querySelectorAll(`[data-i="${i}"]`).forEach(function (el) {
+			const cell = el.querySelector('.match-cell');
 			if (cell) cell.innerHTML = `<span class="badge badge-light-success">${escHtml(rider.name)} <span class="text-muted">${escHtml(rider.rider_code)}</span> <span class="badge badge-success ms-1">${escHtml(badgeLabel || '신규')}</span></span>`;
-		}
+		});
 		previewState.matched++;
 		previewState.unmatched = Math.max(0, previewState.unmatched - 1);
 		const m = document.getElementById('sumMatched'); if (m) m.textContent = previewState.matched;
