@@ -56,12 +56,16 @@ final class AgencyPayout
             ));
         }
 
-        // 승인 절차 없이 즉시 오픈뱅킹 이체(현재 mock) → 대리점 자기 계좌로.
+        // 승인 절차 없이 즉시 오픈뱅킹 이체(현재 mock).
+        // 나가는 곳은 **본사 단일 출금 원천 계좌**(Disbursement 안에서 결정), 받는 곳은 대리점 정산금 수령 계좌.
         require_once __DIR__ . '/Disbursement.php';
         require_once __DIR__ . '/BankAccount.php';
         $acct   = BankAccount::get($agencyId);
         $toBank = (string) ($acct['bank_code'] ?? '');
         $toAcc  = (string) ($acct['account_no'] ?? '');
+        if ($toBank === '' || $toAcc === '') {
+            throw new RuntimeException('정산금 수령 계좌가 등록돼 있지 않습니다. 「결제 설정(카드·계좌)」에서 먼저 등록하세요.');
+        }
         $res    = Disbursement::transfer($agencyId, $toBank, $toAcc, $amount);
 
         if (!$res->success) {

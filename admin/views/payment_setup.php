@@ -18,12 +18,21 @@ $agencyOptions = [];
 $targetAgency  = null;
 $agencyId      = 0;
 
+// 본사는 대리점 카드·수령계좌 대행 설정 외에, **자기 출금 원천 계좌**도 여기서 관리한다.
+// (2026-08-15 단일 계좌 구조 — 라이더 이체·대리점 인출이 전부 이 계좌에서 나간다.)
+$isHqAccount = false;
+
 if ($isAgencySelf) {
     $agencyId = admin_org_id();
 } elseif ($isSuper) {
     $agencyOptions = Organization::agencyOptions();
     $selected = (int) ($_GET['agency'] ?? 0);
-    if ($selected > 0) {
+    $hqId     = Org::hqId();
+
+    if ($selected === $hqId && $hqId > 0) {
+        $isHqAccount = true;
+        $agencyId    = $hqId;
+    } elseif ($selected > 0) {
         $row = Organization::find($selected);
         if ($row !== null && $row['level'] === Org::LEVEL_AGENCY) {
             $targetAgency = $row;
@@ -71,9 +80,12 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
 					<input type="hidden" name="route" value="withdrawal/payment-setup" />
 				<?php endif; ?>
-				<label class="form-label fw-bold m-0">대상 대리점</label>
+				<label class="form-label fw-bold m-0">대상</label>
 				<select name="agency" class="form-select form-select-solid w-250px" onchange="this.form.submit()">
-					<option value="0"<?= $targetAgency === null ? ' selected' : '' ?>>선택하세요…</option>
+					<option value="0"<?= (!$isHqAccount && $targetAgency === null) ? ' selected' : '' ?>>선택하세요…</option>
+					<?php if (Org::hqId() > 0) : ?>
+					<option value="<?= Org::hqId() ?>"<?= $isHqAccount ? ' selected' : '' ?>>★ 본사 — 출금 원천 계좌</option>
+					<?php endif; ?>
 					<?php foreach ($agencyOptions as $opt) : ?>
 					<option value="<?= (int) $opt['id'] ?>"<?= $targetAgency !== null && (int) $targetAgency['id'] === (int) $opt['id'] ? ' selected' : '' ?>>
 						<?= htmlspecialchars($opt['name'] . ' (' . $opt['code'] . ')', ENT_QUOTES, 'UTF-8') ?>
@@ -81,7 +93,9 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 					<?php endforeach; ?>
 				</select>
 				<noscript><button type="submit" class="btn btn-sm btn-light-primary">이동</button></noscript>
-				<?php if ($targetAgency !== null) : ?>
+				<?php if ($isHqAccount) : ?>
+					<span class="badge badge-light-danger fs-7">라이더 이체·대리점 인출이 전부 이 계좌에서 나갑니다</span>
+				<?php elseif ($targetAgency !== null) : ?>
 					<span class="badge badge-light-warning fs-7">본사 대행 — 이 대리점 결제수단을 대신 설정합니다(감사로그 기록)</span>
 				<?php endif; ?>
 			</form>
@@ -94,7 +108,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 	<div class="alert alert-info mb-8">위에서 설정할 대리점을 선택하세요.</div>
 	<?php else : ?>
 
-	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 빌링키/핀테크번호는 모의 값으로 동작합니다. 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.</div>
+	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 <?= $isHqAccount ? '핀테크이용번호는' : '빌링키/핀테크번호는' ?> 모의 값으로 동작합니다.<?php if (!$isHqAccount) : ?> 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.<?php endif; ?></div>
 
 	<div id="ps_toast" class="alert alert-dismissible d-none mb-6" role="alert">
 		<span id="ps_toast_msg"></span>
@@ -102,6 +116,8 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 	</div>
 
 	<div class="row g-6">
+		<?php // 본사 행은 **출금 원천 계좌** 하나만 쓴다. PG 결제 카드와 잔액 충전은 대리점 기능이라 감춘다. ?>
+		<?php if (!$isHqAccount) : ?>
 		<!-- 카드 -->
 		<div class="col-xl-7">
 			<div class="card card-flush mb-6">
@@ -193,12 +209,27 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 				</div>
 			</div>
 		</div>
+		<?php endif; ?>
 
 		<!-- 계좌 + PG 충전 -->
-		<div class="col-xl-5">
+		<div class="<?= $isHqAccount ? 'col-xl-7' : 'col-xl-5' ?>">
 			<div class="card card-flush mb-6">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">오픈뱅킹 출금 계좌</h3></div>
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold"><?= $isHqAccount ? '출금 원천 계좌 (본사)' : '정산금 수령 계좌' ?></h3>
+				</div>
 				<div class="card-body pt-2 fs-7">
+					<?php if ($isHqAccount) : ?>
+					<div class="alert bg-light-danger fs-8 p-3 mb-4">
+						<strong>라이더 이체·대리점 자체 인출이 전부 이 계좌에서 나갑니다.</strong>
+						시스템에서 돈이 실제로 빠져나가는 유일한 계좌이므로 신중히 설정하세요.
+						대리점 지갑은 이 계좌 잔액을 조직별로 나눠 보여주는 내부 장부입니다.
+					</div>
+					<?php else : ?>
+					<div class="alert bg-light-primary fs-8 p-3 mb-4">
+						대리점이 <strong>자체 인출</strong>로 정산금을 받을 계좌입니다.
+						라이더에게 나가는 이체는 <strong>본사 단일 출금 계좌</strong>에서 실행되므로 여기 설정과 무관합니다.
+					</div>
+					<?php endif; ?>
 					<div class="mb-3">
 						<label class="form-label required">은행</label>
 						<select class="form-select form-select-solid" id="ps_bank">
@@ -210,10 +241,11 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 					</div>
 					<div class="mb-3"><label class="form-label required">계좌번호</label><input type="text" class="form-control form-control-solid" id="ps_account" value="<?= htmlspecialchars((string) ($account['account_no'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
 					<div class="mb-3"><label class="form-label">예금주</label><input type="text" class="form-control form-control-solid" id="ps_holder" value="<?= htmlspecialchars((string) ($account['holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
-					<div class="mb-4 text-muted fs-8">핀테크이용번호: <span id="ps_fintech"><?= $account ? htmlspecialchars(substr((string) $account['fintech_use_num'], 0, 12), ENT_QUOTES, 'UTF-8') . '…' : '미발급(저장 시 모의 발급)' ?></span></div>
+					<?php // 핀테크이용번호는 **출금 원천 계좌**(본사)에만 필요하다. 수령 계좌엔 쓰이지 않아 표시하지 않는다. ?>
 					<button type="button" class="btn btn-primary" id="ps_account_save">계좌 저장</button>
 				</div>
 			</div>
+			<?php if (!$isHqAccount) : ?>
 			<div class="card card-flush">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">PG 잔액 충전</h3></div>
 				<div class="card-body pt-2 fs-7">
@@ -224,20 +256,25 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 					<button type="button" class="btn btn-success" id="ps_charge">카드로 충전</button>
 				</div>
 			</div>
+			<?php endif; ?>
 		</div>
 	</div>
 
 	<script>
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
-		// 본사가 대리점을 대신 설정할 때만 값이 있다(대리점 자기 계정은 0 → 서버가 세션 조직으로 고정).
-		var TARGET_AGENCY_ID = <?= $targetAgency !== null ? (int) $targetAgency['id'] : 0 ?>;
+		// 본사가 대상(대리점 또는 본사 출금 원천 계좌)을 골라 설정할 때만 값이 있다.
+		// 대리점 자기 계정은 0 → 서버가 세션 조직으로 고정한다.
+		// ⚠️ `$targetAgency`만 보면 **본사 자신을 고른 경우**(그때는 null)에 0이 나가 "대상을 선택하세요"가 뜬다.
+		var TARGET_AGENCY_ID = <?= $isAgencySelf ? 0 : (int) $agencyId ?>;
 		var toast = document.getElementById('ps_toast'), toastMsg = document.getElementById('ps_toast_msg');
 		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger'); toastMsg.textContent = m; toast.classList.remove('d-none'); window.scrollTo(0, 0); }
 		function post(p) {
 			if (TARGET_AGENCY_ID > 0) { p.agency_id = TARGET_AGENCY_ID; }
 			return fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) }).then(function (r) { return r.json(); });
 		}
+		// 본사(출금 원천 계좌) 화면에는 카드·충전 영역이 없다 → 없는 요소는 조용히 건너뛴다.
+		function on(id, ev, fn) { var el = document.getElementById(id); if (el) { el.addEventListener(ev, fn); } }
 		function reloadSoon() { setTimeout(function () { location.reload(); }, 700); }
 		// 마지막 카드를 지우면 빈 테이블만 남아 "카드가 없다"는 걸 알 수 없으므로 안내 행을 되돌린다.
 		function renderEmptyIfNone() {
@@ -247,7 +284,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 			}
 		}
 
-		document.getElementById('ps_card_add').addEventListener('click', function () {
+		on('ps_card_add', 'click', function () {
 			var mockLimitEl = document.getElementById('ps_mocklimit');
 			var payload = {
 				action: 'card_add',
@@ -276,26 +313,22 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 					showToast(e.message, false);
 				});
 		});
-		document.getElementById('ps_cards').addEventListener('click', function (ev) {
+		on('ps_cards', 'click', function (ev) {
 			var tr = ev.target.closest('tr'); if (!tr) return; var id = parseInt(tr.getAttribute('data-id'), 10);
 			if (ev.target.closest('.ps-del')) { if (!confirm('카드를 삭제할까요?')) return; post({ action: 'card_delete', id: id }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); tr.remove(); renderEmptyIfNone(); }).catch(function (e) { showToast(e.message, false); }); }
 			if (ev.target.closest('.ps-toggle')) { var on = ev.target.textContent.trim() === '활성'; post({ action: 'card_toggle', id: id, active: !on }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); reloadSoon(); }).catch(function (e) { showToast(e.message, false); }); }
 		});
-		document.getElementById('ps_cards').addEventListener('change', function (ev) {
+		on('ps_cards', 'change', function (ev) {
 			if (ev.target.classList.contains('ps-pri')) { var tr = ev.target.closest('tr'); post({ action: 'card_priority', id: parseInt(tr.getAttribute('data-id'), 10), priority: parseInt(ev.target.value, 10) || 100 }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); }).catch(function (e) { showToast(e.message, false); }); }
 		});
 		document.getElementById('ps_account_save').addEventListener('click', function () {
 			post({ action: 'account_save', bank_code: document.getElementById('ps_bank').value, account_no: document.getElementById('ps_account').value.trim(), holder: document.getElementById('ps_holder').value.trim() })
 				.then(function (r) {
 					if (!r.ok) throw new Error(r.message);
-					// 저장 직후에도 "미발급"이 그대로 떠 있으면 저장이 안 된 것처럼 보이므로 즉시 갱신한다.
-					if (r.account && r.account.fintech_use_num) {
-						document.getElementById('ps_fintech').textContent = String(r.account.fintech_use_num).slice(0, 12) + '…';
-					}
 					showToast(r.message, true);
 				}).catch(function (e) { showToast(e.message, false); });
 		});
-		document.getElementById('ps_charge').addEventListener('click', function () {
+		on('ps_charge', 'click', function () {
 			var amt = parseInt(document.getElementById('ps_charge_amt').value, 10) || 0;
 			if (amt <= 0) { showToast('충전 금액을 입력하세요.', false); return; }
 			post({ action: 'pg_charge', amount: amt }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); if (r.wallet) document.getElementById('ps_balance').textContent = (r.wallet.balance || 0).toLocaleString('ko-KR') + '원'; }).catch(function (e) { showToast(e.message, false); });

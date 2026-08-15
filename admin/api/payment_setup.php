@@ -50,7 +50,17 @@ $body = [];
 if ($method === 'POST') {
     $raw  = file_get_contents('php://input');
     $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
-    $body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}', true) : $_POST;
+    if (str_contains($ct, 'application/json')) {
+        // 파싱 실패를 조용히 빈 배열로 넘기면(예: 잘못된 UTF-8) 뒤에서 "대상을 선택하세요"처럼
+        // 엉뚱한 메시지가 나와 원인을 찾기 어렵다. 여기서 바로 이유를 알려준다.
+        $decoded = json_decode($raw ?: '{}', true);
+        if (!is_array($decoded)) {
+            $err('요청 본문(JSON)을 읽을 수 없습니다: ' . json_last_error_msg(), 400);
+        }
+        $body = $decoded;
+    } else {
+        $body = $_POST;
+    }
 }
 
 // 대상 대리점 결정
@@ -65,12 +75,19 @@ if ($isAgencySelf) {
 } elseif (admin_has_role('super')) {
     $agencyId = (int) ($method === 'GET' ? ($_GET['agency_id'] ?? 0) : ($body['agency_id'] ?? 0));
     if ($agencyId < 1) {
-        $err('대상 대리점을 선택하세요.');
+        $err('대상을 선택하세요.');
     }
     $targetAgency = Org::find($agencyId);
-    if ($targetAgency === null || (string) $targetAgency['level'] !== Org::LEVEL_AGENCY) {
-        $err('대상 대리점을 찾을 수 없습니다.', 404);
+    if ($targetAgency === null) {
+        $err('대상 조직을 찾을 수 없습니다.', 404);
     }
+    // 본사 자신도 허용한다 — **출금 원천 계좌**(라이더 이체·대리점 인출이 나가는 단 하나의 계좌)를
+    // 여기서 관리하기 때문. 총판은 결제수단 대상이 아니라 계속 막는다.
+    $lvl = (string) $targetAgency['level'];
+    if ($lvl !== Org::LEVEL_AGENCY && $lvl !== Org::LEVEL_ADMIN) {
+        $err('대리점 또는 본사만 선택할 수 있습니다.', 404);
+    }
+    $isHqTarget = $lvl === Org::LEVEL_ADMIN;
 } else {
     $err('대리점 계정 또는 본사 최고관리자만 사용할 수 있습니다.', 403);
 }
@@ -90,8 +107,17 @@ if ($method !== 'POST') {
 
 $action = trim((string) ($body['action'] ?? ''));
 
+// 본사 행은 **출금 원천 계좌** 전용이다. PG 결제 카드·잔액 충전은 대리점 기능이라 대상이 될 수 없다.
+if (!empty($isHqTarget) && $action !== 'account_save') {
+    $err('본사는 출금 원천 계좌만 설정할 수 있습니다.', 400);
+}
+
 // 본사가 남의 대리점을 대신 설정한 기록은 감사로그에 대상을 남긴다(누가 어느 대리점 것을 건드렸는지).
-$onBehalf = $targetAgency !== null ? sprintf(' [본사 대행 · %s]', (string) $targetAgency['name']) : '';
+$onBehalf = $targetAgency === null
+    ? ''
+    : (!empty($isHqTarget)
+        ? ' [본사 출금 원천 계좌]'
+        : sprintf(' [본사 대행 · %s]', (string) $targetAgency['name']));
 
 try {
     switch ($action) {

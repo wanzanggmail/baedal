@@ -21,7 +21,10 @@ require_once __DIR__ . '/OpenBankingGateway.php'; // TransferResult 재사용
 interface FirmBankingGateway
 {
     /**
-     * 이체 실행 (대리점 출금계좌 → 수취 계좌).
+     * 이체 실행 (**본사 단일 출금계좌** → 수취 계좌).
+     *
+     * ⚠️ `$agencyId`는 **어느 조직 몫에서 나가는지 기록용**이지 출금 계좌를 고르는 값이 아니다.
+     *    2026-08-15 갑 확정으로 실제로 돈이 나가는 계좌는 본사 하나뿐이다(`BankAccount::payerFintechNum()`).
      *
      * @param array<string,mixed> $meta 부가정보(요청 id·라이더코드 등 추적용)
      */

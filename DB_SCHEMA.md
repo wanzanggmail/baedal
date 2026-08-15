@@ -45,7 +45,8 @@ settlement_uploads → settlement_daily_riders → settlement_rider_cycles → s
 agency_wallets(대리점 잔액) ←─ pg_payments(PG충전, agency_cards로 결제)
        │
        └─→ withdrawal_requests(kind: rider_manual/auto_daily/agency_payout) ─→ agency_wallet_ledger(원장)
-                     이체는 agency_bank_accounts(핀테크번호) 통해 실행(현재 mock)
+                     이체는 agency_bank_accounts의 **본사 행**(출금 원천 계좌)에서 실행(현재 mock)
+                     대리점 행은 정산금을 받을 수령 계좌일 뿐 — 지갑은 단일 계좌를 나눈 내부 장부
 
 content_notices / content_banners   본사 작성 → org_id 기준 broadcast
 audit_logs                          전 도메인 공통 감사로그(before/after JSON)
@@ -243,9 +244,19 @@ PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점
 `status`(`success`/`failed`), `attempts`(시도한 카드 수), `card_id`(실제 승인 카드).
 `hq_amount`/`distributor_amount`/`agency_amount`(🆕 2026-08-05) — `service_fee`의 본사/총판/대리점 분배 **금액 스냅샷**, `hq_pct`/`distributor_pct`/`agency_pct`는 그 시점 요율 스냅샷. `PgPayment::record()`가 결제 순간의 `PgFeeConfig::breakdownForAgency()` 결과를 그대로 저장 — 이후 `org_fee_config` 요율이 바뀌어도 이 값은 불변(재계산 안 함). 「플랫폼 수수료 내역」(`settlement/platform-fee`) 화면과 `OrgDashboard`의 "내 몫" 집계 둘 다 이 스냅샷 컬럼을 그대로 합산한다(실시간 재계산 금지).
 
-### `agency_bank_accounts` — 🆕 대리점 오픈뱅킹 출금 계좌
-PK=`agency_id`. `fintech_use_num`(핀테크이용번호, 실 연동 전 모의 발급 가능).
-`Disbursement::transfer()`가 이 계좌 기준으로 이체(현재 `MockOpenBankingGateway`).
+### `agency_bank_accounts` — 조직 계좌 (🔧 2026-08-15 의미 재정의)
+PK=`agency_id`. **행의 역할이 조직 레벨에 따라 다르다**(갑 확정 "돈이 나가는 계좌는 하나"):
+
+| 레벨 | 역할 | `fintech_use_num` |
+|---|---|---|
+| `admin`(본사) | **출금 원천 계좌** — 라이더 이체·대리점 자체 인출이 전부 여기서 나감 | **필요**(이체 실행 키) |
+| `agency`(대리점) | **정산금 수령 계좌** — 대리점이 자체 인출로 받을 곳 | 불필요(저장 안 함) |
+
+- `BankAccount::payerFintechNum()` — 출금 원천(본사) 핀테크번호. `Disbursement::transfer()`가 이걸 쓴다(현재 `MockOpenBankingGateway`).
+- `BankAccount::fintechNum($orgId)` — 특정 행을 그대로 읽는 저수준 함수. 대리점 id를 넘기면 수령 계좌 행이 나오므로 이체에는 쓰지 말 것.
+- `BankAccount::save()`는 기존 `fintech_use_num`을 **보존**한다(예금주만 고쳐도 번호가 바뀌면 이체가 끊기므로). 모의 번호 발급도 본사 행에서만 한다.
+- 화면(`withdrawal/payment-setup`): 본사를 대상으로 고르면 **출금 원천 계좌만** 노출(카드·PG충전 숨김, API도 `account_save` 외 거부). 대리점은 기존대로 카드+수령계좌+충전.
+- 총판(`distributor`)은 결제수단 대상이 아니다(선택 불가).
 
 > **Mock→Real 교체 지점:** `inc/PgGateway.php`(`PgGatewayFactory::make()`), `inc/OpenBankingGateway.php`(`OpenBankingGatewayFactory::make()`) — 실 스펙 도착 시 이 두 팩토리만 교체하면 스키마·상위 로직은 그대로 재사용.
 >

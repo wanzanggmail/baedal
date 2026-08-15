@@ -235,6 +235,18 @@ final class Org
      *
      * @return array{agency:int, distributor:int, hq:int}
      */
+    /**
+     * 본사(admin 레벨) 조직 id. 트리 루트라 항상 1개다.
+     * 단일 가맹점·단일 실계좌 구조(2026-08-15 갑 확정)에서 "돈이 실제로 드나드는 주체"를
+     * 가리킬 때 쓴다 — 라이더 이체·대리점 인출의 **출금 원천 계좌**가 본사 것이다.
+     */
+    public static function hqId(): int
+    {
+        $row = db_row("SELECT id FROM organizations WHERE level = 'admin' ORDER BY id ASC LIMIT 1");
+
+        return $row !== null ? (int) $row['id'] : 0;
+    }
+
     public static function chainForAgency(int $agencyId): array
     {
         $out = ['agency' => 0, 'distributor' => 0, 'hq' => 0];
