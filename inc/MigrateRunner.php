@@ -110,6 +110,10 @@ final class MigrateRunner
             'agency_fee_day_threshold' => "ADD COLUMN agency_fee_day_threshold SMALLINT UNSIGNED NOT NULL DEFAULT 7 COMMENT '적립 일수 기준' AFTER agency_fee_pct",
             'agency_fee_short'         => "ADD COLUMN agency_fee_short INT NOT NULL DEFAULT 80 COMMENT '기준 미만 건당(원)' AFTER agency_fee_day_threshold",
             'agency_fee_long'          => "ADD COLUMN agency_fee_long INT NOT NULL DEFAULT 40 COMMENT '기준 이상 건당(원)' AFTER agency_fee_short",
+            // 🆕 2026-08-15 본사가 정하는 하한. **전역 행(org_id NULL)의 값만 의미가 있다** —
+            // 대리점 행에도 컬럼은 생기지만 읽지 않는다(대리점이 자기 하한을 정하면 하한이 아니므로).
+            'agency_fee_min_short'     => "ADD COLUMN agency_fee_min_short INT NOT NULL DEFAULT 0 COMMENT '본사 지정 최저 — 기준 미만 건당(원)' AFTER agency_fee_long",
+            'agency_fee_min_long'      => "ADD COLUMN agency_fee_min_long INT NOT NULL DEFAULT 0 COMMENT '본사 지정 최저 — 기준 이상 건당(원)' AFTER agency_fee_min_short",
         ];
 
         foreach ($adds as $col => $alter) {

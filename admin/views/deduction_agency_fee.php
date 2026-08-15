@@ -12,6 +12,16 @@ $cfgOrgId     = $isAgencySelf ? admin_org_id() : null;
 $config       = AgencyFeeConfig::get($cfgOrgId);
 $apiUrl       = ADMIN_BASE . '/api/agency_fee_config.php';
 $needsMigrate = !AgencyFeeConfig::tableReady();
+// 🆕 본사가 정한 구간별 최저 건당 금액. 대리점은 이 아래로 저장할 수 없다(API에서도 거부).
+$minReady     = AgencyFeeConfig::minimumReady();
+$minimum      = AgencyFeeConfig::minimums();
+$belowMin     = $isHq && $minReady ? AgencyFeeConfig::agenciesBelowMinimum() : [];
+// 전역 기본값이 하한보다 낮으면 **전용 설정이 없는 대리점이 하한을 우회**한다 → 화면에서 바로 보이게.
+$globalCfg      = $isHq ? $config : AgencyFeeConfig::get(null);
+$globalBelowMin = $isHq && $minReady && (
+    ($minimum['fee_per_tx_short'] > 0 && $globalCfg['fee_per_tx_short'] < $minimum['fee_per_tx_short'])
+    || ($minimum['fee_per_tx_long'] > 0 && $globalCfg['fee_per_tx_long'] < $minimum['fee_per_tx_long'])
+);
 // 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
 $canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
 $readOnlyNote = (!$isAgencySelf && !$isHq);
@@ -71,13 +81,15 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 						<div class="row g-4 mb-6">
 							<div class="col-md-6">
 								<label class="form-label required" for="cfg_fee_short">건당 수수료 — 기준 미만 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_short" min="0"
+								<input type="number" class="form-control form-control-solid" id="cfg_fee_short" min="<?= (int) $minimum['fee_per_tx_short'] ?>"
 									value="<?= (int) $config['fee_per_tx_short'] ?>" <?= $canWrite ? '' : 'readonly' ?> required />
+									<?php if ($minimum['fee_per_tx_short'] > 0) : ?><div class="form-text">본사 최저 <strong><?= number_format($minimum['fee_per_tx_short']) ?>원</strong> — 이 아래로는 저장되지 않습니다.</div><?php endif; ?>
 							</div>
 							<div class="col-md-6">
 								<label class="form-label required" for="cfg_fee_long">건당 수수료 — 기준 이상 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_long" min="0"
+								<input type="number" class="form-control form-control-solid" id="cfg_fee_long" min="<?= (int) $minimum['fee_per_tx_long'] ?>"
 									value="<?= (int) $config['fee_per_tx_long'] ?>" <?= $canWrite ? '' : 'readonly' ?> required />
+									<?php if ($minimum['fee_per_tx_long'] > 0) : ?><div class="form-text">본사 최저 <strong><?= number_format($minimum['fee_per_tx_long']) ?>원</strong> — 이 아래로는 저장되지 않습니다.</div><?php endif; ?>
 							</div>
 						</div>
 						<?php if ($canWrite) : ?>
@@ -103,6 +115,59 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				</div>
 			</div>
 		</div>
+
+		<?php // 최저금액은 본사 전용 — 대리점이 자기 하한을 정하면 하한이 아니게 된다. ?>
+		<?php if ($isHq) : ?>
+		<div class="col-12">
+			<div class="card card-flush border border-warning">
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold">대행수수료 최저 금액 <span class="badge badge-light-warning ms-2">본사 전용</span></h3>
+				</div>
+				<div class="card-body pt-0 fs-7">
+					<?php if (!$minReady) : ?>
+					<div class="alert alert-warning mb-0">최저금액 컬럼이 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
+					<?php else : ?>
+					<div class="text-gray-700 mb-5">
+						대리점은 여기서 정한 금액 <strong>아래로 대행수수료를 설정할 수 없습니다</strong>(저장 시 거부).
+						<strong>0</strong>이면 하한 없음. 전역 기본값에도 똑같이 걸리므로, 하한보다 낮은 기본값은 저장되지 않습니다.
+					</div>
+					<div class="row g-4 mb-5">
+						<div class="col-md-4">
+							<label class="form-label" for="cfg_min_short">최저 — 기준 미만 구간 (원)</label>
+							<input type="number" class="form-control form-control-solid" id="cfg_min_short" min="0" value="<?= (int) $minimum['fee_per_tx_short'] ?>" <?= $canWrite ? '' : 'readonly' ?> />
+						</div>
+						<div class="col-md-4">
+							<label class="form-label" for="cfg_min_long">최저 — 기준 이상 구간 (원)</label>
+							<input type="number" class="form-control form-control-solid" id="cfg_min_long" min="0" value="<?= (int) $minimum['fee_per_tx_long'] ?>" <?= $canWrite ? '' : 'readonly' ?> />
+						</div>
+						<?php if ($canWrite) : ?>
+						<div class="col-md-4 d-flex align-items-end">
+							<button type="button" class="btn btn-warning" id="cfg_min_save_btn">최저금액 저장</button>
+						</div>
+						<?php endif; ?>
+					</div>
+					<?php if ($globalBelowMin) : ?>
+					<div class="alert bg-light-danger fs-8 p-4 mb-4">
+						<span class="fw-bold">전역 기본값(<?= number_format((int) $globalCfg['fee_per_tx_short']) ?>원 / <?= number_format((int) $globalCfg['fee_per_tx_long']) ?>원)이 최저보다 낮습니다.</span>
+						전용 설정이 없는 대리점은 이 기본값을 쓰므로 <strong>최저가 사실상 적용되지 않습니다</strong>. 위 「수수료 정책」에서 기본값을 최저 이상으로 올리세요.
+					</div>
+					<?php endif; ?>
+					<?php if ($belowMin !== []) : ?>
+					<div class="alert bg-light-danger fs-8 p-4 mb-0">
+						<div class="fw-bold mb-2">현재 최저보다 낮게 설정해둔 대리점 <?= count($belowMin) ?>곳</div>
+						<div class="text-gray-700 mb-2">하한을 올려도 <strong>기존 설정은 그대로 둡니다</strong>(남의 요율을 말없이 바꾸지 않음). 해당 대리점이 다음에 저장할 때 하한 이상으로 올려야 합니다.</div>
+						<ul class="mb-0 ps-4">
+							<?php foreach ($belowMin as $b) : ?>
+							<li><?= htmlspecialchars((string) $b['name'], ENT_QUOTES, 'UTF-8') ?> — 미만 <?= number_format((int) $b['agency_fee_short']) ?>원 / 이상 <?= number_format((int) $b['agency_fee_long']) ?>원</li>
+							<?php endforeach; ?>
+						</ul>
+					</div>
+					<?php endif; ?>
+					<?php endif; ?>
+				</div>
+			</div>
+		</div>
+		<?php endif; ?>
 	</div>
 
 	<?php if ($canWrite) : ?>
@@ -115,6 +180,35 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger');
 			toastMsg.textContent = msg;
 			toast.classList.remove('d-none');
+		}
+		function send(payload, okMsg) {
+			return fetch(API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+			})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '저장 실패');
+					showToast(res.message || okMsg, true);
+					return res;
+				})
+				.catch(function (e) { showToast(e.message || '저장 실패', false); });
+		}
+		// 최저금액 저장(본사 전용) — 저장 후 아래 입력칸의 min 속성을 갱신해 곧바로 반영되게 한다.
+		var minBtn = document.getElementById('cfg_min_save_btn');
+		if (minBtn) {
+			minBtn.addEventListener('click', function () {
+				send({
+					action: 'save_min',
+					min_fee_per_tx_short: parseInt(document.getElementById('cfg_min_short').value, 10) || 0,
+					min_fee_per_tx_long: parseInt(document.getElementById('cfg_min_long').value, 10) || 0,
+				}, '최저금액이 저장되었습니다.').then(function (res) {
+					if (!res || !res.minimum) return;
+					document.getElementById('cfg_fee_short').min = res.minimum.fee_per_tx_short;
+					document.getElementById('cfg_fee_long').min = res.minimum.fee_per_tx_long;
+				});
+			});
 		}
 		document.getElementById('cfg_save_btn').addEventListener('click', function () {
 			var payload = {
