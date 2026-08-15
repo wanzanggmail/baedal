@@ -7,6 +7,8 @@ require_once INC_PATH . '/Organization.php';
 $isAgencyUploader = admin_org_level() === Org::LEVEL_AGENCY;
 $uploadAgencyOptions = $isAgencyUploader ? [] : Organization::agencyOptions();
 [$uplScopeSql, $uplScopeParams] = Org::agencyScopeClause('u.agency_id');
+// 라이더 빠른 등록 모달의 은행 선택용(일정산 라이더는 대리점이 출금 대행하므로 계좌가 필요).
+$qrBanks = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM system_codes WHERE category = 'bank' AND is_active = 1 ORDER BY label ASC") : [];
 
 // 최근 업로드 이력 (일간)
 $recentUploads = [];
@@ -374,18 +376,43 @@ $platformLabels = [
 							<input type="text" class="form-control form-control-solid" id="qrName" maxlength="50" />
 						</div>
 						<div class="mb-4">
-							<label class="form-label">휴대전화</label>
+							<label class="form-label required">휴대전화</label>
 							<input type="text" class="form-control form-control-solid" id="qrPhone" maxlength="20" placeholder="01012345678" />
+							<div class="form-text fs-9">로그인 ID로 그대로 쓰입니다(겹치면 뒤에 글자가 자동으로 붙습니다).</div>
 						</div>
-						<div class="row">
+						<div class="mb-4">
+							<label class="form-label">초기 비밀번호</label>
+							<input type="text" class="form-control form-control-solid" id="qrPassword" value="0000" readonly />
+							<div class="form-text fs-9">최초 로그인 시 라이더가 직접 변경합니다.</div>
+						</div>
+						<div class="row mb-2">
+							<div class="col-6">
+								<label class="form-check form-check-custom form-check-solid">
+									<input class="form-check-input" type="checkbox" id="qrDaily" />
+									<span class="form-check-label">일정산 라이더</span>
+								</label>
+							</div>
+							<div class="col-6">
+								<label class="form-check form-check-custom form-check-solid">
+									<input class="form-check-input" type="checkbox" id="qrWithholding" />
+									<span class="form-check-label">원천세 대상</span>
+								</label>
+							</div>
+						</div>
+						<?php // 일정산 라이더는 대리점이 출금을 대행하므로 계좌가 있어야 한다. ?>
+						<div id="qrBankWrap" class="row d-none mt-2">
 							<div class="col-md-6 mb-4">
-								<label class="form-label">로그인 ID</label>
-								<input type="text" class="form-control form-control-solid" id="qrLoginId" maxlength="60" placeholder="비우면 휴대전화번호로 자동 생성" autocomplete="off" />
+								<label class="form-label required">은행</label>
+								<select class="form-select form-select-solid" id="qrBank">
+									<option value="">선택…</option>
+									<?php foreach ($qrBanks as $b) : ?>
+									<option value="<?= htmlspecialchars((string) $b['code'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string) $b['label'], ENT_QUOTES, 'UTF-8') ?></option>
+									<?php endforeach; ?>
+								</select>
 							</div>
 							<div class="col-md-6 mb-4">
-								<label class="form-label">초기 비밀번호</label>
-								<input type="text" class="form-control form-control-solid" id="qrPassword" value="0000" readonly />
-								<div class="form-text fs-9">최초 로그인 시 라이더가 직접 변경합니다.</div>
+								<label class="form-label required">계좌번호</label>
+								<input type="text" class="form-control form-control-solid font-monospace" id="qrAccount" maxlength="40" placeholder="숫자·하이픈" />
 							</div>
 						</div>
 						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
@@ -732,8 +759,12 @@ $platformLabels = [
 		document.getElementById('qrLicenseLabel').textContent = license || '(없음)';
 		document.getElementById('qrName').value = name;
 		document.getElementById('qrPhone').value = '';
-		document.getElementById('qrLoginId').value = '';
 		document.getElementById('qrPassword').value = '0000';
+		document.getElementById('qrDaily').checked = false;
+		document.getElementById('qrWithholding').checked = false;
+		document.getElementById('qrBank').value = '';
+		document.getElementById('qrAccount').value = '';
+		document.getElementById('qrBankWrap').classList.add('d-none');
 		const al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
 		const pfLabels = { coupang: '쿠팡이츠', baemin: '배달의민족', other: '기타' };
 		document.getElementById('qrLinkPlatformLabel').textContent = pfLabels[previewState.platform] || previewState.platform;
@@ -757,6 +788,11 @@ $platformLabels = [
 	}
 	document.querySelectorAll('#qrModeTabs .nav-link').forEach(function (a) {
 		a.addEventListener('click', function (ev) { ev.preventDefault(); setQrMode(a.getAttribute('data-mode')); });
+	});
+
+	// 일정산 라이더는 대리점이 출금을 대행하므로 계좌가 필요하다 — 체크할 때만 계좌 입력을 보여준다.
+	document.getElementById('qrDaily').addEventListener('change', function () {
+		document.getElementById('qrBankWrap').classList.toggle('d-none', !this.checked);
 	});
 
 	// 기존 라이더 검색 → 연결
@@ -800,18 +836,23 @@ $platformLabels = [
 
 	document.getElementById('qrSubmitBtn').addEventListener('click', async function () {
 		const al = document.getElementById('quickRiderAlert');
+		const isDaily = document.getElementById('qrDaily').checked;
 		const payload = {
 			agency_id: previewState.agencyId,
 			platform: previewState.platform,
 			license_id: document.getElementById('qrLicense').value,
 			name: document.getElementById('qrName').value.trim(),
 			phone: document.getElementById('qrPhone').value.trim(),
-			login_id: document.getElementById('qrLoginId').value.trim(),
-			password: document.getElementById('qrPassword').value
+			password: document.getElementById('qrPassword').value,
+			is_daily_settlement: isDaily,
+			withholding_tax_enabled: document.getElementById('qrWithholding').checked,
+			bank_code: isDaily ? document.getElementById('qrBank').value : '',
+			bank_account: isDaily ? document.getElementById('qrAccount').value.trim() : '',
 		};
 		if (!payload.name) { al.className = 'alert alert-danger mb-4'; al.textContent = '이름을 입력하세요.'; return; }
-		if (payload.login_id && payload.login_id.length < 3) { al.className = 'alert alert-danger mb-4'; al.textContent = '로그인 ID는 3자 이상이어야 합니다.'; return; }
-		
+		if (!/^0\d{8,10}$/.test(payload.phone.replace(/\D/g, ''))) { al.className = 'alert alert-danger mb-4'; al.textContent = '휴대전화를 정확히 입력하세요(로그인 ID로 그대로 쓰입니다).'; return; }
+		if (isDaily && (!payload.bank_code || !payload.bank_account)) { al.className = 'alert alert-danger mb-4'; al.textContent = '일정산 라이더는 출금 대행을 위해 은행·계좌번호가 필요합니다.'; return; }
+
 		this.disabled = true;
 		try {
 			const resp = await fetch(registerApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

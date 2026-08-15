@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 /**
  * 정산 미리보기 화면에서 미매칭 라이더 빠른 등록 (최소 정보 + 플랫폼 연동)
- * POST JSON: { agency_id, platform, license_id, name, phone?, login_id, password }
+ * POST JSON: { agency_id, platform, license_id, name, phone,
+ *              is_daily_settlement?, withholding_tax_enabled?, bank_code?, bank_account? }
  *
  * 업로드 대리점에 귀속 + rider_platforms(external_id = license_id) 연동 →
  * 이후 정산 파싱에서 자동 매칭된다.
+ *
+ * 🔧 2026-08-15 — 휴대전화가 필수다(로그인 ID를 항상 여기서 자동 생성하므로 login_id는
+ * 더 이상 입력받지 않는다). is_daily_settlement=true면 대리점이 출금을 대행하므로
+ * bank_code·bank_account도 함께 받아 저장한다(§5.3 출금 대행 전제).
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
@@ -233,7 +238,6 @@ if ($action === 'link') {
 
 $name      = trim((string) ($body['name'] ?? ''));
 $phone     = trim((string) ($body['phone'] ?? ''));
-$loginId   = trim((string) ($body['login_id'] ?? ''));
 // 신규 라이더 비밀번호는 초기값(0000)으로 통일 — 최초 로그인 시 변경 강제
 require_once INC_PATH . '/RiderAuth.php';
 $password  = RiderAuth::INITIAL_PASSWORD;
@@ -241,18 +245,26 @@ $password  = RiderAuth::INITIAL_PASSWORD;
 if ($name === '') {
     $err('이름을 입력하세요.');
 }
-// 로그인 ID — 비워두면 휴대전화번호 기반으로 자동생성(충돌 시 대리점코드 접미사)
+// 🔧 2026-08-15 휴대전화 필수화 — 로그인 ID를 손으로 받지 않고 항상 전화번호 기반으로
+// 자동 생성한다(RiderLoginId::generate, 겹치면 접미사 부여). 전화번호가 없으면 로그인
+// ID가 임의 문자열이 되어 라이더가 자기 계정을 못 외우므로 여기서 막는다.
+$phoneDigits = preg_replace('/\D/', '', $phone) ?? '';
+if (!preg_match('/^0\d{8,10}$/', $phoneDigits)) {
+    $err('휴대전화를 정확히 입력하세요(로그인 ID로 그대로 쓰입니다).');
+}
 require_once INC_PATH . '/RiderLoginId.php';
-if ($loginId === '') {
-    $loginId = RiderLoginId::generate($phone);
-} elseif (!preg_match('/^[a-zA-Z0-9_.@\-]{3,60}$/', $loginId)) {
-    $err('로그인 ID는 영문·숫자·_·.·@·- 3~60자입니다.');
-}
-if (db_row('SELECT id FROM riders WHERE login_id = ? LIMIT 1', [$loginId]) !== null) {
-    $err('이미 사용 중인 로그인 ID입니다.');
-}
+$loginId = RiderLoginId::generate($phone);
 if (!in_array($platform, ['baemin', 'coupang', 'other'], true)) {
     $platform = '';
+}
+
+// 🆕 2026-08-15 빠른 등록에서 일정산/원천세 여부와, 일정산이면 출금 대행용 계좌를 함께 받는다.
+$isDaily   = !empty($body['is_daily_settlement']);
+$withhold  = !empty($body['withholding_tax_enabled']);
+$bankCode  = trim((string) ($body['bank_code'] ?? ''));
+$bankAcct  = trim((string) ($body['bank_account'] ?? ''));
+if ($isDaily && ($bankCode === '' || $bankAcct === '')) {
+    $err('일정산 라이더는 출금 대행을 위해 은행·계좌번호가 필요합니다.');
 }
 
 // rider_code 자동 생성
@@ -261,13 +273,15 @@ do {
 } while (db_row('SELECT id FROM riders WHERE rider_code = ? LIMIT 1', [$riderCode]) !== null);
 
 try {
-    $newId = db_transaction(static function () use ($riderCode, $loginId, $password, $name, $phone, $agencyId, $platform, $licenseId): int {
+    $newId = db_transaction(static function () use ($riderCode, $loginId, $password, $name, $phone, $agencyId, $platform, $licenseId, $isDaily, $withhold, $bankCode, $bankAcct): int {
         // 초기 비밀번호(0000) 통일 + 최초 로그인 시 변경 강제
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
         $id = db_insert(
-            'INSERT INTO riders (rider_code, login_id, password_hash, must_change_password, name, phone, status, team_code, vehicle_type, agency_id)
-             VALUES (?, ?, ?, 1, ?, ?, \'active\', \'etc\', \'motor\', ?)',
-            [$riderCode, $loginId, $hash, $name, $phone, $agencyId]
+            'INSERT INTO riders (rider_code, login_id, password_hash, must_change_password, name, phone, status, team_code, vehicle_type, agency_id,
+                                  is_daily_settlement, withholding_tax_enabled, bank_code, bank_account, account_holder)
+             VALUES (?, ?, ?, 1, ?, ?, \'active\', \'etc\', \'motor\', ?, ?, ?, ?, ?, ?)',
+            [$riderCode, $loginId, $hash, $name, $phone, $agencyId,
+                $isDaily ? 1 : 0, $withhold ? 1 : 0, $bankCode, $bankAcct, $bankAcct !== '' ? $name : '']
         );
 
         if ($platform !== '' && $licenseId !== '') {
