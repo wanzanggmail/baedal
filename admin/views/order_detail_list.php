@@ -188,7 +188,7 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 				<?php if (!$isAgencyLevel) : ?>
 				<div class="col-auto">
 					<label class="form-label fs-8 mb-1">대리점</label>
-					<select name="agency" class="form-select form-select-sm" style="min-width:150px">
+					<select name="agency" id="odFilterAgency" class="form-select form-select-sm" style="min-width:150px">
 						<option value="0">전체</option>
 						<?php foreach ($agencyOptions as $ao) : ?>
 						<option value="<?= (int) $ao['id'] ?>" <?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>><?= $esc((string) $ao['name']) ?></option>
@@ -207,7 +207,13 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 				</div>
 				<div class="col-auto">
 					<label class="form-label fs-8 mb-1">라이더</label>
-					<input type="text" name="rider" class="form-control form-control-sm" placeholder="이름·코드" value="<?= $esc($filterRider) ?>" style="width:120px" />
+					<?php // select2(ajax, tags 허용) — 등록된 라이더는 검색해서 고르고, 미매칭 라이더는
+					      // 엑셀 원본 이름을 그대로 타이핑해도 되도록 자유입력도 열어둔다(기존 LIKE 검색 그대로 유지). ?>
+					<select name="rider" id="odFilterRider" class="form-select form-select-sm" style="width:170px">
+						<?php if ($filterRider !== '') : ?>
+						<option value="<?= $esc($filterRider) ?>" selected><?= $esc($filterRider) ?></option>
+						<?php endif; ?>
+					</select>
 				</div>
 				<div class="col-auto">
 					<label class="form-label fs-8 mb-1">매장명</label>
@@ -337,6 +343,48 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 	<?php endif; ?>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
+
+<?php if (!$needsMigrate) : ?>
+<script>
+	// jQuery/select2는 plugins.bundle.js에서 오는데 그 스크립트가 이 뷰보다 뒤(inc/shell_close.php)에
+	// 있어 아직 로드 전이다 — DOMContentLoaded 이후로 초기화를 미룬다(manual_adjust.php와 동일 패턴).
+	(function () {
+		var RIDERS_API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/riders.php', JSON_UNESCAPED_UNICODE) ?>;
+
+		function initRiderFilter() {
+			var riderSel = jQuery('#odFilterRider');
+			if (!riderSel.length) return;
+			var agencySel = jQuery('#odFilterAgency');
+
+			riderSel.select2({
+				placeholder: '이름·코드 검색',
+				allowClear: true,
+				tags: true, // 미매칭 라이더는 엑셀 원본 이름을 그대로 자유입력할 수 있어야 한다(기존 LIKE 검색 유지)
+				ajax: {
+					url: RIDERS_API,
+					dataType: 'json',
+					delay: 250,
+					data: function (params) {
+						return { q: params.term || '', agency: agencySel.length ? (agencySel.val() || 0) : 0, limit: 30 };
+					},
+					processResults: function (data) {
+						return {
+							results: (data.items || []).map(function (r) {
+								return { id: r.name, text: r.name + ' (' + r.rider_code + ')' };
+							}),
+						};
+					},
+				},
+			});
+		}
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', initRiderFilter);
+		} else {
+			initRiderFilter();
+		}
+	})();
+</script>
+<?php endif; ?>
 
 <?php if (!$needsMigrate && $listError === null && $rows !== []) : ?>
 <script src="<?= htmlspecialchars(web_asset('js/table-paginate.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
