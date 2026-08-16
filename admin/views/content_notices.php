@@ -81,7 +81,7 @@ $needsMigrate = $listError !== null
 							<th class="min-w-80px">카테고리</th>
 							<th class="min-w-70px">고정</th>
 							<th class="min-w-90px">상태</th>
-							<th class="min-w-130px">게시일시</th>
+							<th class="min-w-160px">노출기간</th>
 							<th class="min-w-130px">수정일시</th>
 							<th class="min-w-140px text-end">관리</th>
 						</tr>
@@ -91,9 +91,11 @@ $needsMigrate = $listError !== null
 						<tr><td colspan="8" class="text-center text-muted py-10">등록된 공지가 없습니다.</td></tr>
 						<?php endif; ?>
 						<?php foreach ($notices as $row) :
-						    $excerpt = mb_strlen($row['body']) > 48
-						        ? mb_substr(preg_replace('/\s+/u', ' ', $row['body']), 0, 48) . '…'
-						        : $row['body'];
+						    // 본문이 HTML(CKEditor)이라 태그를 걷어내고 순수 텍스트로만 미리보기를 만든다.
+						    $bodyText = trim(preg_replace('/\s+/u', ' ', strip_tags($row['body'])));
+						    $excerpt = mb_strlen($bodyText) > 48
+						        ? mb_substr($bodyText, 0, 48) . '…'
+						        : $bodyText;
 						    ?>
 						<tr data-id="<?= (int) $row['id'] ?>">
 							<td class="fw-semibold text-gray-800"><?= htmlspecialchars($row['public_id'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -104,7 +106,14 @@ $needsMigrate = $listError !== null
 							<td><span class="badge badge-light-primary"><?= htmlspecialchars($row['category'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td><?= $row['pinned'] ? '<span class="badge badge-light-success">고정</span>' : '<span class="text-muted">—</span>' ?></td>
 							<td><span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($row['status_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
-							<td class="text-gray-700"><?= $row['published_at'] !== '' ? htmlspecialchars($row['published_at'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+							<td class="text-gray-700 fs-8">
+								<?php if ($row['published_date'] === '' && $row['ends_date'] === '') : ?>
+								<span class="text-muted">즉시 · 계속</span>
+								<?php else : ?>
+								<?= htmlspecialchars($row['published_date'] !== '' ? $row['published_date'] : '즉시', ENT_QUOTES, 'UTF-8') ?>
+								~ <?= htmlspecialchars($row['ends_date'] !== '' ? $row['ends_date'] : '계속', ENT_QUOTES, 'UTF-8') ?>
+								<?php endif; ?>
+							</td>
 							<td class="text-gray-700"><?= htmlspecialchars($row['updated_at'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-end">
 								<button type="button" class="btn btn-sm btn-light-primary me-1 btn-notice-edit"
@@ -160,13 +169,24 @@ $needsMigrate = $listError !== null
 								<span class="form-check-label fw-semibold text-gray-700">상단 고정 (로그인 팝업 우선)</span>
 							</label>
 						</div>
-						<div class="mb-6">
-							<label class="form-label">게시일시 (비어 있으면 게시 시 현재 시각)</label>
-							<input type="text" class="form-control form-control-solid" id="notice_published_at" placeholder="YYYY-MM-DD HH:mm" autocomplete="off" />
+						<div class="row g-6 mb-6">
+							<div class="col-md-6">
+								<label class="form-label">노출 시작일 (비어 있으면 게시 즉시)</label>
+								<input type="date" class="form-control form-control-solid" id="notice_starts_date" autocomplete="off" />
+							</div>
+							<div class="col-md-6">
+								<label class="form-label">노출 종료일 (비어 있으면 계속 노출)</label>
+								<input type="date" class="form-control form-control-solid" id="notice_ends_date" autocomplete="off" />
+							</div>
 						</div>
 						<div class="mb-8">
 							<label class="form-label required">본문</label>
-							<textarea class="form-control form-control-solid" id="notice_body" rows="8" required placeholder="공지 내용"></textarea>
+							<div data-bs-theme="light">
+								<?php // required는 안 건다 — CKEditor가 이 textarea를 숨기고 자기 UI로 대체하는데,
+							      // 숨겨진 채 required면 "포커스 불가" 브라우저 경고로 제출 자체가 막힌다.
+							      // 빈 본문 검사는 저장 버튼 클릭 시 JS로, 최종적으로는 서버(Notice::save)에서 한다. ?>
+							<textarea id="notice_body"></textarea>
+							</div>
 						</div>
 						<div class="d-flex justify-content-end gap-3">
 							<button type="button" class="btn btn-light" data-bs-dismiss="modal">취소</button>
@@ -178,10 +198,24 @@ $needsMigrate = $listError !== null
 		</div>
 	</div>
 
+	<script src="<?= htmlspecialchars(web_asset('plugins/custom/ckeditor/ckeditor-classic.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 	<script>
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_THROW_ON_ERROR) ?>;
 		var disabled = <?= $needsMigrate ? 'true' : 'false' ?>;
+
+		// 본문은 CKEditor(Classic)로 입력받는다. #notice_body(textarea)를 그대로 에디터
+		// 대상으로 쓴다 — Metronic 문서 예제(editors/ckeditor/classic)와 동일한 방식.
+		var bodyEditor = null;
+		var bodyEditorReady = typeof ClassicEditor !== 'undefined'
+			? ClassicEditor.create(document.getElementById('notice_body')).then(function (ed) { bodyEditor = ed; return ed; })
+			: Promise.reject(new Error('CKEditor 로드 실패'));
+		function setBodyHtml(html) {
+			bodyEditorReady.then(function (ed) { ed.setData(html || ''); }).catch(function () {});
+		}
+		function getBodyHtml() {
+			return bodyEditor ? bodyEditor.getData() : document.getElementById('notice_body').value;
+		}
 
 		function toast(msg, ok) {
 			var el = document.getElementById('notice_toast');
@@ -213,8 +247,9 @@ $needsMigrate = $listError !== null
 			document.getElementById('notice_category').value = '일반';
 			document.getElementById('notice_status').value = 'draft';
 			document.getElementById('notice_pinned').checked = false;
-			document.getElementById('notice_published_at').value = '';
-			document.getElementById('notice_body').value = '';
+			document.getElementById('notice_starts_date').value = '';
+			document.getElementById('notice_ends_date').value = '';
+			setBodyHtml('');
 		}
 
 		function openEdit(row) {
@@ -224,8 +259,9 @@ $needsMigrate = $listError !== null
 			document.getElementById('notice_category').value = row.category || '일반';
 			document.getElementById('notice_status').value = row.status || 'draft';
 			document.getElementById('notice_pinned').checked = !!row.pinned;
-			document.getElementById('notice_published_at').value = row.published_at || '';
-			document.getElementById('notice_body').value = row.body || '';
+			document.getElementById('notice_starts_date').value = row.published_date || '';
+			document.getElementById('notice_ends_date').value = row.ends_date || '';
+			setBodyHtml(row.body || '');
 			var m = bootstrap.Modal.getOrCreateInstance(document.getElementById('kt_notice_modal'));
 			m.show();
 		}
@@ -255,17 +291,22 @@ $needsMigrate = $listError !== null
 
 			document.getElementById('notice_form').addEventListener('submit', function (ev) {
 				ev.preventDefault();
+				var titleVal = document.getElementById('notice_title').value.trim();
+				var bodyVal = getBodyHtml();
+				if (!titleVal) { toast('제목을 입력하세요.', false); return; }
+				if (!bodyVal.replace(/<[^>]*>/g, '').trim()) { toast('본문을 입력하세요.', false); return; }
 				var btn = document.getElementById('notice_submit_btn');
 				btn.disabled = true;
 				apiPost({
 					action: 'save',
 					id: document.getElementById('notice_id').value.trim() || undefined,
-					title: document.getElementById('notice_title').value.trim(),
-					body: document.getElementById('notice_body').value,
+					title: titleVal,
+					body: bodyVal,
 					category: document.getElementById('notice_category').value,
 					status: document.getElementById('notice_status').value,
 					pinned: document.getElementById('notice_pinned').checked,
-					published_at: document.getElementById('notice_published_at').value.trim(),
+					published_at: document.getElementById('notice_starts_date').value.trim(),
+					ends_at: document.getElementById('notice_ends_date').value.trim(),
 				})
 					.then(function () {
 						toast('저장되었습니다.', true);

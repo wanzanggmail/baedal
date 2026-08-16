@@ -30,7 +30,7 @@ if (empty($riderMinimalShell) && !empty($_SESSION['rider_notice_popup_queue'])) 
 						<span class="badge badge-light-primary fs-8" id="rnp_category"></span>
 						<span class="text-muted fs-8" id="rnp_date"></span>
 					</div>
-					<div id="rnp_body" class="text-gray-800" style="white-space:pre-wrap;word-break:break-word"></div>
+					<div id="rnp_body" class="text-gray-800" style="word-break:break-word"></div>
 				</div>
 				<div class="modal-footer py-3">
 					<button type="button" class="btn btn-sm btn-light" id="rnp_prev">이전</button>
@@ -67,8 +67,8 @@ if (empty($riderMinimalShell) && !empty($_SESSION['rider_notice_popup_queue'])) 
 		function render() {
 			var n = items[i];
 			document.getElementById('rnp_title').textContent = n.title || '공지';
-			// 본문은 textContent로만 넣는다 — 관리자가 입력한 문자열이라 HTML로 해석하지 않는다.
-			document.getElementById('rnp_body').textContent = n.body || '';
+			// 본문은 관리자(CKEditor)가 작성한 HTML이다 — innerHTML로 그대로 렌더링한다.
+			document.getElementById('rnp_body').innerHTML = n.body || '';
 			document.getElementById('rnp_category').textContent = n.pinned ? '고정' : (n.category || '공지');
 			document.getElementById('rnp_date').textContent = n.date || '';
 			document.getElementById('rnp_counter').textContent = items.length > 1 ? (i + 1) + ' / ' + items.length : '';

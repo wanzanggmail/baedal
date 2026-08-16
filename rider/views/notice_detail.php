@@ -25,9 +25,8 @@ $notice = Notice::findForRider($noticeId, rider_current_agency_id());
 			<span class="fs-8 text-muted"><?= htmlspecialchars($notice['published_at'] ?: '', ENT_QUOTES, 'UTF-8') ?></span>
 		</div>
 		<h2 class="fs-3 fw-bold text-gray-900 mb-4"><?= htmlspecialchars($notice['title'], ENT_QUOTES, 'UTF-8') ?></h2>
-		<div class="fs-6 text-gray-800 lh-lg notice-body">
-			<?= nl2br(htmlspecialchars($notice['body'], ENT_QUOTES, 'UTF-8')) ?>
-		</div>
+		<?php // 본문은 관리자(CKEditor)가 작성한 HTML이다 — 그대로 렌더링한다(작성 권한은 콘텐츠 쓰기 권한이 있는 관리자로 제한됨). ?>
+		<div class="fs-6 text-gray-800 lh-lg notice-body"><?= $notice['body'] ?></div>
 		<a href="<?= htmlspecialchars(rider_url('notices'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light w-100 mt-6">목록으로</a>
 		<?php endif; ?>
 	</div>

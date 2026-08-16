@@ -84,7 +84,7 @@ final class Notice
      */
     public static function listPublishedForRider(int $limit = 50, int $agencyId = 0): array
     {
-        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())'];
+        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', '(ends_at IS NULL OR ends_at >= NOW())'];
         $params = [];
         [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
         if ($orgSql !== '') {
@@ -106,7 +106,7 @@ final class Notice
 
     public static function findForRider(int $id, int $agencyId = 0): ?array
     {
-        $where  = ['id = ?', "status = 'published'", '(published_at IS NULL OR published_at <= NOW())'];
+        $where  = ['id = ?', "status = 'published'", '(published_at IS NULL OR published_at <= NOW())', '(ends_at IS NULL OR ends_at >= NOW())'];
         $params = [$id];
         [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
         if ($orgSql !== '') {
@@ -152,7 +152,7 @@ final class Notice
      */
     public static function loginPopupQueue(int $agencyId = 0): array
     {
-        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', "(pinned = 1 OR category = '긴급')"];
+        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', '(ends_at IS NULL OR ends_at >= NOW())', "(pinned = 1 OR category = '긴급')"];
         $params = [];
         [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
         if ($orgSql !== '') {
@@ -193,11 +193,12 @@ final class Notice
         $status = trim((string) ($input['status'] ?? 'draft'));
         $pinned = !empty($input['pinned']) ? 1 : 0;
         $pubAtRaw = trim((string) ($input['published_at'] ?? ''));
+        $endsAtRaw = trim((string) ($input['ends_at'] ?? ''));
 
         if ($title === '') {
             throw new InvalidArgumentException('제목을 입력하세요.');
         }
-        if (trim($body) === '') {
+        if (trim(strip_tags($body)) === '') {
             throw new InvalidArgumentException('본문을 입력하세요.');
         }
         if (!in_array($category, self::CATEGORIES, true)) {
@@ -215,6 +216,16 @@ final class Notice
             $publishedAt = $publishedAt ?? null;
         }
 
+        // 노출 종료일 — 시작일(published_at)보다 앞설 수 없다. 시작일이 없으면(즉시 게시)
+        // 오늘 날짜 기준으로 비교한다.
+        $endsAt = self::normalizeDateTime($endsAtRaw, true);
+        if ($endsAt !== null) {
+            $startCompare = $publishedAt ?? date('Y-m-d H:i:s');
+            if ($endsAt < $startCompare) {
+                throw new InvalidArgumentException('노출 종료일은 시작일보다 앞설 수 없습니다.');
+            }
+        }
+
         if ($id) {
             $exists = db_row('SELECT id, public_id, org_id FROM content_notices WHERE id = ?', [$id]);
             if (!$exists) {
@@ -225,9 +236,9 @@ final class Notice
             }
             db_execute(
                 'UPDATE content_notices
-                 SET title = ?, body = ?, category = ?, pinned = ?, status = ?, published_at = ?
+                 SET title = ?, body = ?, category = ?, pinned = ?, status = ?, published_at = ?, ends_at = ?
                  WHERE id = ?',
-                [$title, $body, $category, $pinned, $status, $publishedAt, $id]
+                [$title, $body, $category, $pinned, $status, $publishedAt, $endsAt, $id]
             );
 
             return self::findAdminById($id) ?? [];
@@ -237,8 +248,8 @@ final class Notice
         $orgId    = admin_org_id();
         $newId = db_insert(
             'INSERT INTO content_notices
-                (public_id, title, body, category, pinned, status, published_at, created_by, org_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (public_id, title, body, category, pinned, status, published_at, ends_at, created_by, org_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $publicId,
                 $title,
@@ -247,6 +258,7 @@ final class Notice
                 $pinned,
                 $status,
                 $publishedAt,
+                $endsAt,
                 $adminId > 0 ? $adminId : null,
                 $orgId > 0 ? $orgId : null,
             ]
@@ -293,14 +305,17 @@ final class Notice
         return $pid;
     }
 
-    private static function normalizeDateTime(string $raw): ?string
+    /**
+     * @param bool $endOfDay 날짜만 온 경우 00:00:00 대신 23:59:59로 채운다(종료일 — 그 날까지는 노출).
+     */
+    private static function normalizeDateTime(string $raw, bool $endOfDay = false): ?string
     {
         $raw = trim($raw);
         if ($raw === '') {
             return null;
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
-            return $raw . ' 00:00:00';
+            return $raw . ($endOfDay ? ' 23:59:59' : ' 00:00:00');
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $raw)) {
             return $raw . ':00';
@@ -309,7 +324,7 @@ final class Notice
             return $raw;
         }
 
-        throw new InvalidArgumentException('게시일시 형식이 올바르지 않습니다. (YYYY-MM-DD HH:mm)');
+        throw new InvalidArgumentException(($endOfDay ? '노출 종료일' : '게시일시') . ' 형식이 올바르지 않습니다. (YYYY-MM-DD)');
     }
 
     /**
@@ -332,6 +347,9 @@ final class Notice
             'status_label'    => $stLabel,
             'status_class'    => $stClass,
             'published_at'    => self::formatDt($row['published_at'] ?? null),
+            'published_date'  => self::formatDateOnly($row['published_at'] ?? null),
+            'ends_at'         => self::formatDt($row['ends_at'] ?? null),
+            'ends_date'       => self::formatDateOnly($row['ends_at'] ?? null),
             'updated_at'      => self::formatDt($row['updated_at'] ?? null),
             'created_by_name' => (string) ($row['created_by_name'] ?? ''),
         ];

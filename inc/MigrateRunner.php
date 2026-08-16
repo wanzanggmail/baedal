@@ -60,6 +60,7 @@ final class MigrateRunner
         self::migrateWithdrawalFeeShare();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
+        self::migrateNoticeEndsAt();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1512,5 +1513,31 @@ final class MigrateRunner
             echo 'ERROR pg_payments 분배 스냅샷 → ' . $e->getMessage() . "\n";
             exit(1);
         }
+    }
+
+    /**
+     * 공지 노출 종료일 — `published_at`(기존 컬럼)이 "노출 시작", 신규 `ends_at`이
+     * "노출 종료"다. NULL이면 종료일 없음(계속 노출).
+     */
+    private static function migrateNoticeEndsAt(): void
+    {
+        echo "== content_notices.ends_at ==\n";
+
+        if (!db_table_exists('content_notices')) {
+            echo "SKIP  content_notices (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM content_notices'), 'Field');
+        if (in_array('ends_at', $cols, true)) {
+            echo "SKIP  content_notices.ends_at\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE content_notices
+             ADD COLUMN ends_at DATETIME NULL COMMENT '노출 종료일시(NULL=계속 노출)' AFTER published_at"
+        );
+        echo "OK    content_notices.ends_at\n";
     }
 }
