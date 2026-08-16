@@ -297,8 +297,8 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 							<th>라이더</th>
 							<th>주문번호</th>
 							<th>매장명</th>
-							<?php // 지역·시간을 한 컬럼에 두 줄로 묶어서 다른 컬럼(매장명·주문번호 등)의 줄바꿈을 줄인다. ?>
-							<th class="min-w-140px">지역 · 시간</th>
+							<th class="min-w-140px">지역</th>
+							<th>시간</th>
 							<th class="text-end">소요(분)</th>
 							<th>유형</th>
 							<th class="text-end">기본비</th>
@@ -323,8 +323,12 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 							<td class="font-monospace"><?= $esc((string) $r['order_no']) ?></td>
 							<td><?= $esc((string) $r['store_name']) ?></td>
 							<td class="fs-8 lh-sm">
-								<div><?= $esc((string) $r['pickup_area']) ?> → <?= $esc((string) $r['delivery_area']) ?></div>
-								<div class="text-muted"><?= $esc(substr((string) $r['assigned_at'], 5, 11)) ?> ~ <?= $esc(substr((string) $r['delivered_at'], 11, 5)) ?></div>
+								<div><?= $esc((string) $r['pickup_area']) ?></div>
+								<div>→ <?= $esc((string) $r['delivery_area']) ?></div>
+							</td>
+							<td class="fs-8 lh-sm text-muted">
+								<div><?= $esc(substr((string) $r['assigned_at'], 11, 5)) ?></div>
+								<div>~ <?= $esc(substr((string) $r['delivered_at'], 11, 5)) ?></div>
 							</td>
 							<td class="text-end"><?= $r['duration_minutes'] !== null ? (int) $r['duration_minutes'] : '—' ?></td>
 							<td class="fs-8"><?= $esc((string) $r['delivery_type']) ?></td>
@@ -365,7 +369,7 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 					dataType: 'json',
 					delay: 250,
 					data: function (params) {
-						return { q: params.term || '', agency: agencySel.length ? (agencySel.val() || 0) : 0, limit: 30 };
+						return { q: params.term || '', q_field: 'name', agency: agencySel.length ? (agencySel.val() || 0) : 0, limit: 30 };
 					},
 					processResults: function (data) {
 						return {

@@ -71,10 +71,19 @@ if ($method === 'GET') {
     $where  = ['1=1'];
     $params = [];
 
+    // 기본은 코드·로그인ID·이름·전화번호를 다 뒤진다. 오더별 상세처럼 "이름으로만" 찾고
+    // 싶은 화면은 q_field=name으로 좁힌다(전화번호 일부가 다른 라이더 코드와 우연히 겹쳐
+    // 엉뚱한 결과가 섞이는 걸 막기 위함).
+    $qField = trim((string) ($_GET['q_field'] ?? ''));
     if ($q !== '') {
-        $like    = '%' . $q . '%';
-        $where[] = '(r.rider_code LIKE ? OR r.login_id LIKE ? OR r.name LIKE ? OR r.phone LIKE ?)';
-        $params  = array_merge($params, [$like, $like, $like, $like]);
+        $like = '%' . $q . '%';
+        if ($qField === 'name') {
+            $where[] = 'r.name LIKE ?';
+            $params[] = $like;
+        } else {
+            $where[] = '(r.rider_code LIKE ? OR r.login_id LIKE ? OR r.name LIKE ? OR r.phone LIKE ?)';
+            $params  = array_merge($params, [$like, $like, $like, $like]);
+        }
     }
     if ($team   !== '') { $where[] = 'r.team_code = ?'; $params[] = $team; }
     if ($status !== '') { $where[] = 'r.status = ?';    $params[] = $status; }
