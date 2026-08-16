@@ -291,8 +291,8 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 							<th>라이더</th>
 							<th>주문번호</th>
 							<th>매장명</th>
-							<th>픽업→배달지역</th>
-							<th>배차~완료</th>
+							<?php // 지역·시간을 한 컬럼에 두 줄로 묶어서 다른 컬럼(매장명·주문번호 등)의 줄바꿈을 줄인다. ?>
+							<th class="min-w-140px">지역 · 시간</th>
 							<th class="text-end">소요(분)</th>
 							<th>유형</th>
 							<th class="text-end">기본비</th>
@@ -316,8 +316,10 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 							<td><?= $esc((string) ($r['rider_name'] ?? $r['rider_name_raw'])) ?><?php if (($r['rider_name'] ?? '') === '') : ?> <span class="badge badge-light-warning fs-9">미매칭</span><?php endif; ?></td>
 							<td class="font-monospace"><?= $esc((string) $r['order_no']) ?></td>
 							<td><?= $esc((string) $r['store_name']) ?></td>
-							<td class="fs-8"><?= $esc((string) $r['pickup_area']) ?> → <?= $esc((string) $r['delivery_area']) ?></td>
-							<td class="fs-8 text-muted"><?= $esc(substr((string) $r['assigned_at'], 5, 11)) ?> ~ <?= $esc(substr((string) $r['delivered_at'], 11, 5)) ?></td>
+							<td class="fs-8 lh-sm">
+								<div><?= $esc((string) $r['pickup_area']) ?> → <?= $esc((string) $r['delivery_area']) ?></div>
+								<div class="text-muted"><?= $esc(substr((string) $r['assigned_at'], 5, 11)) ?> ~ <?= $esc(substr((string) $r['delivered_at'], 11, 5)) ?></div>
+							</td>
 							<td class="text-end"><?= $r['duration_minutes'] !== null ? (int) $r['duration_minutes'] : '—' ?></td>
 							<td class="fs-8"><?= $esc((string) $r['delivery_type']) ?></td>
 							<td class="text-end"><?= $won($base) ?></td>
