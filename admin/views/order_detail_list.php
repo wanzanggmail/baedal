@@ -361,7 +361,7 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 			var agencySel = jQuery('#odFilterAgency');
 
 			riderSel.select2({
-				placeholder: '이름·코드 검색',
+				placeholder: '이름 검색',
 				allowClear: true,
 				tags: true, // 미매칭 라이더는 엑셀 원본 이름을 그대로 자유입력할 수 있어야 한다(기존 LIKE 검색 유지)
 				ajax: {
