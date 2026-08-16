@@ -26,8 +26,22 @@ final class WithdrawalConfig
      *
      * @return array<string, int>
      */
+    /**
+     * ⚡ 요청 단위 캐시. 라이더 목록처럼 N명을 도는 화면에서 **같은 대리점 설정을 매번 다시
+     * 읽던** 자리다(라이더 1명당 최대 2쿼리 × N). DB가 원격이라 쿼리 1건이 네트워크 왕복이라
+     * 체감이 컸다. 설정을 바꾸는 `save()`가 해당 키를 지우므로 저장 직후 조회도 안전하다.
+     *
+     * @var array<string, array<string, int|float>>
+     */
+    private static array $cache = [];
+
     public static function get(?int $orgId = null): array
     {
+        $key = ($orgId !== null && $orgId > 0) ? (string) $orgId : 'global';
+        if (isset(self::$cache[$key])) {
+            return self::$cache[$key];
+        }
+
         if (!db_table_exists('withdrawal_config')) {
             return self::defaults();
         }
@@ -45,7 +59,7 @@ final class WithdrawalConfig
 
         $d = self::defaults();
 
-        return [
+        return self::$cache[$key] = [
             'reserve_amount'    => max(0, (int) ($row['reserve_amount'] ?? $d['reserve_amount'])),
             'fee_day_threshold' => max(1, (int) ($row['fee_day_threshold'] ?? $d['fee_day_threshold'])),
             'fee_per_tx_short'  => max(0, (int) ($row['fee_per_tx_short'] ?? $d['fee_per_tx_short'])),
@@ -158,6 +172,9 @@ final class WithdrawalConfig
                 ]
             );
         }
+
+        // 방금 쓴 값을 다시 읽어야 하므로 캐시를 버린다(안 그러면 저장 전 값이 돌아온다).
+        self::$cache = [];
 
         return self::get($orgId);
     }

@@ -9,19 +9,51 @@ require_once __DIR__ . '/WithdrawalConfig.php';
  */
 final class RiderWallet
 {
-    /** @return array{balance: int, accrued_days: int} */
+    /**
+     * @return array{balance: int, accrued_days: int}
+     *
+     * ⚡ 예전엔 `ensure()`(존재 확인 SELECT)를 먼저 부르고 다시 SELECT 해서 **읽기 한 번에
+     * 쿼리 2번**이 나갔다. DB가 원격이라 왕복이 그대로 비용이고, 라이더 목록처럼 N명을 도는
+     * 화면에서 두 배로 쌓였다. 지금은 먼저 읽고 **없을 때만** 만든다(결과는 동일).
+     */
     public static function get(int $riderId): array
     {
-        self::ensure($riderId);
+        if ($riderId < 1 || !db_table_exists('rider_wallets')) {
+            return ['balance' => 0, 'accrued_days' => 0];
+        }
+
         $row = db_row(
             'SELECT balance, accrued_days FROM rider_wallets WHERE rider_id = ? LIMIT 1',
             [$riderId]
         );
+        if ($row === null) {
+            self::ensure($riderId);
+
+            return ['balance' => 0, 'accrued_days' => 0];
+        }
 
         return [
-            'balance'      => (int) ($row['balance'] ?? 0),
-            'accrued_days' => (int) ($row['accrued_days'] ?? 0),
+            'balance'      => (int) $row['balance'],
+            'accrued_days' => (int) $row['accrued_days'],
         ];
+    }
+
+    /**
+     * 라이더 소속 대리점 id (요청 단위 캐시). 없으면 0.
+     * 소속은 한 요청 안에서 바뀌지 않으므로 캐시해도 안전하다.
+     */
+    private static function agencyIdOf(int $riderId): int
+    {
+        static $cache = [];
+
+        if (isset($cache[$riderId])) {
+            return $cache[$riderId];
+        }
+
+        return $cache[$riderId] = (int) (db_row(
+            'SELECT agency_id FROM riders WHERE id = ? LIMIT 1',
+            [$riderId]
+        )['agency_id'] ?? 0);
     }
 
     public static function ensure(int $riderId): void
@@ -50,7 +82,9 @@ final class RiderWallet
     {
         $wallet = self::get($riderId);
         // 멀티테넌시: 라이더 소속 대리점의 출금 정책 사용 (없으면 전역 기본)
-        $agencyId = (int) (db_row('SELECT agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId])['agency_id'] ?? 0);
+        // ⚡ 소속 대리점은 한 요청 안에서 바뀌지 않으므로 라이더별로 한 번만 읽는다
+        //    (목록 화면에서 라이더마다 이 조회가 그대로 왕복 비용이었다).
+        $agencyId = self::agencyIdOf($riderId);
         $orgId    = $agencyId > 0 ? $agencyId : null;
         $cfg      = WithdrawalConfig::get($orgId);
         $balance  = (int) $wallet['balance'];

@@ -6,6 +6,7 @@ declare(strict_types=1);
  * 출금 대행 API — 대리점이 소속 라이더의 출금을 대신 신청·실행한다.
  *
  * GET  ?rider_id=N&to=YYYY-MM-DD  — 그 일자까지 출금하면 얼마·수수료 얼마인지 미리보기
+ * GET  ?rider_ids=1,2,3&to=YYYY-MM-DD — 위를 여러 명 한 번에(목록 최초 로딩용)
  * POST { action:'apply', rider_id, to }  — 신청 + 즉시 이체까지 실행
  * POST { action:'apply_bulk', items:[{rider_id,to},…] } — 일괄. 건별 처리, 실패해도 계속(부분 성공)
  *
@@ -67,73 +68,122 @@ $normDate = static function ($v): ?string {
     return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : null;
 };
 
+/**
+ * 라이더 1명 미리보기 — 단건 GET과 일괄 GET이 **같은 함수**를 쓴다.
+ * 일괄만 따로 계산하면 화면에 보이는 금액이 갈라질 수 있어서다.
+ *
+ * @param array<string,mixed> $rider `$assertMine()` 결과
+ * @return array<string,mixed>
+ */
+$buildPreview = static function (int $riderId, array $rider, ?string $toDate): array {
+    $preview = RiderWallet::previewWithdrawal($riderId, $toDate);
+
+    // 이 일자까지 실제로 소진될 정산일들 — "출금 가능 일자"로 보여준다.
+    // picked_cycles 는 WithdrawalCycles::select() 결과라 키가 `amount`(이번에 소진할 금액)다.
+    // unwithdrawn() 의 `remaining` 과 헷갈리지 말 것.
+    $picked = array_map(static fn (array $c): array => [
+        'date'    => (string) $c['settlement_date'],
+        'orders'  => (int) $c['order_count'],
+        'amount'  => (int) $c['amount'],
+        'partial' => !empty($c['partial']),
+    ], (array) ($preview['picked_cycles'] ?? []));
+
+    // 신청 자체가 막히는 사유는 미리 알려준다(버튼 누르고 나서 알면 늦다).
+    $block = null;
+    if ((string) $rider['status'] !== 'active') {
+        $block = '활동 중인 라이더가 아닙니다.';
+    } elseif ((int) $rider['withdrawal_hold'] === 1) {
+        $block = '출금 보류 상태입니다.';
+    } elseif ((int) $rider['is_daily_settlement'] === 1) {
+        $block = '선정산 대상이라 「일일정산 지급」으로 처리합니다.';
+    } elseif (trim((string) $rider['bank_code']) === '' || trim((string) $rider['bank_account']) === '') {
+        $block = '출금 계좌가 등록돼 있지 않습니다.';
+    } elseif (Withdrawal::hasOpenRiderRequest($riderId)) {
+        $block = '처리 중인 출금 신청이 이미 있습니다.';
+    }
+
+    return [
+        'rider'   => ['id' => $riderId, 'name' => (string) $rider['name'], 'code' => (string) $rider['rider_code']],
+        'to'      => $toDate,
+        'preview' => [
+            'balance'          => (int) $preview['balance'],
+            'reserve_amount'   => (int) $preview['reserve_amount'],
+            'payout_amount'    => (int) $preview['payout_amount'],
+            'fee'              => (int) $preview['fee_per_tx'],
+            'consume_amount'   => (int) $preview['consume_amount'],
+            'can_apply'        => (bool) $preview['can_apply'],
+            'fee_short_orders' => (int) $preview['fee_short_orders'],
+            'fee_long_orders'  => (int) $preview['fee_long_orders'],
+            'fee_short_amount' => (int) $preview['fee_short_amount'],
+            'fee_long_amount'  => (int) $preview['fee_long_amount'],
+            'fee_rate_short'   => (int) $preview['fee_rate_short'],
+            'fee_rate_long'    => (int) $preview['fee_rate_long'],
+            'fee_threshold'    => (int) $preview['fee_day_threshold'],
+            'blocked_shortfall' => (int) ($preview['blocked_shortfall'] ?? 0),
+        ],
+        'picked'  => $picked,
+        'block'   => $block,
+    ];
+};
+
 // ─────────────────────────────────────────────────────────────
 if ($method === 'GET') {
+    $toDate = $normDate($_GET['to'] ?? null);
+
+    // ── 일괄 미리보기 ────────────────────────────────────────
+    // 목록 최초 로딩에서 라이더 수만큼 HTTP 요청이 나가던 걸 한 번으로 줄인다.
+    // 요청 하나당 부트스트랩·세션락이 따로 붙는데, PHP 세션 파일 락 때문에 같은 세션의
+    // 요청들이 **줄서서 처리**돼 라이더가 많을수록 대기가 선형으로 늘었다.
+    $idsRaw = trim((string) ($_GET['rider_ids'] ?? ''));
+    if ($idsRaw !== '') {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', explode(',', $idsRaw)),
+            static fn (int $v): bool => $v > 0
+        )));
+        if (count($ids) > 500) {
+            $err('한 번에 500명까지만 조회할 수 있습니다.');
+        }
+
+        // 세션 락 조기 해제 — 이 요청은 세션을 더 안 쓰는데, 락을 쥐고 있으면
+        // 사용자가 그 사이 다른 화면을 열 때 같이 밀린다.
+        if (function_exists('session_write_close')) {
+            session_write_close();
+        }
+
+        $out = [];
+        foreach ($ids as $rid) {
+            try {
+                $out[] = ['id' => $rid] + $buildPreview($rid, $assertMine($rid), $toDate);
+            } catch (Throwable $e) {
+                // 한 명이 실패해도 나머지는 보여준다(목록 전체가 빈 화면이 되면 안 된다).
+                $out[] = ['id' => $rid, 'error' => $e->getMessage()];
+            }
+        }
+
+        echo json_encode(['ok' => true, 'to' => $toDate, 'items' => $out], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // ── 단건 미리보기 ────────────────────────────────────────
     $riderId = (int) ($_GET['rider_id'] ?? 0);
     if ($riderId < 1) {
         $err('라이더를 선택하세요.');
     }
-    $rider  = $assertMine($riderId);
-    $toDate = $normDate($_GET['to'] ?? null);
+    $rider = $assertMine($riderId);
 
     try {
-        $preview = RiderWallet::previewWithdrawal($riderId, $toDate);
-
-        // 이 일자까지 실제로 소진될 정산일들 — "출금 가능 일자"로 보여준다.
-        // picked_cycles 는 WithdrawalCycles::select() 결과라 키가 `amount`(이번에 소진할 금액)다.
-        // unwithdrawn() 의 `remaining` 과 헷갈리지 말 것.
-        $picked = array_map(static fn (array $c): array => [
-            'date'    => (string) $c['settlement_date'],
-            'orders'  => (int) $c['order_count'],
-            'amount'  => (int) $c['amount'],
-            'partial' => !empty($c['partial']),
-        ], (array) ($preview['picked_cycles'] ?? []));
-
-        // 아직 안 나간 전체 정산일(선택 상한과 무관) — 날짜를 뒤로 미루면 얼마나 더 나오는지 참고용
+        // 아직 안 나간 전체 정산일(선택 상한과 무관) — 날짜를 뒤로 미루면 얼마나 더 나오는지 참고용.
+        // 일괄 조회에는 안 넣는다(화면에서 안 쓰는데 라이더당 쿼리가 늘어난다).
         $allOpen = array_map(static fn (array $c): array => [
             'date'   => (string) $c['settlement_date'],
             'orders' => (int) $c['order_count'],
             'amount' => (int) $c['remaining'],
         ], WithdrawalCycles::unwithdrawn($riderId));
 
-        // 신청 자체가 막히는 사유는 미리 알려준다(버튼 누르고 나서 알면 늦다).
-        $block = null;
-        if ((string) $rider['status'] !== 'active') {
-            $block = '활동 중인 라이더가 아닙니다.';
-        } elseif ((int) $rider['withdrawal_hold'] === 1) {
-            $block = '출금 보류 상태입니다.';
-        } elseif ((int) $rider['is_daily_settlement'] === 1) {
-            $block = '선정산 대상이라 「일일정산 지급」으로 처리합니다.';
-        } elseif (trim((string) $rider['bank_code']) === '' || trim((string) $rider['bank_account']) === '') {
-            $block = '출금 계좌가 등록돼 있지 않습니다.';
-        } elseif (Withdrawal::hasOpenRiderRequest($riderId)) {
-            $block = '처리 중인 출금 신청이 이미 있습니다.';
-        }
-
-        echo json_encode([
-            'ok'      => true,
-            'rider'   => ['id' => $riderId, 'name' => (string) $rider['name'], 'code' => (string) $rider['rider_code']],
-            'to'      => $toDate,
-            'preview' => [
-                'balance'          => (int) $preview['balance'],
-                'reserve_amount'   => (int) $preview['reserve_amount'],
-                'payout_amount'    => (int) $preview['payout_amount'],
-                'fee'              => (int) $preview['fee_per_tx'],
-                'consume_amount'   => (int) $preview['consume_amount'],
-                'can_apply'        => (bool) $preview['can_apply'],
-                'fee_short_orders' => (int) $preview['fee_short_orders'],
-                'fee_long_orders'  => (int) $preview['fee_long_orders'],
-                'fee_short_amount' => (int) $preview['fee_short_amount'],
-                'fee_long_amount'  => (int) $preview['fee_long_amount'],
-                'fee_rate_short'   => (int) $preview['fee_rate_short'],
-                'fee_rate_long'    => (int) $preview['fee_rate_long'],
-                'fee_threshold'    => (int) $preview['fee_day_threshold'],
-                'blocked_shortfall' => (int) ($preview['blocked_shortfall'] ?? 0),
-            ],
-            'picked'   => $picked,
-            'all_open' => $allOpen,
-            'block'    => $block,
-        ], JSON_UNESCAPED_UNICODE);
+        echo json_encode(
+            ['ok' => true] + $buildPreview($riderId, $rider, $toDate) + ['all_open' => $allOpen],
+            JSON_UNESCAPED_UNICODE
+        );
     } catch (Throwable $e) {
         $err('미리보기 실패: ' . $e->getMessage(), 500);
     }

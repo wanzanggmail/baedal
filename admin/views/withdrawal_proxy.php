@@ -251,59 +251,104 @@ $cntReady = $cntAll - $cntBelow;
 			syncSelection();
 		}
 
+		/** 서버가 준 미리보기 1건을 그 행에 그린다(단건·일괄 공통). */
+		function renderPreview(tr, res) {
+			var cell = tr.querySelector('.wp-info');
+			var btn = tr.querySelector('.wp-pay');
+			var p = res.preview;
+
+			if (res.block) {
+				cell.innerHTML = '<span class="text-danger">' + esc(res.block) + '</span>';
+				setRowPayable(tr, false);
+				return;
+			}
+
+			if (!p.can_apply) {
+				var msg = '이 날짜까지는 출금할 정산분이 없습니다.';
+				if (p.blocked_shortfall > 0) {
+					msg = '보증금(' + won(p.reserve_amount) + ') 때문에 ' + won(p.blocked_shortfall) + ' 더 쌓여야 출금됩니다.';
+				}
+				cell.innerHTML = '<span class="text-muted">' + esc(msg) + '</span>';
+				setRowPayable(tr, false);
+				return;
+			}
+
+			// 출금 가능 일자(이번에 소진되는 정산일) + 수수료 구간 내역
+			var dates = (res.picked || []).map(function (c) { return c.date + '(' + c.orders + '건)'; });
+			var feeParts = [];
+			if (p.fee_short_orders > 0) feeParts.push(p.fee_short_orders + '건×' + p.fee_rate_short + '원');
+			if (p.fee_long_orders > 0) feeParts.push(p.fee_long_orders + '건×' + p.fee_rate_long + '원');
+
+			var h = '';
+			h += '<div><span class="text-gray-600">출금 가능 일자</span> <span class="fw-semibold text-gray-800">'
+			   + (dates.length ? esc(dates.join(', ')) : '—') + '</span></div>';
+			h += '<div class="mt-1"><span class="text-gray-600">수수료</span> <span class="text-danger fw-semibold">− '
+			   + won(p.fee) + '</span>'
+			   + (feeParts.length ? ' <span class="text-muted">(' + esc(feeParts.join(' + ')) + ')</span>' : '') + '</div>';
+			h += '<div class="mt-1"><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
+			   + won(p.payout_amount) + '</span>'
+			   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
+			cell.innerHTML = h;
+			btn.setAttribute('data-amount', p.payout_amount);
+			setRowPayable(tr, true);
+		}
+
+		function previewFailed(tr, message) {
+			tr.querySelector('.wp-info').innerHTML = '<span class="text-danger">' + esc(message) + '</span>';
+			setRowPayable(tr, false);
+		}
+
 		// 선택한 일자 기준으로 "얼마 나가고 수수료가 얼마인지"를 서버에서 받아 그 행에 표시한다.
 		function loadPreview(tr) {
 			var rid = tr.getAttribute('data-rid');
 			var date = tr.querySelector('.wp-date').value;
-			var cell = tr.querySelector('.wp-info');
-			var btn = tr.querySelector('.wp-pay');
-			cell.innerHTML = '<span class="text-muted">조회 중…</span>';
+			tr.querySelector('.wp-info').innerHTML = '<span class="text-muted">조회 중…</span>';
 
 			fetch(API + '?rider_id=' + rid + '&to=' + encodeURIComponent(date), { credentials: 'same-origin' })
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '조회 실패');
-					var p = res.preview;
-
-					if (res.block) {
-						cell.innerHTML = '<span class="text-danger">' + esc(res.block) + '</span>';
-						setRowPayable(tr, false);
-						return;
-					}
-
-					if (!p.can_apply) {
-						var msg = '이 날짜까지는 출금할 정산분이 없습니다.';
-						if (p.blocked_shortfall > 0) {
-							msg = '보증금(' + won(p.reserve_amount) + ') 때문에 ' + won(p.blocked_shortfall) + ' 더 쌓여야 출금됩니다.';
-						}
-						cell.innerHTML = '<span class="text-muted">' + esc(msg) + '</span>';
-						setRowPayable(tr, false);
-						return;
-					}
-
-					// 출금 가능 일자(이번에 소진되는 정산일) + 수수료 구간 내역
-					var dates = (res.picked || []).map(function (c) { return c.date + '(' + c.orders + '건)'; });
-					var feeParts = [];
-					if (p.fee_short_orders > 0) feeParts.push(p.fee_short_orders + '건×' + p.fee_rate_short + '원');
-					if (p.fee_long_orders > 0) feeParts.push(p.fee_long_orders + '건×' + p.fee_rate_long + '원');
-
-					var h = '';
-					h += '<div><span class="text-gray-600">출금 가능 일자</span> <span class="fw-semibold text-gray-800">'
-					   + (dates.length ? esc(dates.join(', ')) : '—') + '</span></div>';
-					h += '<div class="mt-1"><span class="text-gray-600">수수료</span> <span class="text-danger fw-semibold">− '
-					   + won(p.fee) + '</span>'
-					   + (feeParts.length ? ' <span class="text-muted">(' + esc(feeParts.join(' + ')) + ')</span>' : '') + '</div>';
-					h += '<div class="mt-1"><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
-					   + won(p.payout_amount) + '</span>'
-					   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
-					cell.innerHTML = h;
-					btn.setAttribute('data-amount', p.payout_amount);
-					setRowPayable(tr, true);
+					renderPreview(tr, res);
 				})
-				.catch(function (e) {
-					cell.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
-					setRowPayable(tr, false);
-				});
+				.catch(function (e) { previewFailed(tr, e.message); });
+		}
+
+		/**
+		 * 여러 행을 **요청 한 번**으로 조회한다. 예전엔 행마다 fetch를 날렸는데,
+		 * 같은 세션의 요청은 PHP 세션 파일 락 때문에 줄서서 처리돼 라이더가 많을수록
+		 * 대기가 선형으로 늘었다(85명이면 85번 왕복).
+		 * 날짜가 행마다 다를 수 있으므로 **같은 날짜끼리 묶어** 호출한다.
+		 */
+		function loadPreviews(rows) {
+			if (!rows.length) return;
+			var byDate = {};
+			rows.forEach(function (tr) {
+				var d = tr.querySelector('.wp-date').value;
+				(byDate[d] = byDate[d] || []).push(tr);
+				tr.querySelector('.wp-info').innerHTML = '<span class="text-muted">조회 중…</span>';
+			});
+
+			Object.keys(byDate).forEach(function (date) {
+				var group = byDate[date];
+				var byId = {};
+				group.forEach(function (tr) { byId[tr.getAttribute('data-rid')] = tr; });
+
+				fetch(API + '?rider_ids=' + Object.keys(byId).join(',') + '&to=' + encodeURIComponent(date), { credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						if (!res.ok) throw new Error(res.message || '조회 실패');
+						(res.items || []).forEach(function (item) {
+							var tr = byId[String(item.id)];
+							if (!tr) return;
+							if (item.error) { previewFailed(tr, item.error); return; }
+							renderPreview(tr, item);
+						});
+						syncSelection();
+					})
+					.catch(function (e) {
+						group.forEach(function (tr) { previewFailed(tr, e.message); });
+					});
+			});
 		}
 
 		var tbody = document.getElementById('wp_tbody');
@@ -339,10 +384,10 @@ $cntReady = $cntAll - $cntBelow;
 			checkAll.disabled = avail.length === 0;
 		}
 
-		// 최초 진입 시 오늘 날짜 기준으로 전부 조회(막힌 행은 건너뜀)
-		tbody.querySelectorAll('tr[data-rid]').forEach(function (tr) {
-			if (!tr.querySelector('.wp-pay').disabled) loadPreview(tr);
-		});
+		// 최초 진입 시 오늘 날짜 기준으로 전부 조회(막힌 행은 건너뜀) — 요청 한 번으로 묶는다.
+		loadPreviews(Array.from(tbody.querySelectorAll('tr[data-rid]')).filter(function (tr) {
+			return !tr.querySelector('.wp-pay').disabled;
+		}));
 		syncSelection();
 
 		checkAll.addEventListener('change', function () {
@@ -476,7 +521,7 @@ $cntReady = $cntAll - $cntBelow;
 					showToast(e.message, false);
 					bulkBtn.disabled = false;
 					syncSelection();
-					rows.forEach(function (tr) { loadPreview(tr); });
+					loadPreviews(rows);
 				});
 		});
 	})();

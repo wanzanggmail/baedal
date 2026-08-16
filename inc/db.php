@@ -172,17 +172,50 @@ function db_ping(): bool
 
 /**
  * 현재 DB에 테이블 존재 여부 (SHOW TABLES LIKE ? 는 네이티브 prepare 미지원)
+ *
+ * ⚡ **요청 단위로 캐시한다.** 스키마는 한 요청 안에서 바뀌지 않는데, 도메인 코드가
+ * 방어적으로 매번 호출하는 자리가 많다(`WithdrawalCycles::tableReady()`는 한 번에
+ * information_schema를 2번 친다). DB가 원격이라 쿼리 1건이 곧 네트워크 왕복이고,
+ * 목록 화면처럼 라이더 N명을 도는 경로에서 이 호출만 수백 번 쌓였다.
+ *
+ * ⚠️ 마이그레이션(`php migrate.php`)처럼 **같은 요청 안에서 테이블을 만드는** 코드는
+ *    생성 직후 이 캐시를 비워야 한다 — `db_forget_table_exists()` 사용.
  */
 function db_table_exists(string $table): bool
 {
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
         return false;
     }
+    if (isset($GLOBALS['__db_table_exists'][$table])) {
+        return $GLOBALS['__db_table_exists'][$table];
+    }
 
-    return db_row(
+    $exists = db_row(
         'SELECT 1 AS ok FROM information_schema.tables
          WHERE table_schema = DATABASE() AND table_name = ?
          LIMIT 1',
         [$table]
     ) !== null;
+
+    // 없는 테이블은 캐시하지 않는다 — 마이그레이션이 같은 요청 안에서 만들 수 있고,
+    // "없음"을 캐시해두면 그 뒤 검사가 계속 false 로 나와 생성 직후 로직이 건너뛰어진다.
+    if ($exists) {
+        $GLOBALS['__db_table_exists'][$table] = true;
+    }
+
+    return $exists;
+}
+
+/**
+ * `db_table_exists()` 캐시 비우기 — 같은 요청 안에서 테이블을 **지운** 경우에만 필요하다.
+ * (생성은 위에서 "없음"을 캐시하지 않으므로 따로 비울 필요가 없다.)
+ */
+function db_forget_table_exists(?string $table = null): void
+{
+    if ($table === null) {
+        $GLOBALS['__db_table_exists'] = [];
+
+        return;
+    }
+    unset($GLOBALS['__db_table_exists'][$table]);
 }
