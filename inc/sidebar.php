@@ -151,7 +151,7 @@ $route = $route ?? '';
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'withdrawal/list', 'withdrawal/proxy', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
 										    'withdrawal/wallet-ledger', 'withdrawal/download', 'withdrawal/complete',
-										    'promotion', 'promotion/detail',
+										    'promotion', 'promotion/detail', 'promotion/calculator',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -194,6 +194,12 @@ $route = $route ?? '';
 													<a class="menu-link<?= nav_active_any(['promotion', 'promotion/detail']) ?>" href="<?= htmlspecialchars(admin_url('promotion'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">프로모션 지급</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('promotion/calculator') ?>" href="<?= htmlspecialchars(admin_url('promotion/calculator'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">프로모션 계산기</span>
 													</a>
 												</div>
 												<?php endif; ?>
