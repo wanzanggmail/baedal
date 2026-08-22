@@ -10,6 +10,15 @@ final class SettlementExcelConfig
     /** @var list<string> */
     private const PLATFORMS = ['baemin', 'coupang', 'other'];
 
+    /**
+     * 정산서 종류 — **열기 암호가 서로 다르다.**
+     * (2026-08-22 배민 실파일 확인: 주간 `3060454741` / 일일 `siook00`)
+     * 그래서 (플랫폼 × 종류)마다 따로 저장한다.
+     *
+     * @var list<string>
+     */
+    private const KINDS = ['daily', 'weekly'];
+
     public static function tableExists(): bool
     {
         return db_table_exists('settlement_excel_config');
@@ -19,6 +28,24 @@ final class SettlementExcelConfig
     public static function platforms(): array
     {
         return self::PLATFORMS;
+    }
+
+    /** @return list<string> */
+    public static function kinds(): array
+    {
+        return self::KINDS;
+    }
+
+    /** 화면 표기용 */
+    public static function kindLabel(string $kind): string
+    {
+        return $kind === 'weekly' ? '주간' : '일일';
+    }
+
+    /** 알 수 없는 값은 기존 동작(일일)으로 떨어뜨린다. */
+    public static function normalizeKind(?string $kind): string
+    {
+        return $kind === 'weekly' ? 'weekly' : 'daily';
     }
 
     /**
@@ -39,8 +66,48 @@ final class SettlementExcelConfig
             : db_rows('SELECT platform, open_password FROM settlement_excel_config WHERE org_id IS NULL');
         foreach ($rows as $row) {
             $p = (string) ($row['platform'] ?? '');
-            if (in_array($p, self::PLATFORMS, true)) {
-                $out[$p] = (string) ($row['open_password'] ?? '');
+            if (in_array($p, self::PLATFORMS, true) && (string) ($row['open_password'] ?? '') !== '') {
+                $out[$p] = (string) $row['open_password'];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * 종류별 저장 암호 — 관리 화면용. `platform|kind` 키로 돌려준다.
+     *
+     * @return array<string, string> "baemin|daily" => password
+     */
+    public static function allStoredByKind(?int $orgId = null): array
+    {
+        $out = [];
+        foreach (self::PLATFORMS as $p) {
+            foreach (self::KINDS as $k) {
+                $out[$p . '|' . $k] = '';
+            }
+        }
+        if (!self::tableExists()) {
+            return $out;
+        }
+        $hasKind = in_array('kind', array_column(db_rows('SHOW COLUMNS FROM settlement_excel_config'), 'Field'), true);
+        if (!$hasKind) {
+            // 마이그레이션 전 DB — 기존 값은 전부 일일로 본다.
+            foreach (self::allStored($orgId) as $p => $pw) {
+                $out[$p . '|daily'] = $pw;
+            }
+
+            return $out;
+        }
+
+        $rows = ($orgId !== null && $orgId > 0)
+            ? db_rows('SELECT platform, kind, open_password FROM settlement_excel_config WHERE org_id = ?', [$orgId])
+            : db_rows('SELECT platform, kind, open_password FROM settlement_excel_config WHERE org_id IS NULL');
+        foreach ($rows as $row) {
+            $p = (string) ($row['platform'] ?? '');
+            $k = self::normalizeKind((string) ($row['kind'] ?? 'daily'));
+            if (in_array($p, self::PLATFORMS, true) && (string) ($row['open_password'] ?? '') !== '') {
+                $out[$p . '|' . $k] = (string) $row['open_password'];
             }
         }
 
@@ -74,7 +141,8 @@ final class SettlementExcelConfig
                 'name'        => (string) $r['name'],
                 'code'        => (string) $r['code'],
                 'parent_name' => $r['parent_name'] !== null ? (string) $r['parent_name'] : null,
-                'passwords'   => self::allStored($id),
+                // "platform|kind" 키 — 화면이 일일/주간 칸을 따로 그린다.
+                'passwords'   => self::allStoredByKind($id),
             ];
         }
 
@@ -124,7 +192,7 @@ final class SettlementExcelConfig
      *
      * @return list<string>
      */
-    public static function passwordsToTry(string $platform, ?string $uploadPassword = null, ?int $orgId = null): array
+    public static function passwordsToTry(string $platform, ?string $uploadPassword = null, ?int $orgId = null, ?string $kind = null): array
     {
         $list = [];
 
@@ -132,8 +200,8 @@ final class SettlementExcelConfig
             $list[] = self::normalizePassword($uploadPassword);
         }
 
-        // 대리점 저장값 → 전역 저장값 순 (복호화 폴백)
-        foreach (self::storedPasswordList($platform, $orgId) as $pw) {
+        // 대리점 저장값 → 전역 저장값 순 (복호화 폴백). $kind가 오면 그 종류를 먼저 시도한다.
+        foreach (self::storedPasswordList($platform, $orgId, $kind) as $pw) {
             $list[] = $pw;
         }
 
@@ -191,26 +259,50 @@ final class SettlementExcelConfig
      *
      * @return list<string>
      */
-    private static function storedPasswordList(string $platform, ?int $orgId): array
+    private static function storedPasswordList(string $platform, ?int $orgId, ?string $kind = null): array
     {
         if (!self::tableExists()) {
             return [];
         }
+
+        // kind 컬럼이 아직 없는 DB(마이그레이션 전)에서도 동작해야 한다.
+        $hasKind = in_array('kind', array_column(db_rows('SHOW COLUMNS FROM settlement_excel_config'), 'Field'), true);
+
+        // 요청한 종류를 먼저, 그 다음 나머지 종류. 복호화는 순서대로 시도만 하면 되므로
+        // 한쪽만 저장해둔 경우에도 다른 쪽 암호로 열릴 수 있다(사용자 실수에 관대하게).
+        $kindOrder = $hasKind
+            ? ($kind === null ? self::KINDS : array_merge([self::normalizeKind($kind)], array_diff(self::KINDS, [self::normalizeKind($kind)])))
+            : [null];
+
         $out = [];
-        if ($orgId !== null && $orgId > 0) {
-            $r = db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id = ? LIMIT 1', [$platform, $orgId]);
-            if ($r !== null) {
-                $pw = self::normalizePassword((string) ($r['open_password'] ?? ''));
-                if ($pw !== '') {
-                    $out[] = $pw;
-                }
+        $push = static function (?array $r) use (&$out): void {
+            if ($r === null) {
+                return;
             }
-        }
-        $r = db_row('SELECT open_password FROM settlement_excel_config WHERE platform = ? AND org_id IS NULL LIMIT 1', [$platform]);
-        if ($r !== null) {
             $pw = self::normalizePassword((string) ($r['open_password'] ?? ''));
-            if ($pw !== '') {
+            if ($pw !== '' && !in_array($pw, $out, true)) {
                 $out[] = $pw;
+            }
+        };
+
+        // 대리점 행 → 전역 행 순
+        foreach ([true, false] as $orgScoped) {
+            if ($orgScoped && ($orgId === null || $orgId <= 0)) {
+                continue;
+            }
+            foreach ($kindOrder as $k) {
+                $where  = 'platform = ? AND ' . ($orgScoped ? 'org_id = ?' : 'org_id IS NULL');
+                $params = $orgScoped ? [$platform, $orgId] : [$platform];
+                if ($k !== null) {
+                    $where   .= ' AND kind = ?';
+                    $params[] = $k;
+                }
+                // 중복 행이 남아 있어도 암호가 있는 행을 우선 집는다(정렬 없이 LIMIT 1이면 빈 행을 집을 수 있다).
+                $push(db_row(
+                    "SELECT open_password FROM settlement_excel_config WHERE {$where}
+                      ORDER BY (open_password <> '') DESC, id ASC LIMIT 1",
+                    $params
+                ));
             }
         }
 
@@ -240,24 +332,54 @@ final class SettlementExcelConfig
             throw new RuntimeException('settlement_excel_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
-        $hasOrg   = $orgId !== null && $orgId > 0;
+        $hasOrg    = $orgId !== null && $orgId > 0;
         $updatedBy = ($adminId !== null && $adminId > 0) ? $adminId : null;
+        $hasKind   = in_array('kind', array_column(db_rows('SHOW COLUMNS FROM settlement_excel_config'), 'Field'), true);
 
         foreach (self::PLATFORMS as $platform) {
-            $pw = self::normalizePassword((string) ($passwords[$platform] ?? ''));
-            $exists = $hasOrg
-                ? db_row('SELECT id FROM settlement_excel_config WHERE platform = ? AND org_id = ? LIMIT 1', [$platform, $orgId])
-                : db_row('SELECT id FROM settlement_excel_config WHERE platform = ? AND org_id IS NULL LIMIT 1', [$platform]);
-            if ($exists) {
-                db_execute(
-                    'UPDATE settlement_excel_config SET open_password = ?, updated_by = ? WHERE id = ?',
-                    [$pw, $updatedBy, (int) $exists['id']]
+            foreach (self::KINDS as $kind) {
+                // 키는 "platform|kind"(신규)를 우선하고, 없으면 "platform"(구 형식)도 받는다.
+                $key = $platform . '|' . $kind;
+                if (array_key_exists($key, $passwords)) {
+                    $raw = (string) $passwords[$key];
+                } elseif ($kind === 'daily' && array_key_exists($platform, $passwords)) {
+                    $raw = (string) $passwords[$platform];
+                } else {
+                    continue; // 안 보낸 항목은 건드리지 않는다(빈 값으로 덮어쓰지 않음)
+                }
+                $pw = self::normalizePassword($raw);
+
+                $where  = 'platform = ? AND ' . ($hasOrg ? 'org_id = ?' : 'org_id IS NULL');
+                $params = $hasOrg ? [$platform, $orgId] : [$platform];
+                if ($hasKind) {
+                    $where   .= ' AND kind = ?';
+                    $params[] = $kind;
+                }
+                $exists = db_row(
+                    "SELECT id FROM settlement_excel_config WHERE {$where} ORDER BY id ASC LIMIT 1",
+                    $params
                 );
-            } else {
-                db_insert(
-                    'INSERT INTO settlement_excel_config (platform, org_id, open_password, updated_by) VALUES (?, ?, ?, ?)',
-                    [$platform, $hasOrg ? $orgId : null, $pw, $updatedBy]
-                );
+
+                if ($exists) {
+                    db_execute(
+                        'UPDATE settlement_excel_config SET open_password = ?, updated_by = ? WHERE id = ?',
+                        [$pw, $updatedBy, (int) $exists['id']]
+                    );
+                } elseif ($hasKind) {
+                    db_insert(
+                        'INSERT INTO settlement_excel_config (platform, kind, org_id, open_password, updated_by) VALUES (?, ?, ?, ?, ?)',
+                        [$platform, $kind, $hasOrg ? $orgId : null, $pw, $updatedBy]
+                    );
+                } else {
+                    db_insert(
+                        'INSERT INTO settlement_excel_config (platform, org_id, open_password, updated_by) VALUES (?, ?, ?, ?)',
+                        [$platform, $hasOrg ? $orgId : null, $pw, $updatedBy]
+                    );
+                }
+
+                if (!$hasKind) {
+                    break; // 구 스키마는 종류 구분이 없다
+                }
             }
         }
 

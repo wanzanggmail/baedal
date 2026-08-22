@@ -61,6 +61,8 @@ final class MigrateRunner
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
+        self::migrateSettlementExcelKind();
+        self::migrateWeeklyRiders();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1539,5 +1541,145 @@ final class MigrateRunner
              ADD COLUMN ends_at DATETIME NULL COMMENT '노출 종료일시(NULL=계속 노출)' AFTER published_at"
         );
         echo "OK    content_notices.ends_at\n";
+    }
+
+    /**
+     * 정산 엑셀 암호를 **일일/주간 따로** 저장할 수 있게 `kind` 추가 + 중복 전역행 정리.
+     *
+     * 배민은 일일정산서와 주간정산서의 열기 암호가 다르다(2026-08-22 실파일 확인 —
+     * 주간 3060454741 / 일일 siook00). 플랫폼 하나에 암호 하나만 저장되면 둘 중 하나는 못 연다.
+     */
+    private static function migrateSettlementExcelKind(): void
+    {
+        echo "== settlement_excel_config.kind ==\n";
+
+        if (!db_table_exists('settlement_excel_config')) {
+            echo "SKIP  settlement_excel_config (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_excel_config'), 'Field');
+        if (!in_array('kind', $cols, true)) {
+            db_execute(
+                "ALTER TABLE settlement_excel_config
+                 ADD COLUMN kind ENUM('daily','weekly') NOT NULL DEFAULT 'daily'
+                     COMMENT '일일/주간 정산서 구분(암호가 서로 다름)' AFTER platform"
+            );
+            echo "OK    settlement_excel_config.kind\n";
+        } else {
+            echo "SKIP  settlement_excel_config.kind\n";
+        }
+
+        // 🧹 구 시드(`INSERT IGNORE`)가 남긴 중복 전역행 정리.
+        // MySQL 유니크키는 NULL을 구분하지 않아 migrate 실행마다 전역행이 새로 쌓였다.
+        // (org_id NULL, platform, kind)당 **암호가 있는 행 우선, 없으면 가장 오래된 행**만 남긴다.
+        $dupes = db_rows(
+            "SELECT platform, kind, COUNT(*) AS c
+               FROM settlement_excel_config
+              WHERE org_id IS NULL
+              GROUP BY platform, kind
+             HAVING c > 1"
+        );
+        $removed = 0;
+        foreach ($dupes as $d) {
+            $keep = db_row(
+                "SELECT id FROM settlement_excel_config
+                  WHERE org_id IS NULL AND platform = ? AND kind = ?
+                  ORDER BY (open_password <> '') DESC, id ASC
+                  LIMIT 1",
+                [(string) $d['platform'], (string) $d['kind']]
+            );
+            if ($keep === null) {
+                continue;
+            }
+            $removed += db_execute(
+                "DELETE FROM settlement_excel_config
+                  WHERE org_id IS NULL AND platform = ? AND kind = ? AND id <> ?",
+                [(string) $d['platform'], (string) $d['kind'], (int) $keep['id']]
+            );
+        }
+        echo $removed > 0
+            ? "OK    중복 전역행 {$removed}건 정리(암호 있는 행 유지)\n"
+            : "SKIP  중복 전역행 없음\n";
+
+        // 유니크키에 kind를 포함시킨다. 기존 (org_id, platform)만으로는 같은 대리점·플랫폼에
+        // 일일/주간 두 행을 만들 수 없어 저장이 막힌다.
+        $idx = db_rows('SHOW INDEX FROM settlement_excel_config');
+        $keyCols = [];
+        foreach ($idx as $i) {
+            if ((string) $i['Key_name'] === 'uq_sec_org_pf') {
+                $keyCols[(int) $i['Seq_in_index']] = (string) $i['Column_name'];
+            }
+        }
+        ksort($keyCols);
+        if ($keyCols !== [] && !in_array('kind', $keyCols, true)) {
+            try {
+                db_execute('ALTER TABLE settlement_excel_config DROP INDEX uq_sec_org_pf');
+                db_execute('ALTER TABLE settlement_excel_config ADD UNIQUE KEY uq_sec_org_pf_kind (org_id, platform, kind)');
+                echo "OK    유니크키 (org_id, platform, kind)로 교체\n";
+            } catch (Throwable $e) {
+                echo 'ERROR 유니크키 교체 → ' . $e->getMessage() . "\n";
+                exit(1);
+            }
+        } else {
+            echo "SKIP  유니크키 (이미 kind 포함)\n";
+        }
+    }
+
+    /**
+     * 배민 주간정산서(을지) 라이더별 결과 저장 테이블.
+     *
+     * 일일정산서에는 배달료와 주문 상세만 있고, **프로모션·시간제보험료·고용/산재보험·원천세·
+     * 최종 지급액은 주간정산서에만** 있다(2026-08-22 실파일 확인 — 프로모션만 237만원).
+     * 일자별 사이클(`settlement_rider_cycles`)과 달리 여기는 **주 단위 1행**이다.
+     */
+    private static function migrateWeeklyRiders(): void
+    {
+        echo "== settlement_weekly_riders ==\n";
+
+        if (db_table_exists('settlement_weekly_riders')) {
+            echo "SKIP  settlement_weekly_riders (이미 있음)\n";
+
+            return;
+        }
+
+        try {
+            db_execute(
+                "CREATE TABLE settlement_weekly_riders (
+                    id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    upload_id     INT UNSIGNED NOT NULL,
+                    agency_id     INT UNSIGNED NULL,
+                    week_start    DATE NOT NULL COMMENT '정산 시작일',
+                    week_end      DATE NOT NULL COMMENT '정산 종료일',
+                    rider_id      INT UNSIGNED NULL COMMENT '매칭된 라이더(미매칭이면 NULL)',
+                    user_id_raw   VARCHAR(80)  NOT NULL DEFAULT '' COMMENT '배민 User ID(매칭 키)',
+                    rider_name_raw VARCHAR(100) NOT NULL DEFAULT '',
+                    order_count   INT NOT NULL DEFAULT 0 COMMENT '처리건수(픽업완료·금액>0 기준)',
+                    delivery_fee  INT NOT NULL DEFAULT 0 COMMENT '배달료 A',
+                    extra_pay     INT NOT NULL DEFAULT 0 COMMENT '추가지급 B(프로모션·할증)',
+                    total_fee     INT NOT NULL DEFAULT 0 COMMENT '총 배달료 C(A+B)',
+                    hourly_ins    INT NOT NULL DEFAULT 0 COMMENT '시간제보험료',
+                    expense       INT NOT NULL DEFAULT 0 COMMENT '필요경비',
+                    reward        INT NOT NULL DEFAULT 0 COMMENT '보수액',
+                    emp_ins_rider INT NOT NULL DEFAULT 0 COMMENT '고용보험 라이더부담',
+                    acc_ins_rider INT NOT NULL DEFAULT 0 COMMENT '산재보험 라이더부담',
+                    settle_amount INT NOT NULL DEFAULT 0 COMMENT '라이더별 정산금액',
+                    income_tax    INT NOT NULL DEFAULT 0 COMMENT '소득세',
+                    resident_tax  INT NOT NULL DEFAULT 0 COMMENT '주민세',
+                    withholding   INT NOT NULL DEFAULT 0 COMMENT '원천징수세액',
+                    payout        INT NOT NULL DEFAULT 0 COMMENT '라이더별 지급금액(최종)',
+                    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uq_swr_upload_user (upload_id, user_id_raw),
+                    KEY idx_swr_rider (rider_id, week_start),
+                    KEY idx_swr_agency (agency_id, week_start)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            echo "OK    settlement_weekly_riders 생성\n";
+        } catch (Throwable $e) {
+            echo 'ERROR settlement_weekly_riders → ' . $e->getMessage() . "\n";
+            exit(1);
+        }
     }
 }

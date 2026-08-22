@@ -47,7 +47,13 @@ class XlsxParser
     {
         self::assertRequirements();
 
-        $this->spreadsheet = IOFactory::load($filePath);
+        // ⚡ **데이터 전용으로 읽는다.** 기본 로더는 수식을 계산하는데, 배민 주간정산서(을지)에는
+        // `SUM(D20:INDEX(D:D,...))` 처럼 **열 전체(1,048,576행)를 참조하는 수식**이 있어 메모리
+        // 128MB를 넘기고 타임아웃까지 났다. readDataOnly는 파일에 저장된 **계산 결과(캐시값)**를
+        // 그대로 읽으므로 결과는 같고 훨씬 빠르다. 이 파서는 서식·스타일을 안 쓴다(전부 값만 읽음).
+        $reader = IOFactory::createReaderForFile($filePath);
+        $reader->setReadDataOnly(true);
+        $this->spreadsheet = $reader->load($filePath);
         $this->sheetNames  = [];
         foreach ($this->spreadsheet->getAllSheets() as $sheet) {
             $this->sheetNames[] = $sheet->getTitle();
@@ -67,16 +73,22 @@ class XlsxParser
     }
 
     /**
+     * @param bool $calculateFormulas 수식 셀을 계산할지. `false`면 수식 문자열이 그대로 온다.
+     *   ⚠️ 배민 주간정산서(을지)에는 `SUM(D20:INDEX(D:D,…))`처럼 **열 전체(약 105만 행)를
+     *      참조하는 합계 수식**이 있어 계산하면 메모리가 터진다(512MB로도 부족). 그 시트는
+     *      정작 데이터 칸이 전부 리터럴 값이라 계산이 필요 없으므로 `false`로 읽는다.
+     *      쿠팡 등 기존 경로는 계산이 필요할 수 있어 기본값을 `true`로 둔다.
+     *
      * @return array<int, array<string, mixed>>  행 번호(1-based) => [컬럼 => 값]
      */
-    public function readSheet(int|string $sheetIndex = 0, int $startRow = 1, int $maxRows = 0): array
+    public function readSheet(int|string $sheetIndex = 0, int $startRow = 1, int $maxRows = 0, bool $calculateFormulas = true): array
     {
         $worksheet = $this->resolveWorksheet($sheetIndex);
         if ($worksheet === null) {
             return [];
         }
 
-        $raw = $worksheet->toArray(null, true, false, false);
+        $raw = $worksheet->toArray(null, $calculateFormulas, false, false);
         $result = [];
 
         foreach ($raw as $i => $row) {
@@ -706,6 +718,137 @@ class XlsxParser
                 'fee_area'        => $money($cols, $map['fee_area'] ?? null),
                 'fee_bulk'        => $money($cols, $map['fee_bulk'] ?? null),
                 'payout'          => $money($cols, $map['payout'] ?? null),
+            ];
+
+            // 🔢 **처리건수에 셀지 여부** — 배민 주간정산서(을지) 「처리건수」와 맞추기 위한 규칙.
+            //
+            // 2026-08-22 실 정산서(20260812~18) 대조로 확인: 배민은 **금액과 건수를 다른 기준**으로 센다.
+            //   · 배달료   = 배달취소 건도 포함해 배달처리비 전액 합산
+            //   · 처리건수 = **픽업완료했고 배달처리비가 0원이 아닌 건**만
+            // 그래서 아래 두 종류는 돈은 받지만 건수에는 안 들어간다:
+            //   · 가게까지 갔다가 픽업 못 한 취소건 → 헛걸음 보상 700원 (기본단가 700, 픽업완료 없음)
+            //   · 라이더 귀책으로 0원 처리된 건 (전달완료여도 배달처리비 0)
+            // 이 규칙을 안 지키면 우리 집계가 6건 더 많아지고(실측), 건당 정산수수료와
+            // 프로모션 건수 구간이 그만큼 어긋난다.
+            $last = array_key_last($rows);
+            $rows[$last]['counted'] = $rows[$last]['accepted_at'] !== null
+                && $rows[$last]['accepted_at'] !== ''
+                && $rows[$last]['payout'] > 0;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * 배민 **주간정산서 을지**(협력사 소속 라이더 정산 확인용) 파서 — 라이더별 주간 정산 결과.
+     *
+     * 일일정산서(배달 내역 상세)에는 **배달료와 주문 상세만** 있다. 프로모션·시간제보험료·
+     * 고용/산재보험·원천세·최종 지급액은 **주간정산서에만** 있어서, 이걸 안 읽으면 라이더에게
+     * 줄 정확한 금액이 나오지 않는다(2026-08-22 실파일 기준 프로모션만 237만원).
+     *
+     * 시트 구조(2026-08 기준): 안내문 → 행18 헤더 → 행20부터 데이터.
+     * 헤더가 2줄(행18 항목명 + 행19 설명)이라 항목명 행을 찾아 매핑한다.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function parseBaeminWeeklyRiders(): array
+    {
+        $sheetIdx = $this->findSheetIndex('을지');
+        if ($sheetIdx === null) {
+            $sheetIdx = $this->findSheetIndex('라이더');
+        }
+        if ($sheetIdx === null) {
+            return [];
+        }
+
+        // 수식 계산 끄기 — 위 readSheet() 주석 참고(전체열 SUM 때문에 계산하면 메모리가 터진다).
+        $allRows = $this->readSheet($sheetIdx, 1, 0, false);
+        // ⚠️ 키워드를 「배달료」로 잡으면 안 된다 — 헤더 위 안내문("정산 주간 발생한 배달료 항목")에
+        //    걸려 안내문 행을 헤더로 오인한다. 「처리건수」는 헤더에만 나오는 단어라 이걸 쓴다.
+        $headerRow = $this->findHeaderRow($allRows, ['처리건수']);
+        if ($headerRow === null) {
+            return [];
+        }
+
+        $map = $this->mapHeaderColumns($allRows[$headerRow] ?? [], [
+            'user_id'      => ['User ID', 'UserID'],
+            'rider_name'   => ['라이더명', '이름'],
+            'order_count'  => ['처리건수'],
+            'delivery_fee' => ['배달료'],
+            'extra_pay'    => ['추가지급'],
+            'total_fee'    => ['총 배달료', '총배달료'],
+            'hourly_ins'   => ['시간제보험료'],
+            'expense'      => ['필요경비'],
+            'reward'       => ['보수액'],
+            'emp_ins_rider'  => ['라이더부담'],       // 고용보험(라이더)
+            'acc_ins_rider'  => ['라이더부담'],       // 산재보험(라이더) — 같은 이름이라 아래에서 위치로 보정
+            'settle_amount'  => ['라이더별'],          // 라이더별 정산금액
+            'income_tax'     => ['소득세'],
+            'resident_tax'   => ['주민세'],
+            'withholding'    => ['원천징수세액'],
+            'payout'         => ['라이더별'],          // 라이더별 지급금액 — 위와 동명, 아래에서 보정
+        ]);
+
+        // ⚠️ 「라이더부담」·「라이더별」은 같은 라벨이 2번 나온다(고용/산재, 정산금액/지급금액).
+        //    mapHeaderColumns가 첫 번째만 잡으므로, 헤더 행을 직접 훑어 2번째 위치를 찾아준다.
+        $hdr = $allRows[$headerRow] ?? [];
+        $findAll = static function (array $hdr, string $needle): array {
+            $hits = [];
+            foreach ($hdr as $col => $v) {
+                if (str_contains(preg_replace('/\s+/u', '', (string) $v) ?? '', $needle)) {
+                    $hits[] = $col;
+                }
+            }
+
+            return $hits;
+        };
+        $riderBurden = $findAll($hdr, '라이더부담');
+        if (count($riderBurden) >= 2) {
+            $map['emp_ins_rider'] = $riderBurden[0];
+            $map['acc_ins_rider'] = $riderBurden[1];
+        }
+        $riderCols = $findAll($hdr, '라이더별');
+        if (count($riderCols) >= 2) {
+            $map['settle_amount'] = $riderCols[0];
+            $map['payout']        = $riderCols[1];
+        }
+
+        $get   = static fn (array $c, ?string $col): mixed => ($col !== null && isset($c[$col])) ? $c[$col] : null;
+        $money = static fn (array $c, ?string $col): int => (int) round((float) (self::numOrZero($get($c, $col))));
+
+        $rows = [];
+        foreach ($allRows as $rowNum => $cols) {
+            if ($rowNum <= $headerRow) {
+                continue;
+            }
+            $userId = trim((string) ($get($cols, $map['user_id'] ?? null) ?? ''));
+            $name   = trim((string) ($get($cols, $map['rider_name'] ?? null) ?? ''));
+            if ($userId === '' && $name === '') {
+                continue;
+            }
+            // 합계행 방어 — User ID 없이 이름만 「합계」류인 행은 건너뛴다.
+            if ($userId === '' && preg_match('/합계|소계|총계/u', $name)) {
+                continue;
+            }
+
+            $rows[] = [
+                'user_id'       => $userId,
+                'name_raw'      => $name,
+                'name'          => self::cleanName($name),
+                'order_count'   => $money($cols, $map['order_count'] ?? null),
+                'delivery_fee'  => $money($cols, $map['delivery_fee'] ?? null),
+                'extra_pay'     => $money($cols, $map['extra_pay'] ?? null),
+                'total_fee'     => $money($cols, $map['total_fee'] ?? null),
+                'hourly_ins'    => $money($cols, $map['hourly_ins'] ?? null),
+                'expense'       => $money($cols, $map['expense'] ?? null),
+                'reward'        => $money($cols, $map['reward'] ?? null),
+                'emp_ins_rider' => $money($cols, $map['emp_ins_rider'] ?? null),
+                'acc_ins_rider' => $money($cols, $map['acc_ins_rider'] ?? null),
+                'settle_amount' => $money($cols, $map['settle_amount'] ?? null),
+                'income_tax'    => $money($cols, $map['income_tax'] ?? null),
+                'resident_tax'  => $money($cols, $map['resident_tax'] ?? null),
+                'withholding'   => $money($cols, $map['withholding'] ?? null),
+                'payout'        => $money($cols, $map['payout'] ?? null),
             ];
         }
 

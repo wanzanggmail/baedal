@@ -46,7 +46,7 @@ if ($method === 'GET') {
             'ok'          => true,
             'mode'        => 'agency',
             'table_ready' => SettlementExcelConfig::tableExists(),
-            'passwords'   => SettlementExcelConfig::allStored(admin_org_id()),
+            'passwords'   => SettlementExcelConfig::allStoredByKind(admin_org_id()),
             'python_hint' => 'pip install -r requirements-settlement.txt',
         ], JSON_UNESCAPED_UNICODE);
         exit;
@@ -57,7 +57,7 @@ if ($method === 'GET') {
         'mode'        => 'list',
         'table_ready' => SettlementExcelConfig::tableExists(),
         'is_hq'       => $isHq,
-        'global'      => $isHq ? SettlementExcelConfig::allStored(null) : null,
+        'global'      => $isHq ? SettlementExcelConfig::allStoredByKind(null) : null,
         'agencies'    => SettlementExcelConfig::listAgencyRows(),
         'python_hint' => 'pip install -r requirements-settlement.txt',
     ], JSON_UNESCAPED_UNICODE);

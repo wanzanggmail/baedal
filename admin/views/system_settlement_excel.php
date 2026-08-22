@@ -19,8 +19,10 @@ $platformLabels = [
     'other'   => '기타',
 ];
 
-$excelPasswords = $isAgencyLevel ? SettlementExcelConfig::allStored(admin_org_id()) : [];
-$globalPasswords = $isHq ? SettlementExcelConfig::allStored(null) : null;
+// 🔑 일일/주간은 열기 암호가 다르다(배민 확인: 주간=사업자등록번호, 일일=별도 암호).
+//    그래서 "platform|kind" 키로 따로 저장·표시한다.
+$excelPasswords  = $isAgencyLevel ? SettlementExcelConfig::allStoredByKind(admin_org_id()) : [];
+$globalPasswords = $isHq ? SettlementExcelConfig::allStoredByKind(null) : null;
 $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows();
 ?>
 <!--begin::Toolbar-->
@@ -77,19 +79,19 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 					<form class="row g-4 excel-pw-form" data-org-id="">
 						<?php foreach (SettlementExcelConfig::platforms() as $pf) :
 						    $pfLabel = $platformLabels[$pf] ?? $pf;
-						    $meta = SettlementExcelConfig::storedPasswordMeta($pf, admin_org_id());
 						    ?>
 						<div class="col-md-4">
-							<label class="form-label" for="excel_pw_own_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>">
-								<?= htmlspecialchars($pfLabel, ENT_QUOTES, 'UTF-8') ?>
-								<?php if ($meta['configured']) : ?>
-								<span class="text-muted fs-8">(등록됨 · <?= (int) $meta['length'] ?>자)</span>
-								<?php endif; ?>
-							</label>
-							<input type="password" class="form-control form-control-solid excel-pw-input" data-platform="<?= $pf ?>"
-								id="excel_pw_own_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>"
-								value="<?= htmlspecialchars($excelPasswords[$pf] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-								autocomplete="new-password" placeholder="암호 없으면 비움" <?= $canWrite ? '' : 'readonly' ?> />
+							<label class="form-label"><?= htmlspecialchars($pfLabel, ENT_QUOTES, 'UTF-8') ?></label>
+							<?php foreach (SettlementExcelConfig::kinds() as $kd) : ?>
+							<div class="input-group input-group-sm mb-2">
+								<span class="input-group-text fs-8" style="min-width:52px"><?= htmlspecialchars(SettlementExcelConfig::kindLabel($kd), ENT_QUOTES, 'UTF-8') ?></span>
+								<input type="password" class="form-control form-control-solid excel-pw-input"
+									data-platform="<?= $pf ?>" data-kind="<?= $kd ?>"
+									id="excel_pw_own_<?= htmlspecialchars($pf . '_' . $kd, ENT_QUOTES, 'UTF-8') ?>"
+									value="<?= htmlspecialchars($excelPasswords[$pf . '|' . $kd] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+									autocomplete="new-password" placeholder="없으면 비움" <?= $canWrite ? '' : 'readonly' ?> />
+							</div>
+							<?php endforeach; ?>
 						</div>
 						<?php endforeach; ?>
 						<div class="col-12">
@@ -121,19 +123,19 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 					<form class="row g-4 excel-pw-form" data-org-id="global">
 						<?php foreach (SettlementExcelConfig::platforms() as $pf) :
 						    $pfLabel = $platformLabels[$pf] ?? $pf;
-						    $meta = SettlementExcelConfig::storedPasswordMeta($pf, null);
 						    ?>
 						<div class="col-md-4">
-							<label class="form-label" for="excel_pw_global_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>">
-								<?= htmlspecialchars($pfLabel, ENT_QUOTES, 'UTF-8') ?>
-								<?php if ($meta['configured']) : ?>
-								<span class="text-muted fs-8">(등록됨 · <?= (int) $meta['length'] ?>자)</span>
-								<?php endif; ?>
-							</label>
-							<input type="password" class="form-control form-control-solid excel-pw-input" data-platform="<?= $pf ?>"
-								id="excel_pw_global_<?= htmlspecialchars($pf, ENT_QUOTES, 'UTF-8') ?>"
-								value="<?= htmlspecialchars($globalPasswords[$pf] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-								autocomplete="new-password" placeholder="암호 없으면 비움" <?= $canWrite ? '' : 'readonly' ?> />
+							<label class="form-label"><?= htmlspecialchars($pfLabel, ENT_QUOTES, 'UTF-8') ?></label>
+							<?php foreach (SettlementExcelConfig::kinds() as $kd) : ?>
+							<div class="input-group input-group-sm mb-2">
+								<span class="input-group-text fs-8" style="min-width:52px"><?= htmlspecialchars(SettlementExcelConfig::kindLabel($kd), ENT_QUOTES, 'UTF-8') ?></span>
+								<input type="password" class="form-control form-control-solid excel-pw-input"
+									data-platform="<?= $pf ?>" data-kind="<?= $kd ?>"
+									id="excel_pw_global_<?= htmlspecialchars($pf . '_' . $kd, ENT_QUOTES, 'UTF-8') ?>"
+									value="<?= htmlspecialchars($globalPasswords[$pf . '|' . $kd] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+									autocomplete="new-password" placeholder="없으면 비움" <?= $canWrite ? '' : 'readonly' ?> />
+							</div>
+							<?php endforeach; ?>
 						</div>
 						<?php endforeach; ?>
 						<div class="col-12">
@@ -188,10 +190,16 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 							</td>
 							<?php foreach (SettlementExcelConfig::platforms() as $pf) : ?>
 							<td>
-								<input type="password" class="form-control form-control-sm excel-pw-input" data-platform="<?= $pf ?>"
-									value="<?= htmlspecialchars($row['passwords'][$pf] ?? '', ENT_QUOTES, 'UTF-8') ?>"
-									autocomplete="new-password" placeholder="비움=전역기본" <?= $canWrite ? '' : 'readonly' ?>
-									form="excel_pw_row_<?= (int) $row['id'] ?>" />
+								<?php foreach (SettlementExcelConfig::kinds() as $kd) : ?>
+								<div class="input-group input-group-sm mb-1">
+									<span class="input-group-text fs-9 px-2"><?= htmlspecialchars(SettlementExcelConfig::kindLabel($kd), ENT_QUOTES, 'UTF-8') ?></span>
+									<input type="password" class="form-control form-control-sm excel-pw-input"
+										data-platform="<?= $pf ?>" data-kind="<?= $kd ?>"
+										value="<?= htmlspecialchars($row['passwords'][$pf . '|' . $kd] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+										autocomplete="new-password" placeholder="비움=전역기본" <?= $canWrite ? '' : 'readonly' ?>
+										form="excel_pw_row_<?= (int) $row['id'] ?>" />
+								</div>
+								<?php endforeach; ?>
 							</td>
 							<?php endforeach; ?>
 							<?php if ($canWrite) : ?>
@@ -228,9 +236,11 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 	}
 
 	function collectPasswords(root) {
+		// 키는 "platform|kind" (예: baemin|weekly) — 일일/주간 암호가 서로 다르기 때문.
 		var out = {};
 		root.querySelectorAll('.excel-pw-input').forEach(function (input) {
-			out[input.dataset.platform] = input.value || '';
+			var kind = input.dataset.kind || 'daily';
+			out[input.dataset.platform + '|' + kind] = input.value || '';
 		});
 		return out;
 	}

@@ -59,6 +59,14 @@ if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
 }
 
 $origName = (string) ($_FILES['file']['name'] ?? 'upload.xlsx');
+// 파일명은 브라우저·OS가 보내는 값이라 UTF-8이 아닐 수 있다(윈도우 CP949 등).
+// 그대로 두면 utf8mb4 컬럼 INSERT에서 "Incorrect string value"로 업로드가 통째로 실패한다.
+if (!mb_check_encoding($origName, 'UTF-8')) {
+    $converted = @mb_convert_encoding($origName, 'UTF-8', 'CP949, EUC-KR, SJIS, UTF-8');
+    $origName  = is_string($converted) && mb_check_encoding($converted, 'UTF-8')
+        ? $converted
+        : preg_replace('/[^\x20-\x7E.]/', '_', $origName); // 그래도 안 되면 ASCII로 강등
+}
 $tmpPath  = (string) ($_FILES['file']['tmp_name'] ?? '');
 
 if ($tmpPath === '' || !is_file($tmpPath)) {
@@ -124,6 +132,8 @@ $metaJson = json_encode(
 );
 
 $uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
+// 🔑 일일/주간은 **열기 암호가 다르다**(배민 확인). 어느 쪽인지 아직 모르므로 둘 다 시도하고,
+//    파일을 연 뒤 시트 구성으로 종류를 판별한다($detectedKind).
 $passwords      = SettlementExcelConfig::passwordsToTry(
     $platform,
     $uploadPassword !== '' ? $uploadPassword : null,
@@ -135,6 +145,26 @@ $parser    = new XlsxParser();
 try {
     $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords, $platform);
     $parser->open($parsePath);
+
+    // 📄 일일/주간 자동 판별 — 사용자가 고르지 않아도 시트 구성으로 갈린다.
+    //    주간이면 라이더별 주간 정산(을지)만 읽고, 일일 파싱 경로는 아예 타지 않는다.
+    $kindDetect   = SettlementPlatformDetect::detectKind($parser, $origName);
+    $detectedKind = (string) $kindDetect['kind'];
+
+    if ($detectedKind === 'weekly') {
+        $weeklyRows = $parser->parseBaeminWeeklyRiders();
+        if ($weeklyRows === []) {
+            echo json_encode([
+                'ok'    => false,
+                'error' => '주간 정산서로 판별했지만 라이더 내역(을지)을 읽지 못했습니다. 파일 형식을 확인해 주세요.',
+                'kind'  => 'weekly',
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        settlement_weekly_handle($weeklyRows, $kindDetect, $origName, $platform, $agencyId, $teamName, $regionName, $metaJson, $dryRun, $dupWarning);
+        exit; // settlement_weekly_handle()이 응답까지 마친다
+    }
+
     if ($platform === 'baemin') {
         // 배민: 시트 1개(주문 단위) → 라이더·운행일별 집계로 정규화
         $baeminOrders           = $parser->parseBaeminOrders();
@@ -683,7 +713,11 @@ function settlement_baemin_normalize(array $orders, string $fallbackDate): array
                 'payout_amount'    => 0,
             ];
         }
-        $agg[$key]['order_count']++;
+        // 금액은 전 건 합산, 건수는 배민 「처리건수」 규칙(픽업완료 & 금액>0)을 따르는 건만.
+        // 상세는 XlsxParser::parseBaeminOrders()의 `counted` 주석 참고.
+        if (!empty($o['counted'])) {
+            $agg[$key]['order_count']++;
+        }
         $agg[$key]['gross_amount']  += (int) ($o['payout'] ?? 0);
         $agg[$key]['payout_amount'] += (int) ($o['payout'] ?? 0);
 
@@ -783,4 +817,182 @@ function settlement_upload_duplicate_error(
     }
 
     return null;
+}
+
+/**
+ * 배민 **주간 정산서** 처리 — 미리보기/확정 응답까지 여기서 마친다.
+ *
+ * 일일 경로(`settlement_daily_riders` → 정산 반영)와 **완전히 분리**했다. 주간은 일자별이 아니라
+ * 주 단위 1행이고, 프로모션·시간제보험·고용/산재·원천세처럼 일일에는 아예 없는 항목을 담는다.
+ * 같은 테이블에 억지로 밀어 넣으면 두 체계가 섞여 어느 쪽 숫자인지 알 수 없게 된다.
+ *
+ * ⚠️ 여기서는 **저장만** 한다(지갑 적립 없음). 주간 금액을 어떤 순서로 라이더 지갑에 반영할지는
+ *    일일 정산 반영과 겹치는 부분이 있어 별도 결정이 필요하다 — 그 전까지는 조회·대조용이다.
+ *
+ * @param list<array<string,mixed>> $rows  XlsxParser::parseBaeminWeeklyRiders() 결과
+ * @param array<string,mixed>       $kindDetect
+ */
+function settlement_weekly_handle(
+    array $rows,
+    array $kindDetect,
+    string $origName,
+    string $platform,
+    int $agencyId,
+    string $teamName,
+    string $regionName,
+    string $metaJson,
+    bool $dryRun,
+    ?string $dupWarning
+): void {
+    // 정산 기간 — 파일명 "20260812~20260818" 에서 뽑고, 없으면 오늘 기준 주간으로 둔다.
+    $weekStart = null;
+    $weekEnd   = null;
+    if (preg_match('/(\d{8})\s*~\s*(\d{8})/', $origName, $m)) {
+        $weekStart = substr($m[1], 0, 4) . '-' . substr($m[1], 4, 2) . '-' . substr($m[1], 6, 2);
+        $weekEnd   = substr($m[2], 0, 4) . '-' . substr($m[2], 4, 2) . '-' . substr($m[2], 6, 2);
+    }
+    if ($weekStart === null || $weekEnd === null) {
+        $weekEnd   = date('Y-m-d');
+        $weekStart = date('Y-m-d', strtotime('-6 days'));
+    }
+
+    // 라이더 매칭 — 배민은 User ID가 매칭키다(일일 경로와 동일 기준).
+    $matched = 0;
+    foreach ($rows as $i => $r) {
+        $rid = settlement_match_rider_id($platform, (string) ($r['user_id'] ?? ''), (string) ($r['name'] ?? ''), $agencyId);
+        $rows[$i]['rider_id'] = $rid;
+        if ($rid !== null) {
+            $matched++;
+        }
+    }
+
+    $sum = static function (string $key) use ($rows): int {
+        $t = 0;
+        foreach ($rows as $r) {
+            $t += (int) ($r[$key] ?? 0);
+        }
+
+        return $t;
+    };
+    $summary = [
+        'riders'       => count($rows),
+        'matched'      => $matched,
+        'unmatched'    => count($rows) - $matched,
+        'order_count'  => $sum('order_count'),
+        'delivery_fee' => $sum('delivery_fee'),
+        'extra_pay'    => $sum('extra_pay'),
+        'total_fee'    => $sum('total_fee'),
+        'hourly_ins'   => $sum('hourly_ins'),
+        'withholding'  => $sum('withholding'),
+        'payout'       => $sum('payout'),
+    ];
+
+    if ($dryRun) {
+        echo json_encode([
+            'ok'           => true,
+            'preview'      => true,
+            'kind'         => 'weekly',
+            'kind_reasons' => $kindDetect['reasons'] ?? [],
+            'platform'     => $platform,
+            'agency_id'    => $agencyId,
+            'week_start'   => $weekStart,
+            'week_end'     => $weekEnd,
+            'summary'      => $summary,
+            'duplicate_warning' => $dupWarning,
+            'rows'         => array_map(static fn (array $r): array => [
+                'user_id'      => (string) ($r['user_id'] ?? ''),
+                'name_raw'     => (string) ($r['name_raw'] ?? ''),
+                'matched'      => $r['rider_id'] !== null,
+                'order_count'  => (int) ($r['order_count'] ?? 0),
+                'delivery_fee' => (int) ($r['delivery_fee'] ?? 0),
+                'extra_pay'    => (int) ($r['extra_pay'] ?? 0),
+                'payout'       => (int) ($r['payout'] ?? 0),
+            ], $rows),
+        ], JSON_UNESCAPED_UNICODE);
+
+        return;
+    }
+
+    if (!db_table_exists('settlement_weekly_riders')) {
+        echo json_encode(['ok' => false, 'error' => 'settlement_weekly_riders 테이블이 없습니다. php migrate.php 를 실행하세요.'], JSON_UNESCAPED_UNICODE);
+
+        return;
+    }
+
+    $uploadId = db_insert(
+        "INSERT INTO settlement_uploads
+            (kind, platform, agency_id, team_name, region_name, original_filename, stored_path,
+             settlement_date, total_rows, ok_rows, skipped_rows, error_rows, status, operator_id)
+         VALUES ('weekly', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'parsed', ?)",
+        [
+            $platform,
+            $agencyId,
+            $teamName,
+            $regionName,
+            $origName,
+            $metaJson,
+            $weekStart,
+            count($rows),
+            $matched,
+            count($rows) - $matched,
+            (int) ($_SESSION['admin_id'] ?? 0) ?: null,
+        ]
+    );
+
+    $saved = 0;
+    foreach ($rows as $r) {
+        db_execute(
+            'INSERT INTO settlement_weekly_riders
+                (upload_id, agency_id, week_start, week_end, rider_id, user_id_raw, rider_name_raw,
+                 order_count, delivery_fee, extra_pay, total_fee, hourly_ins, expense, reward,
+                 emp_ins_rider, acc_ins_rider, settle_amount, income_tax, resident_tax, withholding, payout)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE
+                rider_id = VALUES(rider_id), order_count = VALUES(order_count),
+                delivery_fee = VALUES(delivery_fee), extra_pay = VALUES(extra_pay),
+                total_fee = VALUES(total_fee), hourly_ins = VALUES(hourly_ins),
+                expense = VALUES(expense), reward = VALUES(reward),
+                emp_ins_rider = VALUES(emp_ins_rider), acc_ins_rider = VALUES(acc_ins_rider),
+                settle_amount = VALUES(settle_amount), income_tax = VALUES(income_tax),
+                resident_tax = VALUES(resident_tax), withholding = VALUES(withholding),
+                payout = VALUES(payout)',
+            [
+                $uploadId, $agencyId, $weekStart, $weekEnd,
+                $r['rider_id'], (string) ($r['user_id'] ?? ''), (string) ($r['name_raw'] ?? ''),
+                (int) $r['order_count'], (int) $r['delivery_fee'], (int) $r['extra_pay'], (int) $r['total_fee'],
+                (int) $r['hourly_ins'], (int) $r['expense'], (int) $r['reward'],
+                (int) $r['emp_ins_rider'], (int) $r['acc_ins_rider'], (int) $r['settle_amount'],
+                (int) $r['income_tax'], (int) $r['resident_tax'], (int) $r['withholding'], (int) $r['payout'],
+            ]
+        );
+        $saved++;
+    }
+
+    require_once INC_PATH . '/AuditLog.php';
+    AuditLog::record('settlement.weekly_upload', (string) $uploadId, sprintf(
+        '배민 주간정산서 업로드 · %s~%s · %d명(매칭 %d) · 지급합계 %s원',
+        $weekStart,
+        $weekEnd,
+        count($rows),
+        $matched,
+        number_format($summary['payout'])
+    ));
+
+    echo json_encode([
+        'ok'         => true,
+        'kind'       => 'weekly',
+        'upload_id'  => $uploadId,
+        'week_start' => $weekStart,
+        'week_end'   => $weekEnd,
+        'saved'      => $saved,
+        'summary'    => $summary,
+        'message'    => sprintf(
+            '주간 정산서 저장 완료 — %s~%s · %d명(매칭 %d명) · 지급합계 %s원',
+            $weekStart,
+            $weekEnd,
+            count($rows),
+            $matched,
+            number_format($summary['payout'])
+        ),
+    ], JSON_UNESCAPED_UNICODE);
 }

@@ -37,6 +37,56 @@ final class SettlementPlatformDetect
      *   parse_row_count: int
      * }
      */
+    /**
+     * 일일 정산서인지 주간 정산서인지 판별 — 업로드 화면에서 사용자가 고르지 않아도 되게 한다.
+     *
+     * 배민 주간정산서는 「갑지/을지/관리비/프로모션/고용보험소급정산」 같은 시트로 구성되고,
+     * 일일정산서는 「배달 내역 상세」 한 장이 본체다. 시트 구성만 봐도 확실히 갈린다.
+     * (쿠팡은 현재 일간만 취급하므로 항상 daily)
+     *
+     * @return array{kind:string, confidence:string, reasons:list<string>}
+     */
+    public static function detectKind(XlsxParser $parser, string $filename): array
+    {
+        $sheets  = $parser->getSheetNames();
+        $joined  = implode(' | ', $sheets);
+        $base    = pathinfo($filename, PATHINFO_FILENAME);
+        $reasons = [];
+        $weekly  = 0;
+        $daily   = 0;
+
+        foreach (['갑지' => 4, '을지' => 4, '관리비' => 2, '고용보험소급정산' => 3, '협력사 자체미션' => 2, '추가배달료' => 2] as $marker => $score) {
+            if (str_contains($joined, $marker)) {
+                $weekly += $score;
+                if ($score >= 3) {
+                    $reasons[] = "시트「{$marker}」(주간정산서 구성)";
+                }
+            }
+        }
+        if (str_contains($joined, '배달 내역 상세') || str_contains($joined, '배달내역상세')) {
+            $daily += 5;
+            $reasons[] = '시트「배달 내역 상세」(일일정산서 구성)';
+        }
+        // 파일명에 기간이 두 개(시작~종료)면 주간, 같은 날짜가 반복되면 일일인 경우가 많다.
+        if (preg_match('/(\d{8})\s*~\s*(\d{8})/', $base, $m) && $m[1] !== $m[2]) {
+            $weekly += 2;
+            $reasons[] = '파일명이 기간(시작~종료) 형식';
+        }
+
+        if ($weekly === 0 && $daily === 0) {
+            return ['kind' => 'daily', 'confidence' => 'none', 'reasons' => ['판별 근거 없음 — 일일로 처리']];
+        }
+
+        $kind = $weekly > $daily ? 'weekly' : 'daily';
+        $gap  = abs($weekly - $daily);
+
+        return [
+            'kind'       => $kind,
+            'confidence' => $gap >= 4 ? 'high' : ($gap >= 2 ? 'medium' : 'low'),
+            'reasons'    => $reasons,
+        ];
+    }
+
     public static function analyze(XlsxParser $parser, string $filename, string $settlementDate = ''): array
     {
         $reasons = [];

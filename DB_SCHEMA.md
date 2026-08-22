@@ -160,8 +160,23 @@ UNIQUE(`rider_id`,`settlement_date`,`platform`) — 같은 날 중복 반영 방
 🐛→✅ **2026-07-23 버그 수정**: 실 파일로 헤더 대조 결과 기존 파서가 D열부터 한 칸씩 밀려 읽어 **실제 차감액(금액열)이 아니라 배달비를 저장하던 버그**를 발견·수정. 라이더 매칭(`rider_id`, 이전엔 항상 NULL)도 이번에 추가.
 정산 반영 시 **해당 `upload_id`의 차감행을 라이더별로 바로 공제**한다(`SettlementAmounts::excelDeductions`, fee_code=`excel_deduction`). `registered_entry_id`(🆕): 이 차감행을 `deduction_entries`로 "등록"하면 채워짐(`admin/api/deduction_register.php`) — 수동 원장용. 등록분은 엑셀 차감과 이중으로 빠지지 않게 `buildFeeItems`에서 제외.
 
+### `settlement_weekly_riders` — 🆕(2026-08-22) 배민 **주간정산서(을지)** 라이더별 결과
+일일정산서에는 **배달료와 주문 상세만** 있다. 프로모션·시간제보험료·고용/산재보험·원천세·최종 지급액은 **주간정산서에만** 있어서(실파일 기준 프로모션만 237만원), 이걸 안 읽으면 라이더에게 줄 정확한 금액이 안 나온다. 그래서 일일과 **별도 테이블**로 둔다 — 일자별이 아니라 **주 단위 1행**이고 담는 항목도 다르다.
+UNIQUE(`upload_id`,`user_id_raw`) — 같은 업로드를 다시 올려도 라이더별로 덮어쓴다(멱등). 매칭키는 배민 **User ID**(일일 경로와 동일).
+컬럼: `order_count`(처리건수) · `delivery_fee`(배달료 A) · `extra_pay`(추가지급 B=프로모션) · `total_fee`(C=A+B) · `hourly_ins` · `expense` · `reward` · `emp_ins_rider`/`acc_ins_rider`(라이더부담 보험) · `settle_amount` · `income_tax`/`resident_tax`/`withholding` · `payout`(최종 지급액).
+⚠️ **저장만 하고 지갑 적립은 하지 않는다.** 주간 금액을 어떤 순서로 라이더 지갑에 반영할지는 일일 정산 반영과 겹치는 부분이 있어 별도 결정이 필요하다 — 그 전까지는 조회·대조용.
+
+**⚠️ 배민의 건수/금액 집계 규칙(2026-08-22 실정산서 대조로 확인)** — 둘의 기준이 다르다:
+- **배달료** = 배달취소 건도 포함해 `배달처리비` 전액 합산
+- **처리건수** = **픽업완료했고 배달처리비가 0원이 아닌 건**만
+  → 가게까지 갔다 픽업 못 한 취소건(헛걸음 보상 700원)과 라이더 귀책 0원 건은 **돈은 받지만 건수엔 안 들어간다**.
+  이 규칙을 안 지키면 집계가 6건(실측) 많아지고 건당 정산수수료·프로모션 건수 구간이 그만큼 어긋난다.
+  구현: `XlsxParser::parseBaeminOrders()`의 `counted` 플래그 → `settlement_baemin_normalize()`.
+
 ### `settlement_excel_config` — 정산 엑셀 열기 암호(대리점별 오버라이드)
-UNIQUE(`org_id`,`platform`), `org_id IS NULL`=전역 기본. 복호화 순서: 업로드 직접입력→대리점→전역→env→baemin 하드코딩.
+UNIQUE(`org_id`,`platform`,`kind`), `org_id IS NULL`=전역 기본. 복호화 순서: 업로드 직접입력→대리점→전역→env→baemin 하드코딩.
+🆕 **`kind`(daily|weekly)** — 배민은 **일일과 주간의 열기 암호가 다르다**(주간=사업자등록번호, 일일=별도). 종류별로 따로 저장하고, 업로드 시 요청한 종류를 먼저 시도한 뒤 나머지 종류도 시도한다(한쪽만 등록해둔 경우에도 열리도록).
+🐛→✅ **2026-08-22 중복행 버그 수정** — 구 시드가 `INSERT IGNORE`로 전역행(org_id NULL)을 심었는데, **MySQL 유니크키는 NULL을 서로 다른 값으로 취급**해서 `php migrate.php`를 돌릴 때마다 3행씩 쌓였다(실제 141행까지 늘어나 있었음). 조회는 `LIMIT 1`이라 정렬 보장 없이 아무 행이나 집게 되고, 빈 암호 행을 집으면 복호화가 실패한다. 시드를 제거하고 기존 중복행을 정리했다(암호가 있는 행 우선 유지).
 관리 화면(`system/settlement-excel`)은 2026-08-05부터 `system/*` 일괄 super 전용 규칙의 예외 — `RolePermission`의 `settlement` 영역 권한을 따르며, 대리점 계정은 자기 암호만, 본사·총판은 스코프 내 대리점 전체를 리스트로 본다(`SettlementExcelConfig::listAgencyRows()`, `Org::agencyScopeClause()` 사용).
 
 ---
