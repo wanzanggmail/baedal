@@ -152,16 +152,24 @@ try {
     $detectedKind = (string) $kindDetect['kind'];
 
     if ($detectedKind === 'weekly') {
+        // 배민은 을지(라이더별 표)에서, 쿠팡은 시간제보험(차감) 시트에서 읽는다.
+        // 두 플랫폼의 주정산서 구조가 완전히 달라 파서를 나눈다.
         $weeklyRows = $parser->parseBaeminWeeklyRiders();
+        $weeklyIns  = [];
         if ($weeklyRows === []) {
-            echo json_encode([
-                'ok'    => false,
-                'error' => '주간 정산서로 판별했지만 라이더 내역(을지)을 읽지 못했습니다. 파일 형식을 확인해 주세요.',
-                'kind'  => 'weekly',
-            ], JSON_UNESCAPED_UNICODE);
-            exit;
+            // 쿠팡 주정산서 — 반영 대상(시간제보험)만 뽑는다. 라이더별 표는 일일과 컬럼이 같아
+            // 그대로 읽으면 한 주치가 하루치로 저장되므로 **의도적으로 읽지 않는다**.
+            $weeklyIns = $parser->parseHourlyInsuranceSheet();
+            if ($weeklyIns === []) {
+                echo json_encode([
+                    'ok'    => false,
+                    'error' => '주간 정산서로 판별했지만 반영할 내역(라이더별 정산 또는 시간제보험)을 읽지 못했습니다. 파일 형식을 확인해 주세요.',
+                    'kind'  => 'weekly',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
         }
-        settlement_weekly_handle($weeklyRows, $kindDetect, $origName, $platform, $agencyId, $teamName, $regionName, $metaJson, $dryRun, $dupWarning);
+        settlement_weekly_handle($weeklyRows, $weeklyIns, $kindDetect, $origName, $platform, $agencyId, $teamName, $regionName, $metaJson, $dryRun, $dupWarning);
         exit; // settlement_weekly_handle()이 응답까지 마친다
     }
 
@@ -820,20 +828,29 @@ function settlement_upload_duplicate_error(
 }
 
 /**
- * 배민 **주간 정산서** 처리 — 미리보기/확정 응답까지 여기서 마친다.
+ * **주간 정산서** 처리 — 미리보기/확정 응답까지 여기서 마친다.
  *
  * 일일 경로(`settlement_daily_riders` → 정산 반영)와 **완전히 분리**했다. 주간은 일자별이 아니라
- * 주 단위 1행이고, 프로모션·시간제보험·고용/산재·원천세처럼 일일에는 아예 없는 항목을 담는다.
- * 같은 테이블에 억지로 밀어 넣으면 두 체계가 섞여 어느 쪽 숫자인지 알 수 없게 된다.
+ * 주 단위 1행이라, 같은 테이블에 밀어 넣으면 두 체계가 섞여 어느 쪽 숫자인지 알 수 없게 된다.
  *
- * ⚠️ 여기서는 **저장만** 한다(지갑 적립 없음). 주간 금액을 어떤 순서로 라이더 지갑에 반영할지는
- *    일일 정산 반영과 겹치는 부분이 있어 별도 결정이 필요하다 — 그 전까지는 조회·대조용이다.
+ * ## 반영 범위 — **프로모션 + 시간제보험만** (2026-08-22 갑 확정)
+ * 갑: *"주간정산서는 프로모션 금액과 시간제 보험만 반영해, (고용 산재 원천)은 기존처럼
+ * 일일정산서 업로드 할때 우리 내부 기준에 맞춰서 계산하니까"*
  *
- * @param list<array<string,mixed>> $rows  XlsxParser::parseBaeminWeeklyRiders() 결과
+ * 그래서 고용보험·산재보험·원천세는 주간 파일에 값이 있어도 **반영하지 않는다** — 우리
+ * 자체 요율(`deduction_global_config`)로 일일 반영 때 계산하는 게 기준이다. 다만 파일에 있는
+ * 값은 대조용으로 **저장은 해둔다**(플랫폼이 준 값과 우리 계산이 얼마나 벌어지는지 확인 가능).
+ *
+ * ⚠️ 아직 **저장만** 하고 지갑 적립은 하지 않는다. 프로모션·시간제보험을 라이더 지갑에 어떤
+ *    시점에 넣을지는 일일 반영과 순서가 얽혀 별도 결정이 필요하다.
+ *
+ * @param list<array<string,mixed>> $rows       배민 을지(라이더별). 쿠팡이면 빈 배열.
+ * @param list<array<string,mixed>> $hourlyIns  쿠팡 「시간제보험(차감)」. 배민이면 빈 배열.
  * @param array<string,mixed>       $kindDetect
  */
 function settlement_weekly_handle(
     array $rows,
+    array $hourlyIns,
     array $kindDetect,
     string $origName,
     string $platform,
@@ -856,7 +873,30 @@ function settlement_weekly_handle(
         $weekStart = date('Y-m-d', strtotime('-6 days'));
     }
 
-    // 라이더 매칭 — 배민은 User ID가 매칭키다(일일 경로와 동일 기준).
+    // 쿠팡 주정산서는 라이더별 표 대신 「시간제보험(차감)」만 읽는다(반영 대상이 그것뿐).
+    // 이름별로 합쳐 배민 을지와 같은 형태(`$rows`)로 맞춰, 아래 저장 로직을 그대로 재사용한다.
+    if ($rows === [] && $hourlyIns !== []) {
+        $byName = [];
+        foreach ($hourlyIns as $h) {
+            $nm = (string) ($h['name'] ?? '');
+            if ($nm === '') {
+                continue;
+            }
+            if (!isset($byName[$nm])) {
+                $byName[$nm] = [
+                    'user_id' => '', 'name_raw' => (string) ($h['name_raw'] ?? $nm), 'name' => $nm,
+                    'order_count' => 0, 'delivery_fee' => 0, 'extra_pay' => 0, 'total_fee' => 0,
+                    'hourly_ins' => 0, 'expense' => 0, 'reward' => 0,
+                    'emp_ins_rider' => 0, 'acc_ins_rider' => 0, 'settle_amount' => 0,
+                    'income_tax' => 0, 'resident_tax' => 0, 'withholding' => 0, 'payout' => 0,
+                ];
+            }
+            $byName[$nm]['hourly_ins'] += (int) ($h['amount'] ?? 0);
+        }
+        $rows = array_values($byName);
+    }
+
+    // 라이더 매칭 — 배민은 User ID, 쿠팡은 성함(이름)이 매칭키다(일일 경로와 동일 기준).
     $matched = 0;
     foreach ($rows as $i => $r) {
         $rid = settlement_match_rider_id($platform, (string) ($r['user_id'] ?? ''), (string) ($r['name'] ?? ''), $agencyId);
@@ -958,7 +998,11 @@ function settlement_weekly_handle(
                 payout = VALUES(payout)',
             [
                 $uploadId, $agencyId, $weekStart, $weekEnd,
-                $r['rider_id'], (string) ($r['user_id'] ?? ''), (string) ($r['name_raw'] ?? ''),
+                $r['rider_id'],
+                // UNIQUE(upload_id, user_id_raw) 키 — 배민은 User ID, 쿠팡은 User ID가 없어
+                // 성함을 키로 쓴다. 안 그러면 쿠팡 행이 전부 빈 문자열로 겹쳐 1명만 남는다.
+                ((string) ($r['user_id'] ?? '')) !== '' ? (string) $r['user_id'] : (string) ($r['name'] ?? ''),
+                (string) ($r['name_raw'] ?? ''),
                 (int) $r['order_count'], (int) $r['delivery_fee'], (int) $r['extra_pay'], (int) $r['total_fee'],
                 (int) $r['hourly_ins'], (int) $r['expense'], (int) $r['reward'],
                 (int) $r['emp_ins_rider'], (int) $r['acc_ins_rider'], (int) $r['settle_amount'],

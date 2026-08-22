@@ -55,17 +55,30 @@ final class SettlementPlatformDetect
         $weekly  = 0;
         $daily   = 0;
 
-        foreach (['갑지' => 4, '을지' => 4, '관리비' => 2, '고용보험소급정산' => 3, '협력사 자체미션' => 2, '추가배달료' => 2] as $marker => $score) {
+        // 배민 주간 마커
+        foreach (['갑지' => 4, '을지' => 4, '고용보험소급정산' => 3, '추가배달료' => 2] as $marker => $score) {
             if (str_contains($joined, $marker)) {
                 $weekly += $score;
                 if ($score >= 3) {
-                    $reasons[] = "시트「{$marker}」(주간정산서 구성)";
+                    $reasons[] = "시트「{$marker}」(배민 주간정산서 구성)";
                 }
             }
         }
+
+        // 쿠팡 주간 마커 — ⚠️ 쿠팡 주정산서는 라이더별 표가 **일일과 같은 컬럼 구조**라
+        // 일일로 오인하면 한 주치 금액이 하루치로 저장된다(실측: 1,730건이 하루로 들어감).
+        // 「일자별 정산내역」·「보험료(소급)」·「시간제보험(차감)」은 주간에만 있는 시트다
+        // (일일은 「시간제보험」으로 접미사가 없다). 「협력사 자체 미션」은 양쪽에 다 있어 쓸 수 없다.
+        foreach (['일자별 정산내역' => 5, '보험료(소급)' => 4, '시간제보험(차감)' => 3] as $marker => $score) {
+            if (str_contains($joined, $marker)) {
+                $weekly += $score;
+                $reasons[] = "시트「{$marker}」(쿠팡 주정산서 전용)";
+            }
+        }
+
         if (str_contains($joined, '배달 내역 상세') || str_contains($joined, '배달내역상세')) {
             $daily += 5;
-            $reasons[] = '시트「배달 내역 상세」(일일정산서 구성)';
+            $reasons[] = '시트「배달 내역 상세」(배민 일일정산서 구성)';
         }
         // 파일명에 기간이 두 개(시작~종료)면 주간, 같은 날짜가 반복되면 일일인 경우가 많다.
         if (preg_match('/(\d{8})\s*~\s*(\d{8})/', $base, $m) && $m[1] !== $m[2]) {

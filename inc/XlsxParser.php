@@ -374,15 +374,17 @@ class XlsxParser
             return [];
         }
 
-        $allRows   = $this->readSheet($sheetIdx, 1, 0);
-        $headerRow = $this->findHeaderRow($allRows, ['발생일자']);
+        $allRows = $this->readSheet($sheetIdx, 1, 0);
+        // 일일정산서는 「발생일자 / 성함 / 금액」, 주정산서(「시간제보험(차감)」)는 「일자 / 이름 / 금액」으로
+        // 라벨이 다르다. 둘 다 받는다 — 안 그러면 주정산서에서 0건으로 읽혀 조용히 누락된다.
+        $headerRow = $this->findHeaderRow($allRows, ['발생일자', '일자']);
         if ($headerRow === null) {
             return [];
         }
 
         $map = $this->mapHeaderColumns($allRows[$headerRow] ?? [], [
-            'occurred_date' => ['발생일자'],
-            'name'          => ['성함'],
+            'occurred_date' => ['발생일자', '일자'],
+            'name'          => ['성함', '이름'],
             'amount'        => ['금액'],
         ]);
 
