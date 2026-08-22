@@ -51,7 +51,7 @@ final class DailyPayout
 
         $whereStr = implode(' AND ', $where);
         $rows = db_rows(
-            "SELECT r.id, r.rider_code, r.name, r.agency_id, r.bank_code, r.bank_account,
+            "SELECT r.id, r.phone, r.name, r.agency_id, r.bank_code, r.bank_account,
                     w.balance, w.accrued_days,
                     o.name AS agency_name,
                     sc.label AS bank_label
@@ -79,7 +79,7 @@ final class DailyPayout
 
             return [
                 'rider_id'     => (int) $r['id'],
-                'rider_code'   => (string) $r['rider_code'],
+                'phone'        => (string) $r['phone'],
                 'name'         => (string) $r['name'],
                 'agency_id'    => $aid,
                 'agency_name'  => (string) ($r['agency_name'] ?? ''),

@@ -24,7 +24,7 @@ if ($isAgency) {
     // 출금 대상 후보 = 주정산 라이더 중 지갑에 잔액이 있는 사람.
     // (선정산은 「일일정산 지급」으로 나가므로 여기 대상이 아니다.)
     $rows = db_rows(
-        "SELECT r.id, r.name, r.rider_code, r.status, r.withdrawal_hold,
+        "SELECT r.id, r.name, r.rider_code, r.phone, r.status, r.withdrawal_hold,
                 r.bank_code, r.bank_account,
                 COALESCE(w.balance, 0) AS balance,
                 sc.label AS bank_label,
@@ -179,14 +179,14 @@ $cntReady = $cntAll - $cntBelow;
 						<tr data-rid="<?= (int) $r['id'] ?>"
 							data-below="<?= $p['below'] ? '1' : '0' ?>"
 							class="<?= $p['below'] ? 'd-none' : '' ?>"
-							data-search="<?= htmlspecialchars(mb_strtolower($r['name'] . ' ' . $r['rider_code']), ENT_QUOTES, 'UTF-8') ?>">
+							data-search="<?= htmlspecialchars(mb_strtolower($r['name'] . ' ' . $r['rider_code'] . ' ' . preg_replace('/\D/', '', (string) ($r['phone'] ?? ''))), ENT_QUOTES, 'UTF-8') ?>">
 							<td>
 								<?php // 차단 사유가 있으면 애초에 고를 수 없다. 미리보기 결과에 따라 JS가 다시 잠근다. ?>
 								<input class="form-check-input wp-check" type="checkbox" <?= $blocked ? 'disabled' : '' ?> />
 							</td>
 							<td>
 								<span class="fw-bold text-gray-900"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span>
-								<div class="text-muted fs-8"><?= htmlspecialchars((string) $r['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+								<div class="text-muted fs-8"><?= htmlspecialchars(rider_phone_hint((string) ($r['phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></div>
 							</td>
 							<td class="text-muted fs-8">
 								<?php if ($hasBank) : ?>

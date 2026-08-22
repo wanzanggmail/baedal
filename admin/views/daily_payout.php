@@ -100,7 +100,7 @@ $totalFee     = array_sum(array_map(static fn ($r) => (int) $r['fee'], $rows));
 						<tr data-rid="<?= (int) $r['rider_id'] ?>" data-amount="<?= (int) $r['payout'] ?>">
 							<?php if ($isAgency) : ?><td><input type="checkbox" class="form-check-input dp-row-check" <?= $r['has_bank'] ? '' : 'disabled' ?> /></td><?php endif; ?>
 							<?php if (!$isAgency) : ?><td><?= htmlspecialchars($r['agency_name'], ENT_QUOTES, 'UTF-8') ?></td><?php endif; ?>
-							<td><span class="fw-bold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></span> <span class="text-muted">(<?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?>)</span></td>
+							<td><span class="fw-bold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></span> <span class="text-muted"><?= htmlspecialchars(rider_phone_hint((string) ($r['phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="text-muted"><?= $r['has_bank'] ? htmlspecialchars($r['bank_label'], ENT_QUOTES, 'UTF-8') : '<span class="badge badge-light-danger">계좌없음</span>' ?></td>
 							<td class="text-center"><?= (int) $r['accrued_days'] ?>일</td>
 							<td class="text-end text-muted"><?= number_format((int) $r['balance']) ?>원</td>

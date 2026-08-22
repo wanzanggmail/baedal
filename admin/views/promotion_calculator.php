@@ -294,8 +294,7 @@ $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'
 				}).join('<span class="text-muted"> + </span>');
 				if (!detail) detail = '<span class="text-muted">구간 미달</span>';
 				return '<tr>'
-					+ '<td><span class="fw-semibold text-gray-800">' + esc(r.name) + '</span>'
-					+ ' <span class="text-muted fs-8 font-monospace">' + esc(r.rider_code) + '</span></td>'
+					+ '<td><span class="fw-semibold text-gray-800">' + esc(r.name) + '</span></td>'
 					+ '<td class="text-end text-muted">' + num(r.days) + '일</td>'
 					+ '<td class="text-end fw-semibold">' + num(r.order_count) + '건</td>'
 					+ '<td class="text-end text-muted">' + won(r.net_amount) + '</td>'

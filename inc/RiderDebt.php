@@ -653,7 +653,7 @@ final class RiderDebt
             "SELECT e.id, e.applied_date, e.days, e.amount,
                     e.fee_hq, e.fee_distributor, e.fee_agency,
                     d.title, d.vin, d.lease_provider, d.daily_amount,
-                    r.name AS rider_name, r.rider_code,
+                    r.name AS rider_name, r.phone AS rider_phone,
                     o.name AS agency_name
                FROM rider_debt_entries e
                INNER JOIN rider_debts d ON d.id = e.debt_id

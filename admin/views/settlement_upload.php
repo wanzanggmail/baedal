@@ -828,7 +828,7 @@ $platformLabels = [
 
 	function matchCellHtml(r, i) {
 		return r.matched
-			? `<span class="badge badge-light-success">${escHtml(r.rider_name)} <span class="text-muted">${escHtml(r.rider_code)}</span></span>`
+			? `<span class="badge badge-light-success">${escHtml(r.rider_name)}</span>`
 			: `<button type="button" class="btn btn-sm btn-light-danger py-1 btn-reg" data-i="${i}" data-license="${escHtml(r.match_key || r.license_id)}" data-name="${escHtml(r.name_raw)}">미매칭 · 연결/등록</button>`;
 	}
 
@@ -923,7 +923,7 @@ $platformLabels = [
 			box.innerHTML = data.riders.map(function (r) {
 				const has = r.platform_ext ? `<span class="badge badge-light-warning fs-8 ms-1">기존:${escHtml(r.platform_ext)}</span>` : '';
 				return `<div class="d-flex align-items-center justify-content-between border border-gray-300 rounded p-2">
-					<div><span class="fw-bold">${escHtml(r.name)}</span> <span class="text-muted fs-8 font-monospace">${escHtml(r.rider_code)}</span>${has}</div>
+					<div><span class="fw-bold">${escHtml(r.name)}</span> <span class="text-muted fs-8">${escHtml(r.phone_masked || '')}</span>${has}</div>
 					<button type="button" class="btn btn-sm btn-light-primary qr-link-btn" data-id="${r.id}">연결</button>
 				</div>`;
 			}).join('');
@@ -986,7 +986,7 @@ $platformLabels = [
 		// 같은 i가 표(행)·카드(모바일) 양쪽에 다 있을 수 있으니 둘 다 갱신한다.
 		document.querySelectorAll(`[data-i="${i}"]`).forEach(function (el) {
 			const cell = el.querySelector('.match-cell');
-			if (cell) cell.innerHTML = `<span class="badge badge-light-success">${escHtml(rider.name)} <span class="text-muted">${escHtml(rider.rider_code)}</span> <span class="badge badge-success ms-1">${escHtml(badgeLabel || '신규')}</span></span>`;
+			if (cell) cell.innerHTML = `<span class="badge badge-light-success">${escHtml(rider.name)} <span class="badge badge-success ms-1">${escHtml(badgeLabel || '신규')}</span></span>`;
 		});
 		previewState.matched++;
 		previewState.unmatched = Math.max(0, previewState.unmatched - 1);

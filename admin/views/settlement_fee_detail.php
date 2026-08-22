@@ -46,7 +46,7 @@ $fees = $cycle['fees'] ?? [];
 			<div class="fs-7 text-gray-500 mb-1">
 				<?= htmlspecialchars($cycle['settlement_date'], ENT_QUOTES, 'UTF-8') ?>
 				· <?= htmlspecialchars($cycle['platform_label'], ENT_QUOTES, 'UTF-8') ?>
-				· <?= htmlspecialchars($cycle['rider_name'], ENT_QUOTES, 'UTF-8') ?> (<?= htmlspecialchars($cycle['rider_code'], ENT_QUOTES, 'UTF-8') ?>)
+				· <?= htmlspecialchars($cycle['rider_name'], ENT_QUOTES, 'UTF-8') ?> 
 			</div>
 			<div class="fs-2 fw-bold text-gray-900">지갑 반영 <?= number_format((int) $cycle['net_amount']) ?>원</div>
 			<span class="badge badge-light-success">정산 완료</span>

@@ -286,7 +286,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 								$riderDetailUrl .= 'id=' . $r['rider_id'];
 								?>
 								<a href="<?= htmlspecialchars($riderDetailUrl, ENT_QUOTES, 'UTF-8') ?>" class="fw-bold text-gray-900 text-hover-primary"><?= htmlspecialchars($r['rider_name'], ENT_QUOTES, 'UTF-8') ?></a>
-								<span class="text-muted fs-8 d-block"><?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?><?= $r['agency_name'] !== '' ? ' · ' . htmlspecialchars($r['agency_name'], ENT_QUOTES, 'UTF-8') : '' ?></span>
+								<?php if ($r['agency_name'] !== '') : ?><span class="text-muted fs-8 d-block"><?= htmlspecialchars($r['agency_name'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
 							</td>
 							<td class="text-end">
 								<?= $r['withdraw_fee'] > 0 ? '<span class="text-danger fw-semibold">' . $fmtWon($r['withdraw_fee']) . '</span>' : '<span class="text-muted">—</span>' ?>

@@ -24,9 +24,10 @@ $isAgencyLevel = admin_org_level() === Org::LEVEL_AGENCY;
 $filterRiderId   = (int) ($_GET['rider_id'] ?? 0);
 $filterRiderName = '';
 if ($filterRiderId > 0) {
-    $r = db_row('SELECT name, rider_code FROM riders WHERE id = ?', [$filterRiderId]);
+    $r = db_row('SELECT name, phone FROM riders WHERE id = ?', [$filterRiderId]);
     if ($r !== null) {
-        $filterRiderName = (string) $r['name'] . ' (' . (string) $r['rider_code'] . ')';
+        $hint = rider_phone_hint((string) $r['phone']);
+        $filterRiderName = (string) $r['name'] . ($hint !== '' ? ' (' . $hint . ')' : '');
     }
 }
 
@@ -77,7 +78,7 @@ if (!$needsMigrate) {
     $whereStr = implode(' AND ', $where);
 
     $rows = db_rows(
-        "SELECT d.*, r.id AS rider_id, r.name AS rider_name, r.rider_code, o.name AS agency_name,
+        "SELECT d.*, r.id AS rider_id, r.name AS rider_name, r.phone AS rider_phone, o.name AS agency_name,
                 (SELECT COUNT(*) FROM rider_debt_entries e WHERE e.debt_id = d.id) AS entry_count
            FROM rider_debts d
            INNER JOIN riders r ON r.id = d.rider_id
@@ -368,7 +369,7 @@ $currentUrl = admin_url('deduction/debts');
 						<tr>
 							<td>
 								<a href="<?= htmlspecialchars($riderDetailBase . (int) $d['rider_id'], ENT_QUOTES, 'UTF-8') ?>" class="fw-bold text-gray-900 text-hover-primary"><?= htmlspecialchars((string) $d['rider_name'], ENT_QUOTES, 'UTF-8') ?></a>
-								<div class="text-muted fs-8 font-monospace"><?= htmlspecialchars((string) $d['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+								<div class="text-muted fs-8"><?= htmlspecialchars(rider_phone_hint((string) ($d['rider_phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></div>
 							</td>
 							<td>
 								<span class="badge badge-light-<?= $kindBadge[$dk] ?? 'secondary' ?> mb-1"><?= htmlspecialchars(RiderDebt::kindLabel($dk), ENT_QUOTES, 'UTF-8') ?></span>
@@ -776,7 +777,7 @@ $currentUrl = admin_url('deduction/debts');
 				processResults: function (data) {
 					return {
 						results: (data.items || []).map(function (r) {
-							return { id: r.id, text: r.name + ' (' + r.rider_code + ')' };
+							return { id: r.id, text: r.name + (r.phone_masked ? ' (' + r.phone_masked + ')' : '') };
 						}),
 					};
 				},

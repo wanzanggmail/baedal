@@ -466,3 +466,19 @@ function dashboard_period_from_get(): array
 
     return ['from' => $from, 'to' => $to];
 }
+
+/**
+ * 라이더 식별용 보조 표기 — 휴대전화 가운데 마스킹.
+ *
+ * 라이더 코드(rider_code)는 내부 코드성 데이터라 대리점이 알 수 없어 화면에 쓰지 않는다.
+ * 대신 동명이인(현재 5쌍)을 구분해야 하는 자리에 이 값을 쓴다.
+ */
+function rider_phone_hint(?string $phone): string
+{
+    $d = preg_replace('/\D/', '', (string) $phone);
+    if ($d === '') {
+        return '';
+    }
+
+    return preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $d) ?? $d;
+}

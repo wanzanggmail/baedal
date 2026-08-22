@@ -203,7 +203,7 @@ $currentUrl = admin_url('deduction/lease-fees');
 							<td class="text-gray-700"><?= $esc((string) $r['applied_date']) ?></td>
 							<td>
 								<span class="fw-bold text-gray-900"><?= $esc((string) $r['rider_name']) ?></span>
-								<div class="text-muted fs-8 font-monospace"><?= $esc((string) $r['rider_code']) ?></div>
+								<div class="text-muted fs-8"><?= $esc(rider_phone_hint((string) ($r['rider_phone'] ?? ''))) ?></div>
 							</td>
 							<td class="text-gray-700"><?= $esc((string) ($r['agency_name'] ?: '—')) ?></td>
 							<td>

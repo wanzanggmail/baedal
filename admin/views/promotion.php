@@ -203,7 +203,7 @@ $fmtWon      = static fn (int $n): string => number_format($n) . '원';
 					<div class="table-responsive">
 						<table class="table table-row-bordered align-middle gy-2 fs-7">
 							<thead><tr class="fw-bold text-muted bg-light">
-								<th>라이더코드</th><th>이름</th><th class="text-end">프로모션1</th><th class="text-end">프로모션2</th><th class="text-end">합계</th><th>상태</th>
+								<th>이름</th><th class="text-end">프로모션1</th><th class="text-end">프로모션2</th><th class="text-end">합계</th><th>상태</th>
 							</tr></thead>
 							<tbody id="promoTbody"></tbody>
 						</table>
@@ -315,7 +315,6 @@ $fmtWon      = static fn (int $n): string => number_format($n) . '원';
 			              skipped: '<span class="badge badge-light-secondary fs-8">제외</span>' };
 			document.getElementById('promoTbody').innerHTML = d.rows.map(function (r) {
 				return '<tr class="' + (r.status === 'pending' ? '' : 'text-muted') + '">'
-					+ '<td class="font-monospace">' + esc(r.rider_code) + '</td>'
 					+ '<td>' + esc(r.rider_name) + '</td>'
 					+ '<td class="text-end">' + won(r.promo1) + '</td>'
 					+ '<td class="text-end">' + won(r.promo2) + '</td>'

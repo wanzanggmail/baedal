@@ -162,7 +162,7 @@ $payApi = rtrim(ADMIN_BASE, '/') . '/api/promotion_pay.php';
 						<tr>
 							<td>
 								<span class="fw-bold text-gray-800"><?= htmlspecialchars((string) ($e['rider_name'] ?: $e['rider_name_raw']), ENT_QUOTES, 'UTF-8') ?></span>
-								<span class="text-muted fs-8 d-block font-monospace"><?= htmlspecialchars((string) ($e['rider_code'] ?: $e['rider_code_raw']), ENT_QUOTES, 'UTF-8') ?></span>
+								
 							</td>
 							<td class="text-end"><?= $fmtWon((int) $e['promo1_amount']) ?></td>
 							<td class="text-end"><?= $fmtWon((int) $e['promo2_amount']) ?></td>

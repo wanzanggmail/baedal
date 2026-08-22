@@ -296,8 +296,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<td><?= htmlspecialchars($row['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
 								<span class="fw-bold"><?= htmlspecialchars($row['rider_name'], ENT_QUOTES, 'UTF-8') ?></span>
-								<span class="text-muted fs-7 d-block"><?= htmlspecialchars($row['rider_code'], ENT_QUOTES, 'UTF-8') ?></span>
-							</td>
+															</td>
 							<td>
 								<?= htmlspecialchars($row['platform_label'], ENT_QUOTES, 'UTF-8') ?>
 								<?php if (($row['team_region'] ?? '') !== '') : ?>

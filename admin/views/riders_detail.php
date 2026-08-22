@@ -145,8 +145,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 						<span class="symbol-label fs-2x fw-bold text-primary"><?= htmlspecialchars($initial, ENT_QUOTES, 'UTF-8') ?></span>
 					</div>
 					<span class="fs-2 fw-bold text-gray-900"><?= htmlspecialchars($nm, ENT_QUOTES, 'UTF-8') ?></span>
-					<span class="text-gray-500 fs-7 fw-semibold mt-1"><?= htmlspecialchars($rider['rider_code'], ENT_QUOTES, 'UTF-8') ?></span>
-					<div class="mt-5 d-flex flex-wrap justify-content-center gap-2">
+										<div class="mt-5 d-flex flex-wrap justify-content-center gap-2">
 						<span class="badge badge-light-<?= $statusBadge[$st] ?? 'primary' ?> fs-7">
 							<?= htmlspecialchars($statusLabel[$st] ?? $st, ENT_QUOTES, 'UTF-8') ?>
 						</span>

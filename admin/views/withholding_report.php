@@ -32,7 +32,7 @@ if (!$needsMigrate) {
 
     $whereStr = implode(' AND ', $where);
     $rows = db_rows(
-        "SELECT r.id, r.rider_code, r.name, r.agency_id, o.name AS agency_name,
+        "SELECT r.id, r.phone, r.name, r.agency_id, o.name AS agency_name,
                 COUNT(fi.id) AS tax_count,
                 COALESCE(SUM(fi.amount), 0) AS tax_total,
                 COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base_total
@@ -41,7 +41,7 @@ if (!$needsMigrate) {
            LEFT JOIN settlement_rider_cycles c ON {$cycleCond}
            LEFT JOIN settlement_fee_items fi ON fi.cycle_id = c.id AND fi.fee_code = 'withholding'
           WHERE {$whereStr}
-          GROUP BY r.id, r.rider_code, r.name, r.agency_id, o.name
+          GROUP BY r.id, r.phone, r.name, r.agency_id, o.name
           ORDER BY tax_total DESC, r.name ASC",
         $params
     );
@@ -198,7 +198,7 @@ $quickRanges = [
 						    ?>
 						<tr>
 							<?php if (!$isAgency) : ?><td><?= htmlspecialchars((string) $r['agency_name'], ENT_QUOTES, 'UTF-8') ?></td><?php endif; ?>
-							<td><span class="fw-bold"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span> <span class="text-muted">(<?= htmlspecialchars((string) $r['rider_code'], ENT_QUOTES, 'UTF-8') ?>)</span></td>
+							<td><span class="fw-bold"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span> <span class="text-muted"><?= htmlspecialchars(rider_phone_hint((string) ($r['phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="text-center"><?= (int) $r['tax_count'] ?>건</td>
 							<td class="text-end text-gray-700"><?= number_format((int) $r['base_total']) ?>원</td>
 							<td class="text-end fw-bold"><?= number_format((int) $r['tax_total']) ?>원</td>

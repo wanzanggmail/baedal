@@ -374,7 +374,7 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 					processResults: function (data) {
 						return {
 							results: (data.items || []).map(function (r) {
-								return { id: r.name, text: r.name + ' (' + r.rider_code + ')' };
+								return { id: r.name, text: r.name + (r.phone_masked ? ' (' + r.phone_masked + ')' : '') };
 							}),
 						};
 					},

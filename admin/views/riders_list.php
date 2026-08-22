@@ -131,7 +131,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				<div class="col-md-4">
 					<label class="form-label fw-semibold">검색</label>
 					<input type="text" class="form-control form-control-solid" name="q"
-					       placeholder="이름, 라이더코드, 로그인ID, 전화"
+					       placeholder="이름, 로그인ID, 전화"
 					       value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" autocomplete="off" />
 				</div>
 				<?php if (!empty($agencyOptions)): ?>
@@ -186,7 +186,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				<table class="table table-row-bordered table-row-gray-300 table-hover align-middle gs-0 gy-4">
 					<thead>
 						<tr class="fw-bold text-muted">
-							<th class="min-w-110px">라이더코드</th>
 							<th class="min-w-100px">로그인ID</th>
 							<th class="min-w-90px">이름</th>
 							<th class="min-w-120px">연락처</th>
@@ -217,7 +216,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						    $isWht    = !empty($r['withholding_tax_enabled']);
 						?>
 						<tr>
-							<td class="fw-bold text-gray-900 font-monospace fs-7"><?= htmlspecialchars($r['rider_code'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="font-monospace fs-7 text-gray-800"><?= htmlspecialchars($r['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-900 fw-semibold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700"><?= htmlspecialchars($phoneMsk, ENT_QUOTES, 'UTF-8') ?></td>
@@ -484,7 +482,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<div class="table-responsive" style="max-height: 420px;">
 							<table class="table table-row-bordered align-middle gy-2 fs-7">
 								<thead><tr class="fw-bold text-muted bg-light">
-									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th>라이더코드</th><th>상태</th>
+									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th>상태</th>
 								</tr></thead>
 								<tbody id="bulk_tbody"></tbody>
 							</table>
@@ -639,7 +637,6 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				+ '<td>' + esc(r.name) + '</td>'
 				+ '<td>' + esc(r.phone) + '</td>'
 				+ '<td class="font-monospace">' + esc(r.login_id) + '</td>'
-				+ '<td class="font-monospace">' + esc(r.rider_code) + '</td>'
 				+ '<td>' + (r.ok
 					? '<span class="badge badge-light-success fs-8">등록 가능</span>'
 					: '<span class="badge badge-light-danger fs-8">' + esc(r.error) + '</span>')

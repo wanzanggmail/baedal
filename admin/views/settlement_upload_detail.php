@@ -96,7 +96,7 @@ $deductionCount = (int) (db_row(
 $deductionRows = db_rows(
     'SELECT swd.id, swd.order_date, swd.rider_id, swd.rider_name_raw, swd.deduction_type,
             swd.store_name, swd.amount, swd.registered_entry_id,
-            r.name AS rider_name, r.rider_code
+            r.name AS rider_name, r.phone AS rider_phone
        FROM settlement_weekly_deductions swd
        LEFT JOIN riders r ON r.id = swd.rider_id
       WHERE swd.upload_id = ?
@@ -353,8 +353,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 									   class="text-gray-900 text-hover-primary fw-bold">
 										<?= htmlspecialchars((string) ($row['rider_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
 									</a>
-									<?php if (!empty($row['rider_code'])) : ?>
-										<div class="text-muted fs-8"><?= htmlspecialchars((string) $row['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+									<?php if (!empty($row['phone'])) : ?>
+										<div class="text-muted fs-8"><?= htmlspecialchars(rider_phone_hint((string) $row['phone']), ENT_QUOTES, 'UTF-8') ?></div>
 									<?php endif; ?>
 								<?php else : ?>
 									<span class="text-muted">—</span>
@@ -445,7 +445,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<td>
 								<?php if ($dMatched) : ?>
 									<span class="fw-semibold text-gray-900"><?= htmlspecialchars((string) $d['rider_name'], ENT_QUOTES, 'UTF-8') ?></span>
-									<div class="text-muted fs-8"><?= htmlspecialchars((string) $d['rider_code'], ENT_QUOTES, 'UTF-8') ?></div>
+									<div class="text-muted fs-8"><?= htmlspecialchars(rider_phone_hint((string) ($d['rider_phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></div>
 								<?php else : ?>
 									<span class="text-muted"><?= htmlspecialchars((string) $d['rider_name_raw'], ENT_QUOTES, 'UTF-8') ?></span>
 									<div><span class="badge badge-light-warning fs-8">미매칭</span></div>
@@ -663,7 +663,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		}
 		document.querySelectorAll('.btn-reg').forEach(rebindRegBtn);
 
-		function markRowMatched(riderName, riderCode) {
+		function markRowMatched(riderName) {
 			if (!activeBtn) return;
 			var td = activeBtn.closest('td');
 			var tr = activeBtn.closest('tr'); // td.innerHTML을 바꾸면 activeBtn이 DOM에서 떨어져 나가 이후 closest()가 null이 되므로 미리 잡아둔다.
@@ -678,7 +678,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			rebindRegBtn(td.querySelector('.btn-reg'));
 			var nameTd = tr ? tr.querySelector('td:nth-child(3)') : null;
 			if (nameTd) {
-				nameTd.innerHTML = '<span class="fw-bold">' + escHtml(riderName) + '</span><div class="text-muted fs-8">' + escHtml(riderCode) + '</div>';
+				nameTd.innerHTML = '<span class="fw-bold">' + escHtml(riderName) + '</span>';
 			}
 		}
 
@@ -695,7 +695,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				box.innerHTML = data.riders.map(function (r) {
 					var has = r.platform_ext ? '<span class="badge badge-light-warning fs-8 ms-1">기존:' + escHtml(r.platform_ext) + '</span>' : '';
 					return '<div class="d-flex align-items-center justify-content-between border border-gray-300 rounded p-2">' +
-						'<div><span class="fw-bold">' + escHtml(r.name) + '</span> <span class="text-muted fs-8 font-monospace">' + escHtml(r.rider_code) + '</span>' + has + '</div>' +
+						'<div><span class="fw-bold">' + escHtml(r.name) + '</span> <span class="text-muted fs-8">' + escHtml(r.phone_masked || '') + '</span>' + has + '</div>' +
 						'<button type="button" class="btn btn-sm btn-light-primary qr-link-btn" data-id="' + r.id + '">연결</button></div>';
 				}).join('');
 			} catch (e) { box.innerHTML = '<div class="text-danger fs-8">' + escHtml(e.message) + '</div>'; }
@@ -719,7 +719,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				});
 				var data = await resp.json();
 				if (!data.ok) throw new Error(data.message || '연결 실패');
-				markRowMatched(data.rider.name, data.rider.rider_code);
+				markRowMatched(data.rider.name);
 				bootstrap.Modal.getInstance(quickModalEl).hide();
 			} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '연결 실패'; b.disabled = false; }
 		});
@@ -756,7 +756,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				});
 				var data = await resp.json();
 				if (!data.ok) throw new Error(data.message || '등록 실패');
-				markRowMatched(data.rider.name, data.rider.rider_code);
+				markRowMatched(data.rider.name);
 				bootstrap.Modal.getInstance(quickModalEl).hide();
 			} catch (e) { al.className = 'alert alert-danger mb-4'; al.textContent = e.message || '등록 실패'; }
 			submitBtn.disabled = false;
@@ -859,9 +859,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 			html += '<div class="mb-1">' + matchBadge + '</div>';
 			if (d.matched && d.rider) {
 				html += '<div class="fs-7 fw-semibold text-gray-800">' + esc(d.rider.name) + '</div>';
-				html += '<div class="text-muted fs-8">' + esc(d.rider.rider_code);
-				if (d.rider.phone) html += ' · ' + esc(d.rider.phone);
-				html += '</div>';
+				if (d.rider.phone) html += '<div class="text-muted fs-8">' + esc(d.rider.phone) + '</div>';
 				html += '<div class="text-muted fs-8">' + esc(d.rider.status_label) + '</div>';
 			} else {
 				html += '<div class="text-muted fs-8">연결된 라이더 없음</div>';
