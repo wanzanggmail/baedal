@@ -16,6 +16,70 @@ final class RiderRegistration
     public const VEHICLE_TYPES = ['motor', 'bike', 'car', 'walk', 'kick'];
 
     /**
+     * 같은 대리점 안에 같은 휴대전화번호가 이미 있는지 — 있으면 그 라이더 정보를 돌려준다.
+     *
+     * ⚠️ **대리점 범위 안에서만** 검사한다. 라이더가 대리점을 옮기거나 겸업하면 다른 대리점에
+     *    같은 번호로 또 등록되는 게 정상이다(2026-07-02 갑 확정 — 이관이 아니라 신규 등록,
+     *    번호·이름 중복 허용). 전역 UNIQUE를 걸면 이 정상 케이스가 막힌다.
+     *
+     * 비교는 **숫자만 남겨서** 한다 — `010-1234-5678`과 `01012345678`이 같은 번호인데
+     * 문자열 그대로 비교하면 서로 다른 값으로 통과해 중복이 그대로 들어온다.
+     *
+     * @return array{id:int, name:string, rider_code:string, status:string}|null
+     */
+    public static function findByPhoneInAgency(string $phone, int $agencyId, int $excludeRiderId = 0): ?array
+    {
+        $digits = preg_replace('/\D/', '', $phone) ?? '';
+        if ($digits === '' || $agencyId < 1) {
+            return null;
+        }
+
+        $sql = "SELECT id, name, rider_code, status
+                  FROM riders
+                 WHERE agency_id = ?
+                   AND REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '') = ?";
+        $params = [$agencyId, $digits];
+        if ($excludeRiderId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeRiderId;
+        }
+        $row = db_row($sql . ' LIMIT 1', $params);
+
+        return $row === null ? null : [
+            'id'         => (int) $row['id'],
+            'name'       => (string) $row['name'],
+            'rider_code' => (string) $row['rider_code'],
+            'status'     => (string) $row['status'],
+        ];
+    }
+
+    /**
+     * 같은 대리점 내 번호 중복이면 예외. 메시지에 **누구와 겹치는지**를 담는다 —
+     * "중복입니다"만 뜨면 관리자가 기존 라이더를 찾아 헤매게 된다.
+     */
+    public static function assertPhoneFreeInAgency(string $phone, int $agencyId, int $excludeRiderId = 0): void
+    {
+        $dup = self::findByPhoneInAgency($phone, $agencyId, $excludeRiderId);
+        if ($dup === null) {
+            return;
+        }
+
+        $statusLabel = match ($dup['status']) {
+            'suspended'     => ' · 일시정지',
+            'leave_request' => ' · 탈퇴요청',
+            'offboarded'    => ' · 계약종료',
+            default         => '',
+        };
+
+        throw new InvalidArgumentException(sprintf(
+            '이 대리점에 같은 휴대전화번호로 등록된 라이더가 이미 있습니다 — %s(%s)%s. 같은 사람이면 「기존 라이더에 연결」을 쓰세요.',
+            $dup['name'],
+            $dup['rider_code'],
+            $statusLabel
+        ));
+    }
+
+    /**
      * 검증만 수행하고 DB에는 쓰지 않는다 — 대량등록 미리보기에서 사용.
      * (create()가 내부에서 db_transaction()을 여는데, 미리보기를 위해 그걸 또 감싸면
      *  PDO가 트랜잭션 중첩을 지원하지 않아 beginTransaction()에서 바로 에러가 난다.

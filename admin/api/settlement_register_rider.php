@@ -253,6 +253,15 @@ $phoneDigits = preg_replace('/\D/', '', $phone) ?? '';
 if (!preg_match('/^01[016789]\d{7,8}$/', $phoneDigits)) {
     $err('휴대전화 번호 형식이 올바르지 않습니다(예: 01012345678).');
 }
+// 🆕 2026-08-22 같은 대리점 안에서는 번호 중복 금지. 여기는 정산 미매칭을 급히 메우는
+// 화면이라 이미 있는 사람을 실수로 또 만들기 쉽다(그러면 정산이 두 계정으로 쪼개진다).
+// 다른 대리점의 같은 번호는 정상이므로 대리점 범위 안에서만 본다.
+require_once INC_PATH . '/RiderRegistration.php';
+try {
+    RiderRegistration::assertPhoneFreeInAgency($phone, $agencyId);
+} catch (InvalidArgumentException $e) {
+    $err($e->getMessage());
+}
 require_once INC_PATH . '/RiderLoginId.php';
 $loginId = RiderLoginId::generate($phone);
 if (!in_array($platform, ['baemin', 'coupang', 'other'], true)) {
