@@ -108,6 +108,10 @@ final class RiderRegistration
             throw new InvalidArgumentException('선택한 대리점에 접근할 수 없습니다.');
         }
 
+        // 🆕 2026-08-22 같은 대리점 안에서는 번호 중복 금지(빠른 등록과 동일 규칙).
+        // create()가 validate()를 거치므로 단건 등록·엑셀 대량등록(미리보기·확정) 모두 여기서 걸린다.
+        self::assertPhoneFreeInAgency($phone, $agencyId);
+
         $loginId = trim((string) ($in['login_id'] ?? ''));
         if ($loginId === '') {
             $loginId = RiderLoginId::generate($phone);

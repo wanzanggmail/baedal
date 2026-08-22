@@ -176,11 +176,15 @@ if ($rows === []) {
 }
 
 // 파일 안에서도 같은 값끼리 중복될 수 있으므로(휴대전화 두 번, 로그인ID 두 번 등) 미리 표시.
+// ⚠️ 휴대전화는 **숫자만 남겨서** 센다 — `010-1234-5678`과 `01012345678`은 같은 번호인데
+//    적힌 그대로 비교하면 서로 다른 값이 돼 같은 사람이 두 번 등록된다.
+$phoneKey   = static fn (string $p): string => preg_replace('/\D/', '', $p) ?? '';
 $phoneSeen  = [];
 $loginSeen  = [];
 $codeSeen   = [];
 foreach ($rows as $r) {
-    if ($r['phone'] !== '') { $phoneSeen[$r['phone']] = ($phoneSeen[$r['phone']] ?? 0) + 1; }
+    $pk = $phoneKey($r['phone']);
+    if ($pk !== '') { $phoneSeen[$pk] = ($phoneSeen[$pk] ?? 0) + 1; }
     if ($r['login_id'] !== '') { $loginSeen[$r['login_id']] = ($loginSeen[$r['login_id']] ?? 0) + 1; }
     if ($r['rider_code'] !== '') { $codeSeen[$r['rider_code']] = ($codeSeen[$r['rider_code']] ?? 0) + 1; }
 }
@@ -191,7 +195,7 @@ $failCount = 0;
 
 foreach ($rows as $r) {
     $rowErr = null;
-    if (($phoneSeen[$r['phone']] ?? 0) > 1) {
+    if (($phoneSeen[$phoneKey($r['phone'])] ?? 0) > 1) {
         $rowErr = '파일 안에서 휴대전화가 중복됩니다.';
     } elseif ($r['login_id'] !== '' && ($loginSeen[$r['login_id']] ?? 0) > 1) {
         $rowErr = '파일 안에서 로그인ID가 중복됩니다.';
