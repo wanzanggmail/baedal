@@ -104,7 +104,7 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 `platform` enum(`baemin`,`coupang`,`other`), `external_id`(라이선스ID, 대리점 간 중복 허용)
 
 ### `rider_wallets` — 임시 잔액(정산 반영 시 누적, 출금 시 정리)
-PK=`rider_id`. `accrued_days`는 정산수수료 구간 판단용(§5 참고, `Withdrawal::applyForRider`가 여전히 이 값을 씀 — age-bucket 모델 전환은 미착수, §7 #18 이연).
+PK=`rider_id`. `accrued_days`는 **사이클이 없을 때만 쓰는 폴백**용(§5 참고). 정산수수료 본 계산은 age-bucket 모델(`WithdrawalConfig::feeForCycles`, 정산일로부터 경과일 × 주문 건수)로 전환 완료 — §7 #18.
 
 ---
 
@@ -215,7 +215,7 @@ UNIQUE(`org_id`,`platform`,`kind`), `org_id IS NULL`=전역 기본. 복호화 �
 🆕 **(2026-08-12 갑 확정) 정산수수료 3분할** — `hq_fee_per_order`(본사 몫, **배달 건당 정액 원**) · `fee_share_distributor_pct`(본사 몫을 뺀 나머지 중 총판 %, 대리점은 잔여). 대리점별 설정이지만 **편집은 본사만**(대리점은 조회). 저장 시 `hq_fee_per_order < min(fee_per_tx_short, fee_per_tx_long)` 검증 — 아니면 대리점에 남는 금액이 없다.
 계산·이동은 `WithdrawalConfig::feeShare()` + `inc/WithdrawalFeeShare.php`. **대리점 몫은 이동하지 않는다**(정산수수료는 라이더 지갑에서 빠져 이미 대리점 지갑에 남아 있는 돈) — 본사·총판 몫만 대리점 지갑에서 빼서 각 조직 지갑으로 옮기고 `agency_wallet_ledger`에 `wd_fee_up`(대리점 출금)·`wd_fee_in`(상위 수입)으로 기록한다.
 `fee_day_threshold`(기준일수, 기본 7) · `fee_per_tx_short`(80원) · `fee_per_tx_long`(40원) — **대리점별 설정 가능**(2026-07-16 재정정, 방향 불변: 최근=비쌈/오래됨=쌈). `reserve_amount`(출금 시 남기는 보증금).
-⚠️ 실제 계산은 아직 `accrued_days` 단일값 모델(`Withdrawal::applyForRider`) — 주문별 age-bucket 합산 모델(§7 #18)로의 전환은 **라이더 출금 플로우 단계로 이연**.
+✅ 실제 계산은 주문별 age-bucket 합산 모델(`WithdrawalConfig::feeForCycles` + `WithdrawalCycles`)로 전환 완료(§7 #18). `accrued_days` 단일값 모델은 사이클이 하나도 없는 경우의 폴백으로만 남아 있다.
 
 ### `org_fee_config` — 🆕(2026-07-22) 영업대행수수료 분배 요율
 PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_fee_pct` 기본 1.00%(임시, 갑 확정 대기).

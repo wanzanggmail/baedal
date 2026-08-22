@@ -94,7 +94,7 @@ $rows   = !$needsMigrate ? AgencyPayout::listScoped($isAgency ? $myAgency : null
 							</thead>
 							<tbody id="ap_tbody">
 								<?php if ($rows === []) : ?>
-								<tr><td colspan="5" class="text-center text-muted py-6">인출 내역이 없습니다.</td></tr>
+								<tr><td colspan="<?= $isAgency ? 4 : 5 ?>" class="text-center text-muted py-6">인출 내역이 없습니다.</td></tr>
 								<?php else : foreach ($rows as $r) : ?>
 								<tr>
 									<?php if (!$isAgency) : ?><td><?= htmlspecialchars($r['agency_name'], ENT_QUOTES, 'UTF-8') ?></td><?php endif; ?>

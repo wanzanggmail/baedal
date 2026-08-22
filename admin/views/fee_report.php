@@ -5,12 +5,15 @@ declare(strict_types=1);
 /**
  * 수수료·차감 통합 조회 — 라이더별로 두 시점의 공제를 한 화면에서 본다.
  *   ① 출금 시점: withdrawal_requests.withhold_other (정산수수료)
- *   ② 정산 반영 시점: settlement_fee_items (대행수수료·원천세·보험료·대여금/리스/선지급)
+ *   ② 정산 반영 시점: settlement_fee_items (대행수수료·원천세·보험료)
+ *   ③ 미수금 차감: rider_debt_entries (대여금·리스·선지급 — fee_items에는 남지 않는다)
  *
  * ⚠️ 미수금(대여금·리스·선지급)은 "수수료"가 아니라 원금 상환 **차감**이다(rider_debts에 수수료
  *    개념 자체가 없음). 합계에서 수수료와 섞이지 않도록 열을 나눠 표기한다.
  *    참고: LOGIC.md §5.7 · §8-A #3(수수료 구조 갑 확인 대기)
  */
+
+require_once INC_PATH . '/RiderDebt.php';
 
 $needsMigrate = !db_table_exists('settlement_fee_items') || !db_table_exists('withdrawal_requests');
 
@@ -31,7 +34,6 @@ $bucketOf = static function (string $code): string {
         'agency_fee'                                              => 'agency_fee',
         'withholding'                                             => 'withholding',
         'employment_ins', 'accident_ins', 'hourly_ins', 'ins_refund' => 'insurance',
-        'loan', 'lease', 'advance', 'rental'                      => 'debt',
         default                                                   => 'etc',
     };
 };
@@ -92,6 +94,35 @@ if (!$needsMigrate) {
             $rid = (int) $f['rider_id'];
             $b   = $bucketOf((string) $f['fee_code']);
             $agg[$rid][$b] = ($agg[$rid][$b] ?? 0) + (int) $f['amt'];
+        }
+
+        // ── ③ 미수금 차감 ──
+        // 미수금 차감은 settlement_fee_items에 남지 않는다. 리스는 정산 반영 시
+        // RiderDebt::applyLeaseForPeriod()가, 대여금·선지급금은 「차감」 버튼이
+        // rider_debt_entries에만 기록한다. 그래서 여기서 직접 읽어야 한다.
+        if (RiderDebt::tableReady()) {
+            $dWhere  = ['e.applied_date >= ?', 'e.applied_date <= ?'];
+            $dParams = [$filterFrom, $filterTo];
+            if ($scopeSql !== '') {
+                $dWhere[] = $scopeSql;
+                $dParams  = array_merge($dParams, $scopeParams);
+            }
+            if ($filterQ !== '') {
+                $dWhere[] = '(r.name LIKE ? OR r.rider_code LIKE ?)';
+                $like     = '%' . $filterQ . '%';
+                $dParams  = array_merge($dParams, [$like, $like]);
+            }
+            foreach (db_rows(
+                'SELECT e.rider_id, COALESCE(SUM(e.amount), 0) AS amt
+                   FROM rider_debt_entries e
+                   INNER JOIN riders r ON r.id = e.rider_id
+                  WHERE ' . implode(' AND ', $dWhere) . '
+                  GROUP BY e.rider_id',
+                $dParams
+            ) as $d) {
+                $rid = (int) $d['rider_id'];
+                $agg[$rid]['debt'] = ($agg[$rid]['debt'] ?? 0) + (int) $d['amt'];
+            }
         }
 
         // ── 라이더 정보 붙이기 ──

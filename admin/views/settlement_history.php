@@ -290,10 +290,6 @@ $queryParams = array_filter([
 							<td><?= htmlspecialchars($teamLabel !== '' ? $teamLabel : '-', ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700 fs-7 text-break">
 							<?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?>
-							<?php $tr = trim((string) ($up['team_name'] ?? '') . ' ' . (string) ($up['region_name'] ?? '')); ?>
-							<?php if ($tr !== '') : ?>
-							<span class="badge badge-light-info fs-9 d-inline-block mt-1"><?= htmlspecialchars($tr, ENT_QUOTES, 'UTF-8') ?></span>
-							<?php endif; ?>
 						</td>
 							<td><?= htmlspecialchars($platLabel, ENT_QUOTES, 'UTF-8') ?></td>
 							<td>

@@ -40,6 +40,6 @@ return [
     'system/settlement-excel' => ['title' => '정산 엑셀 열기 암호', 'view' => 'system_settlement_excel'],
     'system/audit' => ['title' => '감사 로그', 'view' => 'system_audit'],
     'system/manual-adjust' => ['title' => '정산/잔액 수동 조정', 'view' => 'system_manual_adjust'],
-    'system/pg-fee' => ['title' => '수수료 설정', 'view' => 'pg_fee_config'],
+    'system/pg-fee' => ['title' => '수수료 현황', 'view' => 'pg_fee_config'],
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
 ];

@@ -41,7 +41,7 @@ $riderRoute = $riderRoute ?? '';
 			<div class="menu-item">
 				<a class="menu-link<?= rider_nav_active('settlement/detail') ?>" href="<?= htmlspecialchars(rider_url('settlement/detail'), ENT_QUOTES, 'UTF-8') ?>">
 					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-					<span class="menu-title">상세 (샘플)</span>
+					<span class="menu-title">정산 상세</span>
 				</a>
 			</div>
 		</div>

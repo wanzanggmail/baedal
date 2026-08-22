@@ -227,7 +227,7 @@ $net = $sum['credit'] - $sum['debit'];
 						<?php if ($selectedWallet !== null) : ?>
 							<?= $esc($selectedWallet['level_label'] . ' · ' . $selectedWallet['name']) ?>
 						<?php else : ?>
-							지갑이 있는 조직 <?= number_format(count($orgOptions)) ?>곳
+							조직 <?= number_format(count($orgOptions)) ?>곳 (거래 없는 조직은 0원)
 						<?php endif; ?>
 					</div>
 				</div>

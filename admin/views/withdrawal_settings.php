@@ -29,6 +29,13 @@ if ($isAgencySelf) {
 }
 
 $config  = WithdrawalConfig::get($cfgOrgId);
+
+// 플랫폼(PG) 수수료 — 예전엔 「수수료 설정」 화면에서 따로 편집했으나, 그 화면이 정산수수료까지
+// 같이 편집해 **같은 값을 두 화면에서 고치는** 상태였다. 편집은 이 화면 한 곳으로 모으고
+// 「수수료 설정」은 전 대리점 비교용 읽기 전용으로 돌렸다.
+require_once INC_PATH . '/PgFeeConfig.php';
+$pgFeeReady = PgFeeConfig::tableExists();
+$pgFee      = ($pgFeeReady && $cfgOrgId !== null) ? PgFeeConfig::breakdownForAgency($cfgOrgId) : null;
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 $listUrl = admin_url('withdrawal/list');
 $settingsBaseUrl = admin_url('withdrawal/settings');
@@ -62,7 +69,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 		<i class="ki-duotone ki-wallet fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 		<div class="fs-7 text-gray-800">
 			라이더 출금은 <strong>전액 출금</strong>만 가능합니다. 지갑 잔액에서 <strong>보증금</strong>을 남기고, <strong>건당 출금 수수료</strong>를 차감한 금액이 이체액(<code>amount</code>)입니다.
-			수수료 구간은 <strong>적립 일수</strong>(<code>rider_wallets.accrued_days</code>) 기준입니다.
+			수수료 구간은 <strong>주문의 정산일로부터 경과일</strong> 기준입니다 — 한 번의 출금 안에서도 최근 주문과 오래된 주문에 서로 다른 단가가 붙어 합산됩니다.
 		</div>
 	</div>
 
@@ -115,10 +122,10 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 							<div class="form-text">출금 후에도 지갑에 남기는 금액. 잔액 − 보증금 − 수수료 = 실지급액</div>
 						</div>
 						<div class="mb-6">
-							<label class="form-label required" for="cfg_threshold">적립 일수 기준</label>
+							<label class="form-label required" for="cfg_threshold">경과일 기준</label>
 							<input type="number" class="form-control form-control-solid" id="cfg_threshold" min="1" max="365"
 								value="<?= (int) $config['fee_day_threshold'] ?>" required />
-							<div class="form-text">이 값 <strong>미만</strong>이면 짧은 구간 수수료, <strong>이상</strong>이면 긴 구간 수수료(건당)</div>
+							<div class="form-text">정산일로부터 이 일수 <strong>미만</strong>인 주문은 짧은 구간 단가, <strong>이상</strong>이면 긴 구간 단가(건당)</div>
 						</div>
 						<div class="row g-4 mb-6">
 							<div class="col-md-6">
@@ -144,7 +151,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 								<label class="form-label" for="cfg_hq_per_order">본사 몫 — 배달 건당 (원)</label>
 								<input type="number" class="form-control form-control-solid" id="cfg_hq_per_order" min="0"
 									value="<?= (int) $config['hq_fee_per_order'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
-								<div class="form-text fs-9">건당 수수료(<?= (int) min((int) $config['fee_per_tx_short'], (int) $config['fee_per_tx_long']) ?>원)보다 작아야 합니다. 0이면 배분 없이 전액 대리점.</div>
+								<div class="form-text fs-9">배달 <strong>1건당</strong> 본사가 가져갈 금액입니다(출금 건당 수수료와 단위가 다릅니다). 본사 몫이 걷은 정산수수료 총액을 넘으면 총액까지만 가져가고, 그만큼 대리점 몫은 0원이 될 수 있습니다. 0이면 배분 없이 전액 대리점.</div>
 							</div>
 							<div class="col-md-6">
 								<label class="form-label" for="cfg_dist_pct">총판 몫 — 본사 몫 제외 후 (%)</label>
@@ -155,6 +162,33 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						</div>
 						<?php if ($isAgencySelf) : ?>
 						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
+						<?php endif; ?>
+
+						<?php if ($pgFee !== null) : ?>
+						<div class="separator separator-dashed my-6"></div>
+						<h4 class="fw-bold fs-6 mb-2">플랫폼 수수료 <span class="text-muted fs-8 fw-normal">(PG 결제 시 분배)</span><?= $isAgencySelf ? ' <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span>' : '' ?></h4>
+						<div class="text-muted fs-8 mb-4">
+							라이더에게 자금을 조달(PG 카드결제)할 때 붙는 수수료를 본사·총판·대리점이 나눠 갖습니다.
+							결제 시점의 요율이 그대로 저장되므로 나중에 값을 바꿔도 과거 내역은 변하지 않습니다.
+						</div>
+						<div class="row g-4 mb-3">
+							<div class="col-md-4">
+								<label class="form-label" for="cfg_pf_hq">본사 몫 (%)</label>
+								<input type="number" class="form-control form-control-solid" id="cfg_pf_hq" min="0" max="100" step="0.01"
+									value="<?= htmlspecialchars(number_format($pgFee['hq'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							</div>
+							<div class="col-md-4">
+								<label class="form-label" for="cfg_pf_dist">총판 몫 (%)</label>
+								<input type="number" class="form-control form-control-solid" id="cfg_pf_dist" min="0" max="100" step="0.01"
+									value="<?= htmlspecialchars(number_format($pgFee['distributor'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							</div>
+							<div class="col-md-4">
+								<label class="form-label" for="cfg_pf_agency">대리점 몫 (%)</label>
+								<input type="number" class="form-control form-control-solid" id="cfg_pf_agency" min="0" max="100" step="0.01"
+									value="<?= htmlspecialchars(number_format($pgFee['agency'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							</div>
+						</div>
+						<div class="form-text fs-9 mb-6">합계 <strong id="cfg_pf_total"><?= number_format($pgFee['hq'] + $pgFee['distributor'] + $pgFee['agency'], 2) ?></strong>% 가 결제금액에 붙습니다.</div>
 						<?php endif; ?>
 
 						<?php if ($canEdit) : ?>
@@ -172,9 +206,9 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			<div class="card card-flush h-100">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">계산 예시</h3></div>
 				<div class="card-body pt-0 fs-7 text-gray-700">
-					<p class="mb-3">잔액 600,000원 · 보증금 50,000원 · 적립 5일 → 수수료 <strong><?= (int) $config['fee_per_tx_short'] ?>원</strong></p>
-					<p class="mb-3">실지급 = 600,000 − 50,000 − <?= (int) $config['fee_per_tx_short'] ?> = <strong><?= number_format(600000 - (int) $config['reserve_amount'] - (int) $config['fee_per_tx_short']) ?>원</strong> (보증금은 설정값 기준)</p>
-					<p class="mb-0">적립 <?= (int) $config['fee_day_threshold'] ?>일 이상이면 건당 <?= (int) $config['fee_per_tx_long'] ?>원 적용</p>
+					<p class="mb-3">잔액 600,000원 · 보증금 50,000원 · 정산 5일 지난 주문 10건 → 수수료 <strong><?= number_format(10 * (int) $config['fee_per_tx_short']) ?>원</strong> (10건 × <?= (int) $config['fee_per_tx_short'] ?>원)</p>
+					<p class="mb-3">실지급 = 600,000 − <?= number_format((int) $config['reserve_amount']) ?> − <?= number_format(10 * (int) $config['fee_per_tx_short']) ?> = <strong><?= number_format(600000 - (int) $config['reserve_amount'] - 10 * (int) $config['fee_per_tx_short']) ?>원</strong> (보증금은 설정값 기준)</p>
+					<p class="mb-0">정산일로부터 <?= (int) $config['fee_day_threshold'] ?>일 이상 지난 주문은 건당 <?= (int) $config['fee_per_tx_long'] ?>원 적용</p>
 				</div>
 			</div>
 		</div>
@@ -183,6 +217,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 	<script>
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
+		var PG_API = <?= json_encode(ADMIN_BASE . '/api/pg_fee_config.php', JSON_UNESCAPED_UNICODE) ?>;
 		var TARGET_AGENCY_ID = <?= $targetAgency !== null ? (int) $targetAgency['id'] : 0 ?>;
 		var toast = document.getElementById('wd_cfg_toast');
 		var toastMsg = document.getElementById('wd_cfg_toast_msg');
@@ -191,6 +226,45 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			toastMsg.textContent = msg;
 			toast.classList.remove('d-none');
 		}
+		// 플랫폼 수수료 합계 실시간 표시
+		var pfIds = ['cfg_pf_hq', 'cfg_pf_dist', 'cfg_pf_agency'];
+		var pfTotal = document.getElementById('cfg_pf_total');
+		if (pfTotal) {
+			pfIds.forEach(function (id) {
+				var el = document.getElementById(id);
+				if (el) {
+					el.addEventListener('input', function () {
+						var t = pfIds.reduce(function (a, i) {
+							var e = document.getElementById(i);
+							return a + (e ? parseFloat(e.value) || 0 : 0);
+						}, 0);
+						pfTotal.textContent = t.toFixed(2);
+					});
+				}
+			});
+		}
+
+		// 플랫폼 수수료는 저장 엔드포인트가 다르다(org_fee_config). 출금 정책과 한 버튼으로
+		// 묶되, 편집 가능한 상태가 아니면 아무것도 보내지 않고 즉시 성공 처리한다.
+		function savePlatformFee() {
+			var hq = document.getElementById('cfg_pf_hq');
+			if (!hq || hq.disabled || TARGET_AGENCY_ID < 1) { return Promise.resolve(); }
+			return fetch(PG_API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify({
+					action: 'save_platform',
+					org_id: TARGET_AGENCY_ID,
+					hq_pct: parseFloat(hq.value) || 0,
+					distributor_pct: parseFloat(document.getElementById('cfg_pf_dist').value) || 0,
+					agency_pct: parseFloat(document.getElementById('cfg_pf_agency').value) || 0
+				})
+			}).then(function (r) { return r.json(); }).then(function (res) {
+				if (!res.ok) { throw new Error(res.message || '플랫폼 수수료 저장 실패'); }
+			});
+		}
+
 		var saveBtn = document.getElementById('cfg_save_btn');
 		if (!saveBtn) return; // 조회 전용(총판)이면 저장 버튼이 아예 없다.
 		saveBtn.addEventListener('click', function () {
@@ -216,7 +290,9 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '저장 실패');
-					showToast(res.message || '저장되었습니다.', true);
+					return savePlatformFee().then(function () {
+						showToast(res.message || '저장되었습니다.', true);
+					});
 				})
 				.catch(function (e) { showToast(e.message || '저장 실패', false); });
 		});

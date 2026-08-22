@@ -100,7 +100,7 @@ $platformLabels = [
 						<div class="card-header pt-7">
 							<h3 class="card-title align-items-start flex-column">
 								<span class="card-label fw-bold text-gray-900">일간 정산서 업로드</span>
-								<span class="text-gray-500 mt-1 fw-semibold fs-6">쿠팡이츠 일별 정산서(.xlsx) → DB 저장</span>
+								<span class="text-gray-500 mt-1 fw-semibold fs-6">배달의민족·쿠팡이츠 일별 정산서(.xlsx) → DB 저장</span>
 							</h3>
 						</div>
 						<div class="card-body pt-5">

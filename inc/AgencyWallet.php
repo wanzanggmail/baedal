@@ -210,7 +210,12 @@ final class AgencyWallet
     }
 
     /**
-     * 스코프 내 지갑이 있는 조직(필터 드롭다운).
+     * 스코프 내 전체 조직(필터 드롭다운).
+     *
+     * 지갑 행(agency_wallets)은 돈이 처음 오갈 때 ensure()로 늦게 만들어진다. 그래서
+     * INNER JOIN 하면 아직 거래가 없는 조직이 목록에서 통째로 빠져, 고르려던 총판이
+     * 안 보일 때 "잔액 0원"인지 "누락"인지 구분할 수 없었다. LEFT JOIN 으로 전 조직을
+     * 내보내고 지갑이 없으면 0원으로 표시한다.
      *
      * @return list<array{id:int,name:string,level:string,level_label:string,balance:int}>
      */
@@ -222,9 +227,9 @@ final class AgencyWallet
         [$scopeSql, $scopeParams] = Org::orgScopeClause('o.id');
         $where = $scopeSql !== '' ? 'WHERE ' . $scopeSql : '';
         $rows = db_rows(
-            "SELECT o.id, o.name, o.level, w.balance
-               FROM agency_wallets w
-               INNER JOIN organizations o ON o.id = w.agency_id
+            "SELECT o.id, o.name, o.level, COALESCE(w.balance, 0) AS balance
+               FROM organizations o
+               LEFT JOIN agency_wallets w ON w.agency_id = o.id
               {$where}
               ORDER BY FIELD(o.level, 'admin', 'distributor', 'agency'), o.name ASC",
             $scopeParams

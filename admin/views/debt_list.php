@@ -355,8 +355,7 @@ $currentUrl = admin_url('deduction/debts');
 							<th class="text-end min-w-90px">남은 잔액</th>
 							<th class="text-end min-w-80px">일납</th>
 							<th class="min-w-90px">채권자</th>
-							<th class="min-w-140px">계약기간(리스)</th>
-							<th class="min-w-90px">미납갱신</th>
+							<th class="min-w-140px">계약기간 · 미납갱신</th>
 							<th class="min-w-80px">상태</th>
 							<th class="text-end min-w-140px">관리</th>
 						</tr>

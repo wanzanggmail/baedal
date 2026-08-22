@@ -21,7 +21,7 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 <div class="card card-flush shadow-sm mb-4">
 	<div class="card-header border-0 pt-5">
 		<h2 class="card-title fw-bold fs-4">대여금 · 리스 · 선지급</h2>
-		<span class="text-gray-500 fs-7">잔액은 정산 반영 시 자동으로 차감됩니다</span>
+		<span class="text-gray-500 fs-7">리스·렌탈은 정산 반영 시 자동으로 차감되고, 대여금·선지급금은 대리점이 차감 처리합니다</span>
 	</div>
 	<div class="card-body pt-0">
 		<?php if (!$debtReady) : ?>

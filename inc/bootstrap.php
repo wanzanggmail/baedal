@@ -5,6 +5,15 @@ declare(strict_types=1);
 define('INC_PATH', __DIR__);
 define('ROOT_PATH', dirname(INC_PATH));
 
+/**
+ * 시간대는 코드에서 고정한다 — php.ini에 맡기면 서버마다 달라진다.
+ *
+ * DB(MariaDB)는 KST로 도는데 PHP가 UTC면 9시간이 어긋나, 한국 시간 00:00~09:00
+ * 사이에 date('Y-m-d')가 "어제"를 돌려준다. 정산 귀속일 기본값·기간 필터 기본값·
+ * 공지 노출기간 비교·리스 차감 격차 계산이 전부 이 함수를 쓰므로 하루씩 밀린다.
+ */
+date_default_timezone_set('Asia/Seoul');
+
 if (!defined('ADMIN_BASE')) {
     $env = getenv('ADMIN_BASE');
     if (is_string($env) && $env !== '') {

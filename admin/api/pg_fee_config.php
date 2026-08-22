@@ -5,14 +5,16 @@ declare(strict_types=1);
 /**
  * 수수료 설정 API (본사 super 전용) — 대리점 기준.
  *   action=save_platform  : 플랫폼 수수료 3분할(본사/총판/대리점 %)
- *   action=save_settlement: 정산수수료(건별 단가·임계일) + 보증금
+ *
+ * ⚠️ 정산수수료(보증금·경과일 기준·건당 단가)는 여기서 저장하지 않는다. 같은 값을
+ *    「출금 정책 설정」과 이 화면이 각자 쓰던 걸 2026-08-23에 전자로 일원화했다
+ *    (`admin/api/withdrawal_config.php`).
  *
  * 참고: LOGIC.md §7 #12
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/PgFeeConfig.php';
-require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -73,23 +75,8 @@ try {
             sprintf('%s 플랫폼 수수료 · 본사 %.2f%% / 총판 %.2f%% / 대리점 %.2f%% (합 %.2f%%)',
                 (string) $org['name'], $hq, $dist, $ag, $hq + $dist + $ag)
         );
-    } elseif ($action === 'save_settlement') {
-        $saved = WithdrawalConfig::save([
-            'reserve_amount'    => (int) ($body['reserve_amount'] ?? 0),
-            'fee_day_threshold' => (int) ($body['fee_day_threshold'] ?? 7),
-            'fee_per_tx_short'  => (int) ($body['fee_per_tx_short'] ?? 0),
-            'fee_per_tx_long'   => (int) ($body['fee_per_tx_long'] ?? 0),
-        ], $orgId, $adminId > 0 ? $adminId : null);
-
-        AuditLog::record(
-            'org.settlement_fee',
-            (string) $orgId,
-            sprintf('%s 정산수수료 · %d일 이내 %d원 / 이후 %d원 · 보증금 %s원',
-                (string) $org['name'],
-                $saved['fee_day_threshold'], $saved['fee_per_tx_short'], $saved['fee_per_tx_long'],
-                number_format($saved['reserve_amount']))
-        );
     } else {
+
         $err('action이 올바르지 않습니다.', 400);
     }
 
