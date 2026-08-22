@@ -6,6 +6,8 @@ $filterFrom     = trim((string) ($_GET['from'] ?? ''));
 $filterTo       = trim((string) ($_GET['to'] ?? ''));
 $filterPlatform = trim((string) ($_GET['platform'] ?? ''));
 $filterQ        = trim((string) ($_GET['q'] ?? ''));
+// 일간/주간 전환 — 주간 정산서(프로모션·시간제보험)도 업로드되므로 여기서 확인할 수 있어야 한다.
+$filterKind     = ($_GET['kind'] ?? '') === 'weekly' ? 'weekly' : 'daily';
 $page           = max(1, (int) ($_GET['page'] ?? 1));
 $perPage        = 30;
 $offset         = ($page - 1) * $perPage;
@@ -36,13 +38,14 @@ $platformLabels = [
 
 $listError    = null;
 $uploads      = [];
+$weeklySums   = [];   // upload_id => ['week'=>, 'promo'=>, 'ins'=>]  주간 탭에서만 채움
 $totalCount   = 0;
 $needsMigrate = !db_table_exists('settlement_uploads');
 
 if (!$needsMigrate) {
     try {
         $where  = ['u.kind = ?', 'u.settlement_date >= ?', 'u.settlement_date <= ?'];
-        $params = ['daily', $filterFrom, $filterTo];
+        $params = [$filterKind, $filterFrom, $filterTo];
 
         if ($filterPlatform !== '') {
             $where[]  = 'u.platform = ?';
@@ -88,6 +91,25 @@ if (!$needsMigrate) {
               LIMIT ? OFFSET ?",
             $listParams
         );
+
+        // 주간은 「상세」 화면이 없으므로(그 화면은 일간 전용) 반영 대상 금액을 목록에 바로 보여준다.
+        if ($filterKind === 'weekly' && $uploads !== [] && db_table_exists('settlement_weekly_riders')) {
+            $ids = array_map(static fn (array $u): int => (int) $u['id'], $uploads);
+            foreach (db_rows(
+                'SELECT upload_id, MIN(week_start) AS ws, MAX(week_end) AS we,
+                        SUM(extra_pay) AS promo, SUM(hourly_ins) AS ins
+                   FROM settlement_weekly_riders
+                  WHERE upload_id IN (' . db_in($ids) . ')
+                  GROUP BY upload_id',
+                $ids
+            ) as $w) {
+                $weeklySums[(int) $w['upload_id']] = [
+                    'week'  => (string) $w['ws'] . ' ~ ' . (string) $w['we'],
+                    'promo' => (int) $w['promo'],
+                    'ins'   => (int) $w['ins'],
+                ];
+            }
+        }
     } catch (Throwable $e) {
         $listError = $e->getMessage();
     }
@@ -113,6 +135,8 @@ function settlement_history_page_url(string $base, int $pageNum, array $query): 
 
 $queryParams = array_filter([
     'route'    => (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) ? 'settlement/history' : null,
+    // kind가 빠지면 2페이지로 넘어갈 때 주간 탭이 일간으로 되돌아간다.
+    'kind'     => $filterKind,
     'from'     => $filterFrom,
     'to'       => $filterTo,
     'platform' => $filterPlatform !== '' ? $filterPlatform : null,
@@ -151,12 +175,44 @@ $queryParams = array_filter([
 	<div class="alert alert-danger mb-8"><?= htmlspecialchars($listError, ENT_QUOTES, 'UTF-8') ?></div>
 	<?php else : ?>
 
+	<?php
+	// 일간/주간 전환 탭 — 현재 필터는 유지하고 kind만 바꾼다.
+	$kindTabUrl = static function (string $kind) use ($listUrl, $filterFrom, $filterTo, $filterPlatform, $filterQ): string {
+	    $q = array_filter([
+	        'route'    => (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) ? 'settlement/history' : null,
+	        'kind'     => $kind,
+	        'from'     => $filterFrom,
+	        'to'       => $filterTo,
+	        'platform' => $filterPlatform !== '' ? $filterPlatform : null,
+	        'q'        => $filterQ !== '' ? $filterQ : null,
+	    ], static fn ($v) => $v !== null && $v !== '');
+
+	    return (str_contains($listUrl, '?') ? $listUrl . '&' : $listUrl . '?') . http_build_query($q);
+	};
+	?>
+	<ul class="nav nav-tabs nav-line-tabs fs-6 fw-semibold mb-6">
+		<li class="nav-item">
+			<a class="nav-link<?= $filterKind === 'daily' ? ' active' : '' ?>" href="<?= htmlspecialchars($kindTabUrl('daily'), ENT_QUOTES, 'UTF-8') ?>">일간 정산서</a>
+		</li>
+		<li class="nav-item">
+			<a class="nav-link<?= $filterKind === 'weekly' ? ' active' : '' ?>" href="<?= htmlspecialchars($kindTabUrl('weekly'), ENT_QUOTES, 'UTF-8') ?>">주간 정산서</a>
+		</li>
+	</ul>
+
+	<?php if ($filterKind === 'weekly') : ?>
+	<div class="alert bg-light-primary fs-8 p-4 mb-6">
+		주간 정산서는 <strong>프로모션과 시간제보험만</strong> 반영합니다. 고용·산재·원천세는 일간 정산서 반영 때 우리 기준으로 계산합니다.
+		<span class="d-block mt-1 text-muted">주간은 「정산 반영」 대상이 아니라 조회·대조용입니다.</span>
+	</div>
+	<?php endif; ?>
+
 	<div class="card card-flush mb-8">
 		<div class="card-body py-5">
 			<form method="get" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="row g-4 align-items-end">
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
 				<input type="hidden" name="route" value="settlement/history" />
 				<?php endif; ?>
+				<input type="hidden" name="kind" value="<?= htmlspecialchars($filterKind, ENT_QUOTES, 'UTF-8') ?>" />
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">귀속일 from</label>
 					<input type="date" class="form-control form-control-solid" name="from" value="<?= htmlspecialchars($filterFrom, ENT_QUOTES, 'UTF-8') ?>" />
@@ -197,15 +253,15 @@ $queryParams = array_filter([
 				<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-4">
 					<thead>
 						<tr class="fw-bold text-muted fs-7">
-							<th>귀속일</th>
+							<th><?= $filterKind === 'weekly' ? '정산 기간' : '귀속일' ?></th>
 							<th>팀·지역</th>
 							<th>파일명</th>
 							<th>플랫폼</th>
-							<th>건수</th>
+							<th><?= $filterKind === 'weekly' ? '라이더' : '건수' ?></th>
 							<th>상태</th>
 							<th>업로드자</th>
 							<th>일시</th>
-							<th class="min-w-70px"></th>
+							<th class="min-w-70px"><?= $filterKind === 'weekly' ? '반영 대상' : '' ?></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -226,8 +282,11 @@ $queryParams = array_filter([
                             $platLabel = $platformLabels[$up['platform']] ?? (string) $up['platform'];
                             $detailUrl = $detailBase . 'id=' . (int) $up['id'];
                             ?>
+						<?php $wk = $weeklySums[(int) $up['id']] ?? null; ?>
 						<tr>
-							<td class="fw-bold text-gray-900"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="fw-bold text-gray-900 fs-8">
+								<?= htmlspecialchars($wk !== null ? $wk['week'] : (string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?>
+							</td>
 							<td><?= htmlspecialchars($teamLabel !== '' ? $teamLabel : '-', ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700 fs-7 text-break">
 							<?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?>
@@ -248,7 +307,15 @@ $queryParams = array_filter([
 							<td><?= htmlspecialchars((string) ($up['uploaded_by_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-600 fs-7"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
+								<?php if ($filterKind === 'weekly') : ?>
+								<?php // 주간은 상세 화면이 없다(그 화면은 일간 전용) — 반영 대상 금액을 여기 직접 보여준다. ?>
+								<div class="fs-8 lh-sm">
+									<div><span class="text-muted">프로모션</span> <span class="fw-semibold text-primary"><?= number_format($wk['promo'] ?? 0) ?>원</span></div>
+									<div><span class="text-muted">시간제보험</span> <span class="fw-semibold"><?= number_format($wk['ins'] ?? 0) ?>원</span></div>
+								</div>
+								<?php else : ?>
 								<a href="<?= htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">상세</a>
+								<?php endif; ?>
 							</td>
 						</tr>
 						<?php endforeach; ?>

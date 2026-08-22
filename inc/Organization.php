@@ -714,8 +714,10 @@ final class Organization
                 : 0;
             $hasBank = db_table_exists('agency_bank_accounts')
                 && db_row('SELECT agency_id FROM agency_bank_accounts WHERE agency_id = ? LIMIT 1', [$id]) !== null;
+            // 일간만 센다 — 「업로드 이력」 화면도 일간만 보여주므로, 주간까지 합치면
+            // 여기 숫자와 그 목록 건수가 어긋나 보인다(주간은 별도 집계 대상).
             $uploadCount = db_table_exists('settlement_uploads')
-                ? (int) (db_row('SELECT COUNT(*) AS c FROM settlement_uploads WHERE agency_id = ?', [$id])['c'] ?? 0)
+                ? (int) (db_row("SELECT COUNT(*) AS c FROM settlement_uploads WHERE agency_id = ? AND kind = 'daily'", [$id])['c'] ?? 0)
                 : 0;
             $withholdingRiders = (int) (db_row('SELECT COUNT(*) AS c FROM riders WHERE agency_id = ? AND withholding_tax_enabled = 1', [$id])['c'] ?? 0);
 

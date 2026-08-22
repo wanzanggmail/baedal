@@ -919,8 +919,22 @@ function settlement_weekly_handle(
 
         return $t;
     };
+    // 🔎 **플랫폼별로 반영 대상이 다르다** — 같은 항목이라도 일일정산서에 이미 있으면
+    //    주간에서 또 반영하면 라이더가 두 번 떼인다.
+    //      · 배민: 일일정산서에 시간제보험 시트가 아예 없다 → 프로모션·시간제보험 둘 다 주간에서 반영
+    //      · 쿠팡: 일일정산서에 시간제보험이 이미 있고(그 날짜분), 주간 것은 그 주 일자별 합이다
+    //              (실측: 주간 07-29~08-04 7일치 80,047원 = 같은 기간 일일들의 합).
+    //              일일 반영이 이미 `hourly_ins`로 공제하므로 **주간은 대조용으로만 저장**한다.
+    //              프로모션도 반영하지 않는다(2026-08-22 갑 확정).
+    //              → 결국 쿠팡 주정산서는 반영 대상이 없다.
+    $reflectable = $platform === 'baemin'
+        ? ['promo' => true,  'hourly_ins' => true]
+        : ['promo' => false, 'hourly_ins' => false];
+
     $summary = [
         'riders'       => count($rows),
+        // total: 일간 미리보기 JS와 키 이름을 맞춰 둔다(같은 모달을 재사용할 때 깨지지 않도록)
+        'total'        => count($rows),
         'matched'      => $matched,
         'unmatched'    => count($rows) - $matched,
         'order_count'  => $sum('order_count'),
@@ -930,6 +944,7 @@ function settlement_weekly_handle(
         'hourly_ins'   => $sum('hourly_ins'),
         'withholding'  => $sum('withholding'),
         'payout'       => $sum('payout'),
+        'reflectable'  => $reflectable,
     ];
 
     if ($dryRun) {

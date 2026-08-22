@@ -86,7 +86,7 @@ $platformLabels = [
 			<a class="nav-link text-active-primary pb-4 active" data-bs-toggle="tab" href="#kt_tab_daily">일간 정산서</a>
 		</li>
 		<li class="nav-item">
-			<a class="nav-link text-active-primary pb-4" data-bs-toggle="tab" href="#kt_tab_weekly">주간 정산서 (차감)</a>
+			<a class="nav-link text-active-primary pb-4" data-bs-toggle="tab" href="#kt_tab_weekly">주간 정산서</a>
 		</li>
 	</ul>
 
@@ -294,8 +294,16 @@ $platformLabels = [
 					<div class="notice d-flex bg-light-primary rounded border-primary border border-dashed p-8">
 						<i class="ki-duotone ki-calendar-2 fs-2tx text-primary me-6"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
 						<div class="d-flex flex-column">
-							<h4 class="fw-bold text-gray-900">주간 정산서 업로드는 준비 중입니다.</h4>
-							<span class="text-gray-700 fs-6">일간 정산서 업로드가 안정화된 후 차감내역·보험료 일괄 반영 기능을 추가할 예정입니다.</span>
+							<h4 class="fw-bold text-gray-900">주간 정산서도 「일간 정산서」 탭에서 그대로 올리시면 됩니다.</h4>
+							<span class="text-gray-700 fs-6">
+								파일 내용을 보고 <strong>일간·주간을 자동으로 구분</strong>하므로 따로 고르실 필요가 없습니다.
+								열기 암호가 일간과 다르면 「시스템 관리 → 정산 엑셀 암호」에 <strong>주간용 암호</strong>를 따로 등록해 두세요.
+							</span>
+							<span class="text-gray-700 fs-7 mt-3">
+								주간에서 반영하는 항목은 <strong>프로모션과 시간제보험</strong>뿐입니다(배민 기준).
+								고용·산재·원천세는 일간 반영 때 우리 기준으로 계산합니다.
+								<span class="d-block mt-1">쿠팡 주정산서는 시간제보험을 <strong>일간에서 이미 공제</strong>하므로 반영하지 않고 <strong>대조용</strong>으로만 저장합니다.</span>
+							</span>
 						</div>
 					</div>
 				</div>
@@ -348,6 +356,30 @@ $platformLabels = [
 		</div>
 	</div>
 	<!--end::미리보기 모달-->
+
+	<!--begin::주간 정산서 미리보기 모달-->
+	<?php // 주간은 라이더 매칭 표가 없고 반영 대상도 달라서 일간 모달을 재사용하지 않는다. ?>
+	<div class="modal fade" id="kt_weekly_preview_modal" tabindex="-1" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered mw-600px">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 class="fw-bold fs-4">주간 정산서 확인</h2>
+					<div class="btn btn-icon btn-sm btn-active-icon-primary" data-bs-dismiss="modal">
+						<i class="ki-duotone ki-cross fs-1"><span class="path1"></span><span class="path2"></span></i>
+					</div>
+				</div>
+				<div class="modal-body py-lg-8 px-lg-8 fs-7" id="wkPreviewBody"></div>
+				<div class="modal-footer flex-center">
+					<button type="button" class="btn btn-light me-3" data-bs-dismiss="modal">취소</button>
+					<button type="button" class="btn btn-primary" id="wkConfirmBtn">
+						<span class="indicator-label">저장</span>
+						<span class="indicator-progress">저장 중… <span class="spinner-border spinner-border-sm align-middle ms-2"></span></span>
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!--end::주간 정산서 미리보기 모달-->
 
 	<!--begin::미매칭 라이더 빠른 등록 모달-->
 	<div class="modal fade" id="kt_quick_rider_modal" tabindex="-1" aria-hidden="true">
@@ -624,6 +656,7 @@ $platformLabels = [
 
 	// ── 미리보기 상태 ──────────────────────────────────────────
 	let previewState = { agencyId: 0, platform: '', date: '', total: 0, matched: 0, unmatched: 0 };
+	let weeklyPending = null;   // 주간 미리보기 중인 응답(확정 버튼이 사용)
 	let activeRegRow = null;
 
 	const previewModalEl = document.getElementById('kt_settlement_preview_modal');
@@ -666,7 +699,10 @@ $platformLabels = [
 		try {
 			const resp = await fetch(uploadApiUrl, { method: 'POST', body: fd });
 			const data = await resp.json();
-			if (data.ok && data.preview) {
+			if (data.ok && data.preview && data.kind === 'weekly') {
+				// 주간 정산서는 응답 형식이 일간과 달라(라이더 매칭 표가 없다) 전용 미리보기를 띄운다.
+				openWeeklyPreview(data);
+			} else if (data.ok && data.preview) {
 				openPreview(data);
 			} else if (data.code === 'platform_mismatch') {
 				handleMismatch(data);
@@ -680,6 +716,46 @@ $platformLabels = [
 			btn.disabled = false;
 		}
 	});
+
+	/**
+	 * 주간 정산서 미리보기 — 일간과 응답 형식이 다르다(라이더 매칭 표 없음, 주 단위 1행).
+	 * 반영 대상(프로모션·시간제보험)이 플랫폼마다 달라 그것도 같이 보여준다.
+	 */
+	function openWeeklyPreview(data) {
+		var s = data.summary || {};
+		var ref = s.reflectable || {};
+		weeklyPending = data;   // 확정 버튼이 쓸 정보
+
+		function line(label, value, on) {
+			return '<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">'
+				+ '<span class="text-gray-600">' + escHtml(label) + '</span>'
+				+ '<span class="' + (on ? 'fw-bold text-primary' : 'text-muted') + '">' + escHtml(value)
+				+ (on ? '' : ' <span class="badge badge-light fs-9 ms-1">대조용</span>') + '</span></div>';
+		}
+
+		var h = '';
+		h += '<div class="d-flex flex-wrap gap-2 mb-4">'
+		   + '<span class="badge badge-light-info fs-7 py-2">주간 정산서</span>'
+		   + '<span class="badge badge-light-primary fs-7 py-2">' + escHtml(data.week_start) + ' ~ ' + escHtml(data.week_end) + '</span>'
+		   + '<span class="badge badge-light fs-7 py-2">라이더 ' + won(s.riders) + '명</span>'
+		   + '<span class="badge badge-light-success fs-7 py-2">매칭 ' + won(s.matched) + '명</span>'
+		   + '</div>';
+		h += line('프로모션', won(s.extra_pay) + '원', !!ref.promo);
+		h += line('시간제보험', won(s.hourly_ins) + '원', !!ref.hourly_ins);
+
+		if (!ref.promo && !ref.hourly_ins) {
+			h += '<div class="alert bg-light-warning fs-8 p-4 mt-4 mb-0">'
+			   + '이 정산서에는 <strong>반영할 항목이 없습니다.</strong> 쿠팡은 시간제보험을 '
+			   + '<strong>일간 정산서에서 이미 공제</strong>하고 있어 여기서 또 반영하면 이중 공제가 됩니다. '
+			   + '프로모션도 반영 대상이 아닙니다. 저장은 되지만 <strong>대조·확인용</strong>입니다.</div>';
+		} else {
+			h += '<div class="alert bg-light-primary fs-8 p-4 mt-4 mb-0">'
+			   + '고용·산재·원천세는 여기서 반영하지 않습니다 — 일간 정산서 반영 때 우리 기준으로 계산합니다.</div>';
+		}
+
+		document.getElementById('wkPreviewBody').innerHTML = h;
+		bootstrap.Modal.getOrCreateInstance(document.getElementById('kt_weekly_preview_modal')).show();
+	}
 
 	function openPreview(data) {
 		previewState = {
@@ -881,6 +957,32 @@ $platformLabels = [
 	}
 
 	// 2단계: 확정 업로드 (파일 재전송 → 저장. 새로 등록된 라이더가 매칭됨)
+	// 주간 정산서 저장 — 같은 폼을 mode 없이 다시 보낸다(서버가 다시 주간으로 판별해 저장).
+	document.getElementById('wkConfirmBtn').addEventListener('click', async function () {
+		const file = fileInput?.files[0];
+		if (!file) return;
+		const btn = this;
+		btn.setAttribute('data-kt-indicator', 'on');
+		btn.disabled = true;
+		try {
+			const resp = await fetch(uploadApiUrl, { method: 'POST', body: new FormData(form) });
+			const data = await resp.json();
+			bootstrap.Modal.getInstance(document.getElementById('kt_weekly_preview_modal')).hide();
+			if (data.ok) {
+				showResult('success', data.message + ' — 「업로드 이력 → 주간 정산서」 탭에서 확인할 수 있습니다.');
+				form.reset();
+			} else {
+				showResult('danger', data.error || '저장 실패');
+			}
+		} catch (err) {
+			showResult('danger', '통신 오류: ' + err.message);
+		} finally {
+			btn.removeAttribute('data-kt-indicator');
+			btn.disabled = false;
+			weeklyPending = null;
+		}
+	});
+
 	confirmBtn.addEventListener('click', async function () {
 		const file = fileInput?.files[0];
 		if (!file) return;

@@ -36,12 +36,18 @@ final class SettlementLedger
         }
 
         $upload = db_row(
-            'SELECT id, platform, agency_id, team_name, region_name, settlement_date, status
+            'SELECT id, kind, platform, agency_id, team_name, region_name, settlement_date, status
                FROM settlement_uploads WHERE id = ? LIMIT 1',
             [$uploadId]
         );
         if ($upload === null) {
             throw new InvalidArgumentException('업로드를 찾을 수 없습니다.');
+        }
+        // 주간 정산서는 이 경로로 반영하지 않는다(일자별 사이클을 만드는 로직이라 대상이 아니다).
+        // 막지 않아도 `settlement_daily_riders`가 비어 있어 실패하지만, 그때 나오는
+        // "매칭된 라이더 정산 데이터가 없습니다"는 원인을 오해하게 만든다.
+        if ((string) ($upload['kind'] ?? 'daily') === 'weekly') {
+            throw new InvalidArgumentException('주간 정산서는 정산 반영 대상이 아닙니다. (프로모션·시간제보험만 별도로 다룹니다)');
         }
 
         // 멀티테넌시: 업로드 소유 대리점 설정으로 수수료 산출
