@@ -15,6 +15,20 @@ $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $filterQ      = trim((string) ($_GET['q']      ?? ''));
 $filterDist   = (int) ($_GET['distributor'] ?? 0);
 $filterAgency = (int) ($_GET['agency'] ?? 0);
+// 대리점 계정은 어차피 자기 대리점 하나뿐이라 총판·대리점 필터가 의미가 없다.
+// 게다가 총판 옵션이 0개라 "총판을 먼저 선택하세요"에 걸려 대리점 칸이 **영구히 잠긴다**
+// (실제로 비어 보이던 원인). 아예 감추고 라이더 검색만 남긴다.
+$isAgencyLevel = admin_org_level() === Org::LEVEL_AGENCY;
+
+// 라이더 선택 필터(select2) — 선택된 라이더는 새로고침 후에도 이름이 보이도록 미리 읽어둔다.
+$filterRiderId   = (int) ($_GET['rider_id'] ?? 0);
+$filterRiderName = '';
+if ($filterRiderId > 0) {
+    $r = db_row('SELECT name, rider_code FROM riders WHERE id = ?', [$filterRiderId]);
+    if ($r !== null) {
+        $filterRiderName = (string) $r['name'] . ' (' . (string) $r['rider_code'] . ')';
+    }
+}
 
 $rows = [];
 $kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0, 'lease_overdue' => 0];
@@ -49,10 +63,16 @@ if (!$needsMigrate) {
         $where[] = $subAgencyIds !== [] ? 'r.agency_id IN (' . implode(',', array_fill(0, count($subAgencyIds), '?')) . ')' : '1=0';
         $params = array_merge($params, $subAgencyIds);
     }
+    // 라이더는 select2로 정확히 지목하고, 자유검색(q)은 항목명·채권자만 본다.
+    // (라이더명을 q에도 남겨두면 "라이더 선택 + 검색어"가 서로 어긋날 때 결과가 헷갈린다)
+    if ($filterRiderId > 0) {
+        $where[]  = 'd.rider_id = ?';
+        $params[] = $filterRiderId;
+    }
     if ($filterQ !== '') {
         $like    = '%' . $filterQ . '%';
-        $where[] = '(r.name LIKE ? OR r.rider_code LIKE ? OR d.title LIKE ? OR d.creditor LIKE ?)';
-        $params  = array_merge($params, [$like, $like, $like, $like]);
+        $where[] = '(d.title LIKE ? OR d.creditor LIKE ?)';
+        $params  = array_merge($params, [$like, $like]);
     }
     $whereStr = implode(' AND ', $where);
 
@@ -189,7 +209,7 @@ $currentUrl = admin_url('deduction/debts');
 		<?php endif; ?>
 		<div class="card card-flush mb-8"><div class="card-body py-5">
 			<div class="row g-4 align-items-end">
-				<?php if ($distributorOptions !== []): ?>
+				<?php if (!$isAgencyLevel && $distributorOptions !== []): ?>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">총판</label>
 					<select class="form-select form-select-solid" name="distributor" id="debt_filter_distributor" data-control="select2" data-placeholder="전체">
@@ -200,7 +220,7 @@ $currentUrl = admin_url('deduction/debts');
 					</select>
 				</div>
 				<?php endif; ?>
-				<?php if ($agencyOptions !== []): ?>
+				<?php if (!$isAgencyLevel && $agencyOptions !== []): ?>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">대리점</label>
 					<?php // data-control="select2" 없음(의도적) — 총판 선택에 따라 대리점 목록을 걸러야 해서
@@ -217,8 +237,17 @@ $currentUrl = admin_url('deduction/debts');
 				</div>
 				<?php endif; ?>
 				<div class="col-md-3">
+					<label class="form-label fw-semibold">라이더</label>
+					<?php // 이름을 정확히 몰라도 찾을 수 있게 select2 검색(riders.php ajax, 대리점 스코프 내). ?>
+					<select class="form-select form-select-solid" name="rider_id" id="debt_filter_rider" style="width:100%">
+						<?php if ($filterRiderId > 0 && $filterRiderName !== '') : ?>
+						<option value="<?= (int) $filterRiderId ?>" selected><?= htmlspecialchars($filterRiderName, ENT_QUOTES, 'UTF-8') ?></option>
+						<?php endif; ?>
+					</select>
+				</div>
+				<div class="col-md-3">
 					<label class="form-label fw-semibold">검색</label>
-					<input type="text" class="form-control form-control-solid" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="라이더명·코드·항목·채권자" />
+					<input type="text" class="form-control form-control-solid" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="항목명·채권자" />
 				</div>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">종류</label>
@@ -312,7 +341,7 @@ $currentUrl = admin_url('deduction/debts');
 		<div class="card-body pt-2">
 			<?php if (empty($rows)): ?>
 			<div class="text-center text-gray-500 py-10">
-				<?= ($filterQ !== '' || $filterKind !== '' || $filterStatus !== '') ? '조건에 맞는 미수금이 없습니다.' : '등록된 미수금(대여금·리스·선지급)이 없습니다. 우측 상단 「미수금 등록」으로 추가하세요.' ?>
+				<?= ($filterQ !== '' || $filterKind !== '' || $filterStatus !== '' || $filterRiderId > 0) ? '조건에 맞는 미수금이 없습니다.' : '등록된 미수금(대여금·리스·선지급)이 없습니다. 우측 상단 「미수금 등록」으로 추가하세요.' ?>
 			</div>
 			<?php else: ?>
 			<div class="table-responsive">
@@ -430,11 +459,8 @@ $currentUrl = admin_url('deduction/debts');
 				<div id="debt_new_alert" class="d-none mb-4"></div>
 				<div class="mb-4">
 					<label class="form-label fs-7 fw-semibold required">라이더</label>
-					<div class="input-group">
-						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_rider_q" placeholder="이름 또는 라이더코드" />
-						<button class="btn btn-sm btn-light-primary" type="button" id="dn_rider_search">검색</button>
-					</div>
-					<select class="form-select form-select-sm form-select-solid mt-2 d-none" id="dn_rider_sel" size="4"></select>
+					<?php // 검색 버튼 → 목록 클릭 2단계였던 걸 select2 한 단계로 바꿨다(타이핑하면 바로 후보). ?>
+					<select class="form-select form-select-solid" id="dn_rider_sel" style="width:100%"></select>
 					<input type="hidden" id="dn_rider_id" />
 					<div class="form-text fs-8" id="dn_rider_picked"></div>
 				</div>
@@ -724,35 +750,65 @@ $currentUrl = admin_url('deduction/debts');
 		});
 
 		document.getElementById('btn_debt_new').addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_q', 'dn_rider_id', 'dn_vin'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_id', 'dn_vin'].forEach(function (i) { document.getElementById(i).value = ''; });
 			['dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) { document.getElementById(i).value = 0; });
 			document.getElementById('dn_lease_provider').value = 'hq';
 			document.getElementById('dn_rider_picked').textContent = '';
-			document.getElementById('dn_rider_sel').classList.add('d-none');
+			if (typeof jQuery !== 'undefined') { jQuery('#dn_rider_sel').val(null).trigger('change'); }
 			kindEl.value = 'loan'; syncPrincipal();
 			document.getElementById('debt_new_alert').className = 'd-none';
 			modal('kt_debt_new_modal').show();
 		});
-		document.getElementById('dn_rider_search').addEventListener('click', function () {
-			var q = document.getElementById('dn_rider_q').value.trim();
-			fetch(RIDER_API + '?q=' + encodeURIComponent(q) + '&limit=20', { credentials: 'same-origin' })
-				.then(function (r) { return r.json(); })
-				.then(function (res) {
-					var sel = document.getElementById('dn_rider_sel');
-					sel.innerHTML = '';
-					(res.items || []).forEach(function (it) {
-						var o = document.createElement('option');
-						o.value = it.id; o.textContent = it.name + ' (' + it.rider_code + ')';
-						sel.appendChild(o);
-					});
-					sel.classList.toggle('d-none', (res.items || []).length === 0);
-					if ((res.items || []).length === 0) { setAlert('debt_new_alert', '검색 결과가 없습니다.', 'warning'); }
+
+		/**
+		 * 라이더 선택 select2 — 원장 필터와 등록 모달 둘 다.
+		 * 예전엔 「검색 버튼 → 목록에서 클릭」 2단계였는데, 목록이 안 뜨면 왜 안 되는지 알기 어려웠다.
+		 * 이제 타이핑하는 대로 후보가 뜬다(riders.php ajax, 이름으로만 검색 · 대리점 스코프 내).
+		 */
+		function initRiderSelect2() {
+			if (typeof jQuery === 'undefined' || !jQuery.fn.select2) { return; }
+
+			var ajaxOpts = {
+				url: RIDER_API,
+				dataType: 'json',
+				delay: 250,
+				data: function (params) { return { q: params.term || '', q_field: 'name', limit: 30 }; },
+				processResults: function (data) {
+					return {
+						results: (data.items || []).map(function (r) {
+							return { id: r.id, text: r.name + ' (' + r.rider_code + ')' };
+						}),
+					};
+				},
+			};
+
+			var $filter = jQuery('#debt_filter_rider');
+			if ($filter.length) {
+				$filter.select2({ placeholder: '전체 (이름으로 검색)', allowClear: true, ajax: ajaxOpts });
+			}
+
+			var $modalSel = jQuery('#dn_rider_sel');
+			if ($modalSel.length) {
+				$modalSel.select2({
+					placeholder: '이름으로 검색',
+					allowClear: true,
+					ajax: ajaxOpts,
+					// 모달 안에서 열릴 때 드롭다운이 뒤로 깔리지 않게 부모를 모달로 지정한다.
+					dropdownParent: jQuery('#kt_debt_new_modal'),
 				});
-		});
-		document.getElementById('dn_rider_sel').addEventListener('change', function () {
-			document.getElementById('dn_rider_id').value = this.value;
-			document.getElementById('dn_rider_picked').textContent = '선택: ' + this.options[this.selectedIndex].textContent;
-		});
+				$modalSel.on('change', function () {
+					var v = $modalSel.val() || '';
+					document.getElementById('dn_rider_id').value = v;
+					var txt = $modalSel.find('option:selected').text();
+					document.getElementById('dn_rider_picked').textContent = v ? ('선택: ' + txt) : '';
+				});
+			}
+		}
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', initRiderSelect2);
+		} else {
+			initRiderSelect2();
+		}
 		document.getElementById('dn_save').addEventListener('click', function () {
 			var rid = parseInt(document.getElementById('dn_rider_id').value, 10) || 0;
 			if (!rid) { setAlert('debt_new_alert', '라이더를 검색해서 선택하세요.'); return; }
