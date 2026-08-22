@@ -40,6 +40,7 @@ if (!Org::canAccessAgency((int) ($upload['agency_id'] ?? 0))) {
 
 $filterQ     = trim((string) ($_GET['q'] ?? ''));
 $filterMatch = trim((string) ($_GET['match'] ?? ''));
+$filterSettle = trim((string) ($_GET['settle'] ?? ''));
 
 $where  = ['dr.upload_id = ?'];
 $params = [$uploadId];
@@ -67,6 +68,85 @@ $riders = db_rows(
       ORDER BY dr.gross_amount DESC, dr.rider_name_raw ASC",
     $params
 );
+
+// ── 라이더별 정산 반영 여부 ──────────────────────────────────────────────
+// 업로드 전체 상태(parsed/applied)만으로는 "이 라이더가 반영됐는지"를 알 수 없다.
+// 반영은 행 단위로 건너뛸 수 있기 때문이다(미매칭 행은 스킵, 이미 같은 키의 사이클이
+// 있으면 스킵). 그래서 사이클 존재 여부를 행별로 직접 확인한다.
+//
+// 중복 판정 키는 SettlementLedger::applyUpload() 와 **똑같이**
+// (rider_id, settlement_date, platform, team_region) 이고 팀지역은 NFC 정규화된 값이다.
+// 키에 upload_id 가 없으므로 **다른 업로드로 이미 반영된 행**이 있을 수 있고,
+// 그 경우 이 업로드에서 다시 눌러도 스킵된다 — 화면에서 구분해 보여준다.
+$teamRegionKey = trim(
+    normalize_hangul_nfc((string) ($upload['team_name'] ?? '')) . ' '
+    . normalize_hangul_nfc((string) ($upload['region_name'] ?? ''))
+);
+
+$cycleByRow      = [];
+$rowSettleState  = [];
+$applyStats      = ['applied' => 0, 'other' => 0, 'pending' => 0, 'unmatched' => 0];
+
+if (SettlementLedger::tableExists() && $riders !== []) {
+    $riderIds = [];
+    $dates    = [];
+    foreach ($riders as $rw) {
+        if ((int) ($rw['rider_id'] ?? 0) > 0) {
+            $riderIds[(int) $rw['rider_id']] = true;
+            $dates[(string) $rw['settlement_date']] = true;
+        }
+    }
+    $cycleIndex = [];
+    if ($riderIds !== [] && $dates !== []) {
+        $rp = implode(',', array_fill(0, count($riderIds), '?'));
+        $dp = implode(',', array_fill(0, count($dates), '?'));
+        foreach (db_rows(
+            "SELECT id, rider_id, upload_id, settlement_date, platform, team_region,
+                    net_amount, total_fee_amount
+               FROM settlement_rider_cycles
+              WHERE rider_id IN ({$rp}) AND settlement_date IN ({$dp})",
+            array_merge(array_keys($riderIds), array_keys($dates))
+        ) as $c) {
+            $k = (int) $c['rider_id'] . '|' . (string) $c['settlement_date'] . '|'
+                . (string) $c['platform'] . '|' . (string) $c['team_region'];
+            $cycleIndex[$k] = $c;
+        }
+    }
+
+    foreach ($riders as $rw) {
+        $rid = (int) ($rw['rider_id'] ?? 0);
+        if ($rid < 1) {
+            $applyStats['unmatched']++;
+            $rowSettleState[(int) $rw['id']] = 'none';
+            continue;
+        }
+        $k = $rid . '|' . (string) $rw['settlement_date'] . '|'
+            . (string) ($rw['platform'] ?? $upload['platform'] ?? 'baemin') . '|' . $teamRegionKey;
+        $c = $cycleIndex[$k] ?? null;
+        if ($c === null) {
+            $applyStats['pending']++;
+            $rowSettleState[(int) $rw['id']] = 'pending';
+            continue;
+        }
+        $cycleByRow[(int) $rw['id']] = $c;
+        if ((int) $c['upload_id'] === $uploadId) {
+            $applyStats['applied']++;
+            $rowSettleState[(int) $rw['id']] = 'applied';
+        } else {
+            $applyStats['other']++;
+            $rowSettleState[(int) $rw['id']] = 'other';
+        }
+    }
+}
+
+// 정산 상태 필터는 사이클 조회가 끝난 뒤에 건다 — 집계(applyStats)는 필터 이전
+// 전체 기준이어야 "아직 몇 건 남았는지"가 맞기 때문이다.
+if ($filterSettle !== '' && $rowSettleState !== []) {
+    $riders = array_values(array_filter(
+        $riders,
+        static fn (array $rw): bool => ($rowSettleState[(int) $rw['id']] ?? '') === $filterSettle
+    ));
+}
 
 // 이 업로드에서 매칭된 라이더 중 일일정산(선정산) 대상자 수 — 정산 반영 시 자동 출금될 인원.
 $dailyCount = (int) (db_row(
@@ -146,6 +226,12 @@ $uploadListUrl  = admin_url('settlement/upload');
 $historyUrl     = admin_url('settlement/history');
 $riderDetailUrl = admin_url('riders/detail');
 $riderDetailUrl .= str_contains($riderDetailUrl, '?') ? '&id=' : '?id=';
+
+// 정산 컬럼 링크용 — 수수료 상세(사이클) / 다른 업로드 상세
+$feeDetailUrl = admin_url('settlement/fee-detail');
+$feeDetailUrl .= str_contains($feeDetailUrl, '?') ? '&id=' : '?id=';
+$uploadDetailUrl = admin_url('settlement/upload-detail');
+$uploadDetailUrl .= str_contains($uploadDetailUrl, '?') ? '&id=' : '?id=';
 
 $detailBaseUrl = admin_url('settlement/upload-detail');
 $detailBaseUrl .= str_contains($detailBaseUrl, '?') ? '&' : '?';
@@ -234,11 +320,26 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		<div class="col-xl-3">
 			<div class="card card-flush h-100">
 				<div class="card-body py-6">
-					<div class="text-gray-500 fw-semibold fs-7 mb-1">라이더 / 매칭</div>
+					<div class="text-gray-500 fw-semibold fs-7 mb-1">라이더 / 정산 반영</div>
 					<div class="fw-bold fs-3 text-gray-900"><?= number_format((int) $upload['total_rows']) ?>명</div>
 					<div class="text-success fs-7 mt-1">매칭 <?= number_format((int) $upload['ok_rows']) ?>명</div>
 					<?php if ((int) $upload['error_rows'] > 0) : ?>
 						<div class="text-warning fs-7">미매칭 <?= number_format((int) $upload['error_rows']) ?>명</div>
+					<?php endif; ?>
+					<?php if (array_sum($applyStats) > 0) : ?>
+					<div class="separator separator-dashed my-3"></div>
+					<div class="d-flex flex-wrap gap-1">
+						<span class="badge badge-light-success fs-8">반영 <?= number_format($applyStats['applied']) ?></span>
+						<?php if ($applyStats['pending'] > 0) : ?>
+						<span class="badge badge-light-warning fs-8">미반영 <?= number_format($applyStats['pending']) ?></span>
+						<?php endif; ?>
+						<?php if ($applyStats['other'] > 0) : ?>
+						<span class="badge badge-light-info fs-8" title="같은 라이더·정산일·팀지역이 다른 업로드로 이미 반영돼, 이 업로드에서는 건너뜁니다.">다른 업로드 <?= number_format($applyStats['other']) ?></span>
+						<?php endif; ?>
+						<?php if ($applyStats['unmatched'] > 0) : ?>
+						<span class="badge badge-light-secondary fs-8">대상 아님 <?= number_format($applyStats['unmatched']) ?></span>
+						<?php endif; ?>
+					</div>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -296,12 +397,19 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							class="form-control form-control-solid w-250px ps-12" placeholder="이름·라이선스·코드" />
 					</div>
 					<select name="match" class="form-select form-select-solid w-150px">
-						<option value=""<?= $filterMatch === '' ? ' selected' : '' ?>>전체</option>
+						<option value=""<?= $filterMatch === '' ? ' selected' : '' ?>>매칭 전체</option>
 						<option value="matched"<?= $filterMatch === 'matched' ? ' selected' : '' ?>>매칭됨</option>
 						<option value="unmatched"<?= $filterMatch === 'unmatched' ? ' selected' : '' ?>>미매칭</option>
 					</select>
+					<select name="settle" class="form-select form-select-solid w-150px">
+						<option value=""<?= $filterSettle === '' ? ' selected' : '' ?>>정산 전체</option>
+						<option value="applied"<?= $filterSettle === 'applied' ? ' selected' : '' ?>>반영됨</option>
+						<option value="pending"<?= $filterSettle === 'pending' ? ' selected' : '' ?>>미반영</option>
+						<option value="other"<?= $filterSettle === 'other' ? ' selected' : '' ?>>다른 업로드</option>
+						<option value="none"<?= $filterSettle === 'none' ? ' selected' : '' ?>>대상 아님</option>
+					</select>
 					<button type="submit" class="btn btn-light-primary btn-sm">검색</button>
-					<?php if ($filterQ !== '' || $filterMatch !== '') : ?>
+					<?php if ($filterQ !== '' || $filterMatch !== '' || $filterSettle !== '') : ?>
 						<a href="<?= htmlspecialchars($detailBaseUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light btn-sm">초기화</a>
 					<?php endif; ?>
 				</form>
@@ -325,6 +433,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<th class="min-w-80px text-end">픽업</th>
 							<th class="min-w-80px text-end">배달</th>
 							<th class="min-w-80px text-end">지역단가</th>
+							<th class="min-w-90px">정산</th>
 							<th class="min-w-70px">매칭</th>
 							<th class="min-w-70px"></th>
 						</tr>
@@ -332,7 +441,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<tbody>
 					<?php if ($riders === []) : ?>
 						<tr>
-							<td colspan="12" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
+							<td colspan="13" class="text-center text-muted py-10">조건에 맞는 라이더가 없습니다.</td>
 						</tr>
 					<?php else :
 					    $i = 0;
@@ -375,6 +484,20 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_pickup']) ?></td>
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_delivery']) ?></td>
 							<td class="text-end text-muted fs-7"><?= $fmtWon((int) $row['fee_area']) ?></td>
+							<td>
+								<?php $cyc = $cycleByRow[(int) $row['id']] ?? null; ?>
+								<?php if (!$matched) : ?>
+									<span class="badge badge-light-secondary fs-8" title="라이더가 연결되지 않아 정산 반영 대상이 아닙니다.">대상 아님</span>
+								<?php elseif ($cyc === null) : ?>
+									<span class="badge badge-light-warning fs-8" title="아직 정산이 반영되지 않았습니다. 「정산 반영」을 실행하면 처리됩니다.">미반영</span>
+								<?php elseif ((int) $cyc['upload_id'] === $uploadId) : ?>
+									<a href="<?= htmlspecialchars($feeDetailUrl . (int) $cyc['id'], ENT_QUOTES, 'UTF-8') ?>" class="badge badge-light-success fs-8" title="이 업로드로 정산 반영됨 — 클릭하면 수수료 상세">반영됨</a>
+									<div class="text-muted fs-9 mt-1">실지급 <?= $fmtWon((int) $cyc['net_amount']) ?></div>
+								<?php else : ?>
+									<a href="<?= htmlspecialchars($uploadDetailUrl . (int) $cyc['upload_id'], ENT_QUOTES, 'UTF-8') ?>" class="badge badge-light-info fs-8" title="같은 라이더·정산일·팀지역이 다른 업로드(#<?= (int) $cyc['upload_id'] ?>)로 이미 반영됐습니다. 이 업로드에서는 중복으로 건너뜁니다.">다른 업로드</a>
+									<div class="text-muted fs-9 mt-1">#<?= (int) $cyc['upload_id'] ?></div>
+								<?php endif; ?>
+							</td>
 							<td>
 								<?php if ($matched) : ?>
 									<span class="badge badge-light-success">매칭</span>
