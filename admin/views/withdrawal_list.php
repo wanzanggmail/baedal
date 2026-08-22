@@ -168,25 +168,21 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 			<div class="card-title">
 				<h3 class="fw-bold m-0">신청 내역</h3>
 				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">
-					대기 → <strong>출금 확정(펌뱅킹 즉시 이체)</strong> → 처리 완료
-					<span class="text-gray-400">· 백업: 은행 파일 다운로드 → 입금 완료</span>
+					대기 → <strong>출금 확정</strong>(펌뱅킹 즉시 이체) → 처리 완료
+					<span class="d-block text-gray-400">자동이체가 안 될 때는 <strong>은행 파일 다운로드</strong> → 은행에서 직접 이체 → <strong>입금 완료 기록</strong>. 마지막 단계는 송금을 새로 보내지 않고, 이미 보낸 것으로 보아 지갑을 차감합니다.</span>
 				</span>
 			</div>
-			<div class="card-toolbar gap-2 flex-wrap justify-content-end">
-				<button type="button" class="btn btn-sm btn-primary" id="wd_bulk_transfer_selected">
+			<div class="card-toolbar gap-2 flex-wrap justify-content-end align-items-center">
+				<span class="text-muted fs-8 me-1" id="wd_pick_count">선택 0건</span>
+				<button type="button" class="btn btn-sm btn-primary" id="wd_bulk_transfer_selected"
+					title="선택한 건을 펌뱅킹으로 즉시 이체합니다. 대기·다운로드 완료·이체 실패 상태만 처리됩니다.">
 					<i class="ki-duotone ki-send fs-5"><span class="path1"></span><span class="path2"></span></i>
-					선택 출금 확정
+					출금 확정
 				</button>
-				<button type="button" class="btn btn-sm btn-light-primary" id="wd_bulk_transfer_all">
-					대기 전체 출금 확정
-				</button>
-				<span class="border-start mx-1"></span>
-				<button type="button" class="btn btn-sm btn-light-success" id="wd_bulk_complete_selected">
+				<button type="button" class="btn btn-sm btn-light-success" id="wd_bulk_complete_selected"
+					title="은행 사이트에서 이체를 이미 끝냈을 때 누릅니다. 송금을 새로 보내지는 않지만 라이더·대리점 지갑을 차감하고 완료로 기록합니다. 다운로드 완료 상태만 처리됩니다.">
 					<i class="ki-duotone ki-check fs-5"><span class="path1"></span><span class="path2"></span></i>
-					선택 입금 완료
-				</button>
-				<button type="button" class="btn btn-sm btn-light" id="wd_bulk_complete_all">
-					다운로드 완료 일괄 입금
+					입금 완료 기록
 				</button>
 			</div>
 		</div>
@@ -197,7 +193,7 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 						<tr class="fw-bold text-muted">
 							<th class="w-40px ps-0">
 								<div class="form-check form-check-sm form-check-custom form-check-solid me-1">
-									<input class="form-check-input" type="checkbox" id="wd_master_pick" aria-label="다운로드 완료 행 전체 선택" />
+									<input class="form-check-input" type="checkbox" id="wd_master_pick" aria-label="처리 가능한 행 전체 선택" />
 								</div>
 							</th>
 							<th class="min-w-120px">신청 ID</th>
@@ -367,23 +363,35 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 				});
 		}
 
+		/** 선택 건수 표시 — '전체' 버튼을 없앴으므로 지금 몇 건이 잡혔는지 보여야 한다. */
+		function syncPickCount() {
+			var picks = Array.from(document.querySelectorAll('#wd_table .wd-bulk-pick:not(.d-none):not([disabled])'));
+			var on = picks.filter(function (cb) { return cb.checked; });
+			var label = document.getElementById('wd_pick_count');
+			if (label) { label.textContent = '선택 ' + on.length + '건'; }
+
+			var master = document.getElementById('wd_master_pick');
+			master.checked = picks.length > 0 && on.length === picks.length;
+			master.indeterminate = on.length > 0 && on.length < picks.length;
+			master.disabled = picks.length === 0;
+		}
+
 		document.getElementById('wd_master_pick').addEventListener('change', function () {
 			var on = this.checked;
 			document.querySelectorAll('#wd_table .wd-bulk-pick:not(.d-none):not([disabled])').forEach(function (cb) {
 				cb.checked = on;
 			});
+			syncPickCount();
 		});
 
-		document.getElementById('wd_bulk_complete_all').addEventListener('click', function () {
-			completeIds(collectDownloadedIds(false));
+		document.getElementById('wd_table').addEventListener('change', function (ev) {
+			if (ev.target.classList.contains('wd-bulk-pick')) syncPickCount();
 		});
+
+		syncPickCount();
 
 		document.getElementById('wd_bulk_complete_selected').addEventListener('click', function () {
 			completeIds(collectDownloadedIds(true));
-		});
-
-		document.getElementById('wd_bulk_transfer_all').addEventListener('click', function () {
-			transferIds(collectIds(TRANSFERABLE, false));
 		});
 
 		document.getElementById('wd_bulk_transfer_selected').addEventListener('click', function () {
