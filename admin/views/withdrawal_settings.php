@@ -30,6 +30,9 @@ if ($isAgencySelf) {
 
 $config  = WithdrawalConfig::get($cfgOrgId);
 
+require_once INC_PATH . '/FirmBankingGateway.php';
+$firmIsMock = FirmBankingGatewayFactory::isMock();
+
 // 플랫폼(PG) 수수료 — 예전엔 「수수료 설정」 화면에서 따로 편집했으나, 그 화면이 정산수수료까지
 // 같이 편집해 **같은 값을 두 화면에서 고치는** 상태였다. 편집은 이 화면 한 곳으로 모으고
 // 「수수료 설정」은 전 대리점 비교용 읽기 전용으로 돌렸다.
@@ -115,6 +118,24 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				</div>
 				<div class="card-body pt-0">
 					<form id="wd_cfg_form" class="fs-7">
+						<div class="mb-6 p-4 border border-gray-300 rounded">
+							<label class="form-check form-switch form-check-custom form-check-solid mb-2">
+								<input class="form-check-input" type="checkbox" id="cfg_auto_transfer"
+									<?= (int) $config['auto_transfer_on_request'] === 1 ? 'checked' : '' ?><?= $canEdit ? '' : ' disabled' ?> />
+								<span class="form-check-label fw-bold text-gray-800 ms-3">출금 신청 즉시 이체</span>
+							</label>
+							<div class="form-text mb-0">
+								켜면 라이더가 앱에서 출금을 신청하는 <strong>즉시 펌뱅킹으로 송금</strong>되고 「출금 신청 목록」에 바로 완료로 들어옵니다.
+								끄면 지금처럼 <strong>대기</strong> 상태로 쌓이고, 관리자가 「출금 확정」을 눌러야 나갑니다.
+								<span class="d-block mt-1">이체가 실패하면 신청은 그대로 남고 목록에서 재시도할 수 있습니다.</span>
+							</div>
+							<?php if ($firmIsMock) : ?>
+							<div class="alert bg-light-warning text-gray-800 fs-8 p-3 mt-3 mb-0">
+								⚠️ 펌뱅킹이 아직 <strong>모의(Mock) 연동</strong>입니다. 지금 이걸 켜면 <strong>실제 송금 없이</strong> 완료로 기록되고 지갑만 차감됩니다.
+								실제 이체가 필요하면 중계사 연동을 마친 뒤 켜세요.
+							</div>
+							<?php endif; ?>
+						</div>
 						<div class="mb-6">
 							<label class="form-label required" for="cfg_reserve">보증금 (원)</label>
 							<input type="number" class="form-control form-control-solid" id="cfg_reserve" min="0" step="1000"
@@ -274,6 +295,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				fee_day_threshold: parseInt(document.getElementById('cfg_threshold').value, 10) || 7,
 				fee_per_tx_short: parseInt(document.getElementById('cfg_fee_short').value, 10) || 0,
 				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
+				auto_transfer_on_request: document.getElementById('cfg_auto_transfer').checked ? 1 : 0,
 			};
 			if (TARGET_AGENCY_ID > 0) { payload.agency_id = TARGET_AGENCY_ID; }
 			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.

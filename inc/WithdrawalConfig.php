@@ -18,6 +18,8 @@ final class WithdrawalConfig
             // 정산수수료 3분할(2026-08-12 갑 확정) — 본사는 배달 건당 정액, 나머지를 총판·대리점이 비율로.
             'hq_fee_per_order'          => 0,
             'fee_share_distributor_pct' => 0.0,
+            // 라이더가 신청하는 즉시 펌뱅킹으로 내보낼지. 기본은 끔 — 켜면 관리자가 검토할 틈이 없다.
+            'auto_transfer_on_request'  => 0,
         ];
     }
 
@@ -66,6 +68,7 @@ final class WithdrawalConfig
             'fee_per_tx_long'   => max(0, (int) ($row['fee_per_tx_long'] ?? $d['fee_per_tx_long'])),
             'hq_fee_per_order'  => max(0, (int) ($row['hq_fee_per_order'] ?? $d['hq_fee_per_order'])),
             'fee_share_distributor_pct' => max(0.0, min(100.0, (float) ($row['fee_share_distributor_pct'] ?? $d['fee_share_distributor_pct']))),
+            'auto_transfer_on_request'  => (int) !empty($row['auto_transfer_on_request']),
         ];
     }
 
@@ -124,6 +127,9 @@ final class WithdrawalConfig
             'fee_share_distributor_pct' => array_key_exists('fee_share_distributor_pct', $data)
                 ? max(0.0, min(100.0, (float) $data['fee_share_distributor_pct']))
                 : (float) $cur['fee_share_distributor_pct'],
+            'auto_transfer_on_request' => array_key_exists('auto_transfer_on_request', $data)
+                ? (int) (bool) $data['auto_transfer_on_request']
+                : (int) $cur['auto_transfer_on_request'],
         ];
 
         // ⚠️ 본사 건당 몫이 건당 정산수수료보다 커도 **막지 않는다**(2026-08-12 갑 확정:
@@ -141,6 +147,7 @@ final class WithdrawalConfig
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
                      hq_fee_per_order = ?, fee_share_distributor_pct = ?,
+                     auto_transfer_on_request = ?,
                      updated_by = ?, updated_at = NOW()
                  WHERE id = ?',
                 [
@@ -150,6 +157,7 @@ final class WithdrawalConfig
                     $cfg['fee_per_tx_long'],
                     $cfg['hq_fee_per_order'],
                     $cfg['fee_share_distributor_pct'],
+                    $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                     (int) $exists['id'],
                 ]
@@ -158,8 +166,8 @@ final class WithdrawalConfig
             db_insert(
                 'INSERT INTO withdrawal_config
                     (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
-                     hq_fee_per_order, fee_share_distributor_pct, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                     hq_fee_per_order, fee_share_distributor_pct, auto_transfer_on_request, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
@@ -168,6 +176,7 @@ final class WithdrawalConfig
                     $cfg['fee_per_tx_long'],
                     $cfg['hq_fee_per_order'],
                     $cfg['fee_share_distributor_pct'],
+                    $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                 ]
             );

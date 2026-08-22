@@ -381,6 +381,59 @@ final class Withdrawal
     }
 
     /**
+     * 신청 즉시 이체 — 대리점 설정(`auto_transfer_on_request`)이 켜져 있을 때만 실행한다.
+     *
+     * **라이더 본인 신청 경로에서만** 부른다. 「출금 대행」과 일일정산 자동출금은 자기
+     * 흐름에서 이미 executeTransfers()를 직접 부르므로 여기서 또 부르면 안 된다
+     * (그쪽에서 이 메서드를 타면 이체가 두 번 시도되고, 두 번째는 상태 필터에 걸려
+     * skipped 로 떨어지면서 호출부가 "이체 실패"로 오인한다).
+     *
+     * 이체가 실패해도 신청 자체는 남는다(status=failed). 관리자가 「출금 신청 목록」에서
+     * 재시도할 수 있어야 라이더가 다시 신청하는 헛수고를 안 한다.
+     *
+     * @return array{attempted:bool, ok:bool, message:string}
+     */
+    public static function autoTransferOnRequest(int $requestId, ?int $agencyId = null): array
+    {
+        require_once INC_PATH . '/WithdrawalConfig.php';
+
+        if ($requestId < 1) {
+            return ['attempted' => false, 'ok' => false, 'message' => ''];
+        }
+
+        if ($agencyId === null || $agencyId < 1) {
+            $row = db_row(
+                'SELECT COALESCE(wr.agency_id, r.agency_id) AS agency_id
+                   FROM withdrawal_requests wr
+                   LEFT JOIN riders r ON r.id = wr.rider_id
+                  WHERE wr.id = ? LIMIT 1',
+                [$requestId]
+            );
+            $agencyId = (int) ($row['agency_id'] ?? 0);
+        }
+
+        $cfg = WithdrawalConfig::get($agencyId > 0 ? $agencyId : null);
+        if (empty($cfg['auto_transfer_on_request'])) {
+            return ['attempted' => false, 'ok' => false, 'message' => ''];
+        }
+
+        $res = self::executeTransfers([$requestId]);
+        if ((int) $res['completed'] > 0) {
+            return ['attempted' => true, 'ok' => true, 'message' => ''];
+        }
+
+        // 실패 사유는 executeTransfers 가 건별 결과로 돌려준다 — 라이더에게 그대로 보여준다.
+        $msg = '';
+        foreach ($res['results'] as $r) {
+            if ((int) $r['id'] === $requestId && empty($r['ok'])) {
+                $msg = (string) $r['message'];
+                break;
+            }
+        }
+
+        return ['attempted' => true, 'ok' => false, 'message' => $msg];
+    }
+    /**
      * 「출금 확정」 — 펌뱅킹(쿠콘·하이픈)으로 **건별 이체를 즉시 실행**한다.
      *
      * 기존 `markDownloaded`+`markCompleted`(파일 다운로드 후 수동 입금) 경로는 백업용으로

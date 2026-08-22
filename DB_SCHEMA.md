@@ -216,6 +216,7 @@ UNIQUE(`org_id`,`platform`,`kind`), `org_id IS NULL`=전역 기본. 복호화 �
 계산·이동은 `WithdrawalConfig::feeShare()` + `inc/WithdrawalFeeShare.php`. **대리점 몫은 이동하지 않는다**(정산수수료는 라이더 지갑에서 빠져 이미 대리점 지갑에 남아 있는 돈) — 본사·총판 몫만 대리점 지갑에서 빼서 각 조직 지갑으로 옮기고 `agency_wallet_ledger`에 `wd_fee_up`(대리점 출금)·`wd_fee_in`(상위 수입)으로 기록한다.
 `fee_day_threshold`(기준일수, 기본 7) · `fee_per_tx_short`(80원) · `fee_per_tx_long`(40원) — **대리점별 설정 가능**(2026-07-16 재정정, 방향 불변: 최근=비쌈/오래됨=쌈). `reserve_amount`(출금 시 남기는 보증금).
 ✅ 실제 계산은 주문별 age-bucket 합산 모델(`WithdrawalConfig::feeForCycles` + `WithdrawalCycles`)로 전환 완료(§7 #18). `accrued_days` 단일값 모델은 사이클이 하나도 없는 경우의 폴백으로만 남아 있다.
+🆕 **(2026-08-23) `auto_transfer_on_request`** TINYINT(1) 기본 0 — 라이더가 앱에서 출금을 신청하는 **즉시** 펌뱅킹으로 내보낼지. 대리점별 on/off 이고 **대리점이 직접 설정**(「출금 정책 설정」). 켜면 `Withdrawal::autoTransferOnRequest()`가 신청 직후 `executeTransfers()`를 부른다 — **라이더 본인 신청 경로에서만** 호출한다(「출금 대행」·일일정산 자동출금은 자기 흐름에서 이미 이체를 부르므로 중복 호출 금지). 이체 실패 시 신청은 `failed`로 남아 관리자가 재시도할 수 있다.
 
 ### `org_fee_config` — 🆕(2026-07-22) 영업대행수수료 분배 요율
 PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_fee_pct` 기본 1.00%(임시, 갑 확정 대기).

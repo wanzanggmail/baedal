@@ -119,12 +119,13 @@ try {
         'withdrawal.config.save',
         'withdrawal_config',
         sprintf(
-            '[%s] 보증금 %s · %d일 미만 %d원 / 이상 %d원(건당)',
+            '[%s] 보증금 %s · %d일 미만 %d원 / 이상 %d원(건당) · 신청 즉시 이체 %s',
             $scopeLabel,
             number_format($cfg['reserve_amount']),
             $cfg['fee_day_threshold'],
             $cfg['fee_per_tx_short'],
-            $cfg['fee_per_tx_long']
+            $cfg['fee_per_tx_long'],
+            empty($cfg['auto_transfer_on_request']) ? '끔' : '켬'
         )
     );
     echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg, 'scope' => $scope], JSON_UNESCAPED_UNICODE);

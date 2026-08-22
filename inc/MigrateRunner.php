@@ -58,6 +58,7 @@ final class MigrateRunner
         self::migratePromotionDeductionColumns();
         self::migrateOrgCeoBizColumns();
         self::migrateWithdrawalFeeShare();
+        self::migrateAutoTransferOnRequest();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1319,6 +1320,37 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
         echo 'OK    withdrawal_config ' . count($adds) . "개 컬럼 추가\n";
+    }
+
+    /**
+     * 출금 신청 즉시 이체 스위치 — 대리점별 on/off.
+     *
+     * 기본값은 0(끔)이다. 켜면 라이더가 신청하는 순간 펌뱅킹으로 바로 나가므로
+     * 관리자가 검토할 틈이 없다. 쓰겠다고 명시한 대리점만 켜게 한다.
+     */
+    private static function migrateAutoTransferOnRequest(): void
+    {
+        echo "== withdrawal_config 신청 즉시 이체 ==\n";
+
+        if (!db_table_exists('withdrawal_config')) {
+            echo "SKIP  withdrawal_config (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+        if (in_array('auto_transfer_on_request', $cols, true)) {
+            echo "SKIP  auto_transfer_on_request (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "ALTER TABLE withdrawal_config
+             ADD COLUMN auto_transfer_on_request TINYINT(1) NOT NULL DEFAULT 0
+                 COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
+        );
+        echo "OK    auto_transfer_on_request 추가\n";
     }
 
     /**

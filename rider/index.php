@@ -171,7 +171,21 @@ if ($riderRoute === 'withdrawal/apply' && $_SERVER['REQUEST_METHOD'] === 'POST')
     try {
         $toDate = trim((string) ($_POST['to_date'] ?? ''));
         $row = Withdrawal::applyForRider((int) $ru['id'], $toDate !== '' ? $toDate : null);
-        $_SESSION['rider_flash_ok'] = '출금 신청이 접수되었습니다. (실지급 ₩' . number_format((int) $row['amount']) . ')';
+        $amountText = '₩' . number_format((int) $row['amount']);
+
+        // 대리점이 「신청 즉시 이체」를 켜 뒀으면 여기서 바로 내보낸다.
+        // 꺼져 있으면 아무 일도 하지 않고 예전처럼 '접수' 상태로 남는다.
+        $auto = Withdrawal::autoTransferOnRequest((int) ($row['db_id'] ?? 0));
+        if (!$auto['attempted']) {
+            $_SESSION['rider_flash_ok'] = '출금 신청이 접수되었습니다. (실지급 ' . $amountText . ')';
+        } elseif ($auto['ok']) {
+            $_SESSION['rider_flash_ok'] = '출금이 완료되었습니다. ' . $amountText . '을 등록된 계좌로 보냈습니다.';
+        } else {
+            // 신청은 남아 있고 관리자가 재시도할 수 있다 — 다시 신청하라고 하면 헛수고가 된다.
+            $_SESSION['rider_flash_error'] = '출금 신청은 접수됐지만 이체가 실패했습니다'
+                . ($auto['message'] !== '' ? ' (' . $auto['message'] . ')' : '')
+                . '. 대리점에서 확인 후 처리됩니다.';
+        }
     } catch (InvalidArgumentException $e) {
         $_SESSION['rider_flash_error'] = $e->getMessage();
     } catch (Throwable) {
