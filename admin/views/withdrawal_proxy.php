@@ -149,6 +149,13 @@ $cntReady = $cntAll - $cntBelow;
 					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
 					<input type="text" id="wp_search" class="form-control form-control-sm form-control-solid w-200px ps-11" placeholder="이름·코드 검색" />
 				</div>
+				<?php // 기준일을 행마다 고치면 수십 번 클릭해야 한다 — 화면에 보이는 행 전체에 한 번에 적용한다. ?>
+				<div class="d-flex align-items-center gap-2">
+					<span class="text-muted fs-8 fw-semibold text-nowrap">기준일 일괄</span>
+					<input type="date" id="wp_bulk_date" class="form-control form-control-sm form-control-solid w-150px"
+						value="<?= htmlspecialchars($today, ENT_QUOTES, 'UTF-8') ?>" max="<?= htmlspecialchars($today, ENT_QUOTES, 'UTF-8') ?>" />
+					<button type="button" class="btn btn-sm btn-light-primary text-nowrap" id="wp_bulk_date_apply">전체 적용</button>
+				</div>
 				<button type="button" class="btn btn-sm btn-primary" id="wp_bulk" disabled>선택 일괄 출금</button>
 			</div>
 		</div>
@@ -178,6 +185,7 @@ $cntReady = $cntAll - $cntBelow;
 						    ?>
 						<tr data-rid="<?= (int) $r['id'] ?>"
 							data-below="<?= $p['below'] ? '1' : '0' ?>"
+			data-blocked="<?= $blocked ? '1' : '0' ?>"
 							class="<?= $p['below'] ? 'd-none' : '' ?>"
 							data-search="<?= htmlspecialchars(mb_strtolower($r['name'] . ' ' . $r['rider_code'] . ' ' . preg_replace('/\D/', '', (string) ($r['phone'] ?? ''))), ENT_QUOTES, 'UTF-8') ?>">
 							<td>
@@ -402,6 +410,44 @@ $cntReady = $cntAll - $cntBelow;
 		tbody.addEventListener('change', function (ev) {
 			if (ev.target.classList.contains('wp-date')) loadPreview(ev.target.closest('tr'));
 		});
+
+		/**
+		 * 기준일 일괄 적용 — 화면에 보이는 행 전체의 날짜를 한 번에 바꾸고 다시 조회한다.
+		 *
+		 * 대상은 **보이는 행 전부**다(선택된 행이 아니라). 기준일은 "얼마가 나가는지"를
+		 * 정하는 조회 조건일 뿐 그 자체로 돈을 옮기지 않으므로, 먼저 전부 바꿔 놓고
+		 * 결과를 본 뒤 고르는 순서가 자연스럽다. 숨겨진 행(보증금 미달·검색 제외)은
+		 * 건드리지 않는다 — 안 보이는 값이 조용히 바뀌면 나중에 혼란스럽다.
+		 *
+		 * 조회는 loadPreviews()로 묶어 **요청 한 번**에 끝낸다(날짜가 전부 같아지므로).
+		 */
+		var bulkDate = document.getElementById('wp_bulk_date');
+		var bulkDateBtn = document.getElementById('wp_bulk_date_apply');
+		if (bulkDate && bulkDateBtn) {
+			bulkDateBtn.addEventListener('click', function () {
+				var d = bulkDate.value;
+				if (!d) { showToast('적용할 기준일을 고르세요.', false); return; }
+				if (bulkDate.max && d > bulkDate.max) { showToast('오늘 이후 날짜는 기준일로 쓸 수 없습니다.', false); return; }
+
+				var rows = Array.from(tbody.querySelectorAll('tr[data-rid]')).filter(function (tr) {
+					return !tr.classList.contains('d-none');
+				});
+				if (!rows.length) { showToast('적용할 행이 없습니다.', false); return; }
+
+				rows.forEach(function (tr) { tr.querySelector('.wp-date').value = d; });
+
+				// 날짜가 바뀌면 기존 미리보기 금액은 더 이상 유효하지 않다 — 선택을 풀고 다시 조회한다.
+				rows.forEach(function (tr) {
+					var chk = tr.querySelector('.wp-check');
+					if (chk) { chk.checked = false; }
+					tr.querySelector('.wp-pay').setAttribute('data-amount', '0');
+				});
+				syncSelection();
+
+				loadPreviews(rows.filter(function (tr) { return tr.getAttribute('data-blocked') !== '1'; }));
+				showToast('기준일 ' + d + ' 를 ' + rows.length + '명에게 적용했습니다.', true);
+			});
+		}
 
 		tbody.addEventListener('click', function (ev) {
 			var btn = ev.target.closest('.wp-pay');
