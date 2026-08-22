@@ -168,7 +168,6 @@ $cntReady = $cntAll - $cntBelow;
 								<input class="form-check-input" type="checkbox" id="wp_check_all" title="보이는 출금 가능 건 전체 선택" />
 							</th>
 							<th class="min-w-140px">라이더</th>
-							<th class="min-w-100px">계좌</th>
 							<th class="min-w-100px text-end">지갑 잔액</th>
 							<th class="min-w-130px">출금 기준일</th>
 							<th class="min-w-220px">출금 가능 내역</th>
@@ -177,7 +176,7 @@ $cntReady = $cntAll - $cntBelow;
 					</thead>
 					<tbody id="wp_tbody">
 						<?php if ($prepared === []) : ?>
-						<tr><td colspan="7" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
+						<tr><td colspan="6" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
 						<?php else : foreach ($prepared as $p) :
 						    $r       = $p['r'];
 						    $hasBank = $p['has_bank'];
@@ -195,13 +194,6 @@ $cntReady = $cntAll - $cntBelow;
 							<td>
 								<span class="fw-bold text-gray-900"><?= htmlspecialchars((string) $r['name'], ENT_QUOTES, 'UTF-8') ?></span>
 								<div class="text-muted fs-8"><?= htmlspecialchars(rider_phone_hint((string) ($r['phone'] ?? '')), ENT_QUOTES, 'UTF-8') ?></div>
-							</td>
-							<td class="text-muted fs-8">
-								<?php if ($hasBank) : ?>
-									<?= htmlspecialchars((string) ($r['bank_label'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
-								<?php else : ?>
-									<span class="badge badge-light-danger">계좌 없음</span>
-								<?php endif; ?>
 							</td>
 							<td class="text-end fw-semibold"><?= number_format((int) $r['balance']) ?>원</td>
 							<td>
@@ -287,15 +279,29 @@ $cntReady = $cntAll - $cntBelow;
 			if (p.fee_short_orders > 0) feeParts.push(p.fee_short_orders + '건×' + p.fee_rate_short + '원');
 			if (p.fee_long_orders > 0) feeParts.push(p.fee_long_orders + '건×' + p.fee_rate_long + '원');
 
+			// 출금 가능 일자는 정산일이 쌓인 만큼 줄줄이 길어져(수십 건) 표를 밀어낸다.
+			// 평소엔 "며칠분 N건"으로만 요약하고, 「자세히 보기」를 눌렀을 때 펼친다.
+			var totalOrders = (res.picked || []).reduce(function (a, c) { return a + (Number(c.orders) || 0); }, 0);
+
 			var h = '';
-			h += '<div><span class="text-gray-600">출금 가능 일자</span> <span class="fw-semibold text-gray-800">'
-			   + (dates.length ? esc(dates.join(', ')) : '—') + '</span></div>';
+			h += '<div><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
+			   + won(p.payout_amount) + '</span>'
+			   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
 			h += '<div class="mt-1"><span class="text-gray-600">수수료</span> <span class="text-danger fw-semibold">− '
 			   + won(p.fee) + '</span>'
 			   + (feeParts.length ? ' <span class="text-muted">(' + esc(feeParts.join(' + ')) + ')</span>' : '') + '</div>';
-			h += '<div class="mt-1"><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
-			   + won(p.payout_amount) + '</span>'
-			   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
+			h += '<div class="mt-1 d-flex align-items-center gap-2 flex-wrap">'
+			   + '<span class="text-gray-600">출금 가능 일자</span>'
+			   + '<span class="fw-semibold text-gray-800">'
+			   + (dates.length ? dates.length + '일분 · ' + totalOrders + '건' : '—') + '</span>'
+			   + (dates.length
+			       ? '<button type="button" class="btn btn-sm btn-light py-0 px-2 fs-9 wp-dates-toggle">자세히 보기</button>'
+			       : '')
+			   + '</div>';
+			if (dates.length) {
+				h += '<div class="wp-dates d-none mt-1 p-2 bg-light rounded text-gray-700">'
+				   + esc(dates.join(', ')) + '</div>';
+			}
 			cell.innerHTML = h;
 			btn.setAttribute('data-amount', p.payout_amount);
 			setRowPayable(tr, true);
@@ -409,6 +415,16 @@ $cntReady = $cntAll - $cntBelow;
 
 		tbody.addEventListener('change', function (ev) {
 			if (ev.target.classList.contains('wp-date')) loadPreview(ev.target.closest('tr'));
+		});
+
+		// 출금 가능 일자 펼치기/접기 — 미리보기는 다시 그려지므로 위임으로 붙인다.
+		tbody.addEventListener('click', function (ev) {
+			var btn = ev.target.closest('.wp-dates-toggle');
+			if (!btn) return;
+			var box = btn.closest('.wp-info').querySelector('.wp-dates');
+			if (!box) return;
+			var hidden = box.classList.toggle('d-none');
+			btn.textContent = hidden ? '자세히 보기' : '접기';
 		});
 
 		/**
