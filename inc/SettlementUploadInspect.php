@@ -54,6 +54,9 @@ function settlement_upload_inspect(
         $parsePath = XlsxDecrypt::prepareForParsing($tmpPath, $passwords, 'coupang');
         $parser->open($parsePath);
         $analysis = SettlementPlatformDetect::analyze($parser, $origName, $settlementDate);
+        // 일간/주간도 함께 판별해 파일 선택 즉시 화면에 보여준다 — 둘은 처리 경로가 완전히 다르고,
+        // 사용자가 미리 알아야 "왜 라이더 매칭 표가 안 나오지?" 같은 오해가 없다.
+        $kindDetect = SettlementPlatformDetect::detectKind($parser, $origName);
     } catch (Throwable $e) {
         if (isset($parser)) {
             $parser->close();
@@ -86,5 +89,9 @@ function settlement_upload_inspect(
         'reasons'           => $analysis['reasons'],
         'parse_row_count'   => $analysis['parse_row_count'],
         'sheet_names'       => $analysis['sheet_names'],
+        'detected_kind'       => $kindDetect['kind'],
+        'detected_kind_label' => $kindDetect['kind'] === 'weekly' ? '주간 정산서' : '일간 정산서',
+        'kind_confidence'     => $kindDetect['confidence'],
+        'kind_reasons'        => $kindDetect['reasons'],
     ];
 }

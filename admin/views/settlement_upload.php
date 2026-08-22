@@ -136,6 +136,17 @@ $platformLabels = [
 									<div class="form-text">xlsx 파일만 가능합니다. (최대 20MB) · 선택 시 플랫폼을 자동 감지합니다.</div>
 								</div>
 								<div id="platformDetectBanner" class="d-none mb-6"></div>
+								<?php // 파일을 고르면 자동으로 채워진다. 표시 전용이라 서버로는 보내지 않는다
+								      // (서버가 파일 내용으로 다시 판별한다 — 화면 값을 믿고 처리하면 위험하다). ?>
+								<div class="mb-6">
+									<label class="form-label">정산서 종류 <span class="text-muted fs-7">(파일 선택 시 자동 판별)</span></label>
+									<select class="form-select form-select-solid" id="kindSelect" disabled>
+										<option value="">파일을 선택하면 표시됩니다</option>
+										<option value="daily">일간 정산서</option>
+										<option value="weekly">주간 정산서</option>
+									</select>
+									<div class="form-text" id="kindHint">일간·주간을 파일 내용으로 자동 구분합니다. 직접 고르지 않아도 됩니다.</div>
+								</div>
 								<div class="mb-6">
 									<label class="form-label required">플랫폼</label>
 									<select class="form-select form-select-solid" name="platform" id="platformSelect">
@@ -504,6 +515,31 @@ $platformLabels = [
 	let lastConfidence = 'none';
 	let previewToken = 0;
 
+	const kindSel  = document.getElementById('kindSelect');
+	const kindHint = document.getElementById('kindHint');
+
+	/** 파일 분석 결과의 일간/주간을 셀렉트박스에 반영(표시 전용 — 서버가 다시 판별한다). */
+	function renderKind(kind, label, confidence) {
+		if (!kindSel) return;
+		if (!kind) {
+			kindSel.value = '';
+			kindSel.disabled = true;
+			kindHint.className = 'form-text';
+			kindHint.textContent = '일간·주간을 파일 내용으로 자동 구분합니다. 직접 고르지 않아도 됩니다.';
+			return;
+		}
+		kindSel.value = kind;
+		kindSel.disabled = true;   // 자동 판별 결과라 사람이 바꾸지 못하게 둔다
+		if (kind === 'weekly') {
+			kindHint.className = 'form-text text-primary fw-semibold';
+			kindHint.textContent = '주간 정산서로 감지되었습니다 — 프로모션·시간제보험만 반영합니다.'
+				+ (confidence === 'low' ? ' (판별 근거가 약합니다. 파일을 확인해 주세요)' : '');
+		} else {
+			kindHint.className = 'form-text';
+			kindHint.textContent = '일간 정산서로 감지되었습니다 — 라이더 매칭 후 정산 반영까지 진행합니다.';
+		}
+	}
+
 	function resetPlatformDetect() {
 		lastDetected = null;
 		lastConfidence = 'none';
@@ -511,6 +547,7 @@ $platformLabels = [
 			detectBanner.className = 'd-none mb-6';
 			detectBanner.innerHTML = '';
 		}
+		renderKind(null);
 		updateMismatchUi();
 	}
 
@@ -531,6 +568,8 @@ $platformLabels = [
 
 	function renderDetectBanner(data) {
 		if (!detectBanner) return;
+
+		renderKind(data.ok ? data.detected_kind : null, data.detected_kind_label, data.kind_confidence);
 
 		if (!data.ok) {
 			detectBanner.className = 'alert alert-danger d-flex align-items-start p-5 mb-6';

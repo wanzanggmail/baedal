@@ -742,6 +742,69 @@ class XlsxParser
     }
 
     /**
+     * 배민 정산서에서 **협력사·사업자 정보**를 뽑는다 — 팀명·지역명 자동 채움용.
+     *
+     * 쿠팡은 파일명이 `팀_지역_날짜.xlsx` 라 파일명에서 팀/지역을 얻지만, 배민 파일명은
+     * `배달처리비_표준서울강서C더블유플러스1_20260812_20260812.xlsx`(일일) /
+     * `20260812~20260818_더블유플러스_표준서울강서C더블유플러스1_….xlsx`(주간) 형식이라
+     * 같은 규칙을 쓰면 팀명이 "배달처리비"·"20260812~20260818" 처럼 엉뚱하게 잡힌다.
+     * 배민은 **파일 안에 제대로 된 값**이 있으므로 그걸 쓴다.
+     *
+     * @return array{company:string, partner:string}  company=사업자명, partner=협력사명
+     */
+    public function parseBaeminPartnerInfo(): array
+    {
+        $out = ['company' => '', 'partner' => ''];
+
+        // 일일: 「배달 내역 상세」 헤더에 협력사명/사업자명 컬럼이 있고 데이터 행마다 값이 들어있다.
+        $idx = $this->findSheetIndex('배달');
+        if ($idx !== null) {
+            $rows = $this->readSheet($idx, 1, 3, false);
+            $hdr  = null;
+            foreach ($rows as $rowNum => $cols) {
+                foreach ((array) $cols as $v) {
+                    if (str_contains((string) $v, '협력사명')) {
+                        $hdr = $rowNum;
+                        break 2;
+                    }
+                }
+            }
+            if ($hdr !== null) {
+                $map  = $this->mapHeaderColumns($rows[$hdr] ?? [], [
+                    'partner' => ['협력사명'],
+                    'company' => ['사업자명'],
+                ]);
+                $data = $this->readSheet($idx, $hdr + 1, 1, false);
+                $first = $data[array_key_first($data) ?? 0] ?? [];
+                $out['partner'] = trim((string) ($first[$map['partner'] ?? ''] ?? ''));
+                $out['company'] = trim((string) ($first[$map['company'] ?? ''] ?? ''));
+            }
+        }
+
+        // 주간: 갑지의 「1.협력사 정보」 블록 — 라벨과 값이 좌우로 붙어 있다.
+        if ($out['partner'] === '') {
+            $idx = $this->findSheetIndex('갑지');
+            if ($idx !== null) {
+                foreach ($this->readSheet($idx, 1, 40, false) as $cols) {
+                    $prev = null;
+                    foreach ((array) $cols as $v) {
+                        $s = trim((string) $v);
+                        if ($prev === '협력사명' && $s !== '') {
+                            $out['partner'] = $s;
+                        }
+                        if ($prev === '사업자명' && $s !== '') {
+                            $out['company'] = $s;
+                        }
+                        $prev = $s;
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * 배민 **주간정산서 을지**(협력사 소속 라이더 정산 확인용) 파서 — 라이더별 주간 정산 결과.
      *
      * 일일정산서(배달 내역 상세)에는 **배달료와 주문 상세만** 있다. 프로모션·시간제보험료·

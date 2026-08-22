@@ -110,26 +110,20 @@ if ($teamInput !== '') {
 if ($regionInput !== '') {
     $regionName = $regionInput;
 }
+// ⚠️ 배민은 파일명 규칙이 달라 위 `팀_지역_날짜` 파싱이 엉뚱한 값을 만든다
+//    (일일 → 팀명 "배달처리비", 주간 → 팀명 "20260812~20260818").
+//    배민은 **파일 안의 사업자명·협력사명**으로 채우므로, 여기서는 비워두고
+//    파일을 연 뒤(아래 $parser->open) 덮어쓴다. 폼에서 직접 입력한 값은 그대로 존중한다.
+if ($platform === 'baemin' && $teamInput === '' && $regionInput === '') {
+    $teamName   = '';
+    $regionName = '';
+}
+
 $teamName   = mb_substr(normalize_hangul_nfc($teamName), 0, 60);
 $regionName = mb_substr(normalize_hangul_nfc($regionName), 0, 60);
 
-$fileHash = hash_file('sha256', $tmpPath) ?: '';
-$dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId, $teamName, $regionName);
+$fileHash   = hash_file('sha256', $tmpPath) ?: '';
 $dupWarning = null;
-if ($dupError !== null) {
-    if ($dryRun) {
-        // 미리보기에서는 막지 않고 경고만 (확정 시 차단)
-        $dupWarning = $dupError;
-    } else {
-        echo json_encode(['ok' => false, 'error' => $dupError, 'duplicate' => true], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-}
-
-$metaJson = json_encode(
-    ['team' => $teamName, 'region' => $regionName, 'file_hash' => $fileHash],
-    JSON_UNESCAPED_UNICODE
-);
 
 $uploadPassword = SettlementExcelConfig::normalizePassword((string) ($_POST['excel_password'] ?? ''));
 // 🔑 일일/주간은 **열기 암호가 다르다**(배민 확인). 어느 쪽인지 아직 모르므로 둘 다 시도하고,
@@ -150,6 +144,36 @@ try {
     //    주간이면 라이더별 주간 정산(을지)만 읽고, 일일 파싱 경로는 아예 타지 않는다.
     $kindDetect   = SettlementPlatformDetect::detectKind($parser, $origName);
     $detectedKind = (string) $kindDetect['kind'];
+
+    // 배민 팀/지역은 파일 안에서 얻는다(위 주석 참고). 사업자명=팀, 협력사명=지역으로 둔다 —
+    // 쿠팡의 `팀도깨비 / 서울_마포중앙`과 같은 자리(조직 / 세부지역)에 대응한다.
+    if ($platform === 'baemin' && $teamName === '' && $regionName === '') {
+        $info = $parser->parseBaeminPartnerInfo();
+        if ($info['company'] !== '') {
+            $teamName = mb_substr(normalize_hangul_nfc($info['company']), 0, 60);
+        }
+        if ($info['partner'] !== '') {
+            $regionName = mb_substr(normalize_hangul_nfc($info['partner']), 0, 60);
+        }
+    }
+
+    // 중복 검사는 팀/지역이 확정된 뒤에 해야 한다 — 배민은 위에서야 값이 채워진다.
+    $dupError = settlement_upload_duplicate_error($platform, $settlementDate, $origName, $fileHash, $agencyId, $teamName, $regionName, $detectedKind);
+    if ($dupError !== null) {
+        if ($dryRun) {
+            $dupWarning = $dupError;   // 미리보기에서는 막지 않고 경고만
+        } else {
+            $parser->close();
+            XlsxDecrypt::cleanupTemps();
+            echo json_encode(['ok' => false, 'error' => $dupError, 'duplicate' => true], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    $metaJson = json_encode(
+        ['team' => $teamName, 'region' => $regionName, 'file_hash' => $fileHash],
+        JSON_UNESCAPED_UNICODE
+    );
 
     if ($detectedKind === 'weekly') {
         // 배민은 을지(라이더별 표)에서, 쿠팡은 시간제보험(차감) 시트에서 읽는다.
@@ -778,20 +802,23 @@ function settlement_upload_duplicate_error(
     string $fileHash,
     int $agencyId,
     string $teamName = '',
-    string $regionName = ''
+    string $regionName = '',
+    string $kind = 'daily'
 ): ?string {
     if (!db_table_exists('settlement_uploads')) {
         return null;
     }
 
-    // 중복 판정은 같은 대리점 + **같은 팀지역** 범위 내에서.
+    // 중복 판정은 같은 대리점 + **같은 팀지역** + **같은 종류(일간/주간)** 범위 내에서.
     // 한 대리점이 같은 날 여러 팀지역 정산서를 올리는 게 정상이므로, 팀지역이 다르면 중복이 아니다.
+    // ⚠️ kind를 'daily'로 고정해두면 주간 정산서를 올릴 때 **같은 기간의 일간 업로드와
+    //    비교돼 없는 중복이 잡힌다**(주간 week_start가 그 주 첫 일간의 귀속일과 같아서).
     $hasTeamCol = in_array('team_name', array_column(db_rows('SHOW COLUMNS FROM settlement_uploads'), 'Field'), true);
 
     $sql    = 'SELECT id, original_filename, stored_path
                  FROM settlement_uploads
                 WHERE kind = ? AND platform = ? AND settlement_date = ? AND agency_id = ?';
-    $params = ['daily', $platform, $settlementDate, $agencyId];
+    $params = [$kind === 'weekly' ? 'weekly' : 'daily', $platform, $settlementDate, $agencyId];
     if ($hasTeamCol) {
         $sql     .= ' AND team_name = ? AND region_name = ?';
         $params[] = $teamName;
