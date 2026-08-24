@@ -344,7 +344,7 @@ $route = $route ?? '';
 										<?php if (admin_has_role('super')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'system/orgs', 'system/admins', 'system/permissions', 'system/codes',
-										    'system/audit', 'system/pg-fee', 'system/manual-adjust',
+										    'system/audit', 'system/pg-fee', 'system/pg-integration', 'system/manual-adjust',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -376,6 +376,12 @@ $route = $route ?? '';
 													<a class="menu-link<?= nav_active('system/pg-fee') ?>" href="<?= htmlspecialchars(admin_url('system/pg-fee'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">수수료 현황</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/pg-integration') ?>" href="<?= htmlspecialchars(admin_url('system/pg-integration'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">PG 연동·결제통지</span>
 													</a>
 												</div>
 												<div class="menu-item">

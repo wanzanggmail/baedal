@@ -41,5 +41,6 @@ return [
     'system/audit' => ['title' => '감사 로그', 'view' => 'system_audit'],
     'system/manual-adjust' => ['title' => '정산/잔액 수동 조정', 'view' => 'system_manual_adjust'],
     'system/pg-fee' => ['title' => '수수료 현황', 'view' => 'pg_fee_config'],
+    'system/pg-integration' => ['title' => 'PG 연동·결제통지', 'view' => 'pg_integration'],
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
 ];

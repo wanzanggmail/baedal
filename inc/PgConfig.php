@@ -48,6 +48,9 @@ final class PgConfig
         $defaults = [
             'driver' => self::DRIVER_MOCK, 'mid' => '', 'tid' => '',
             'pay_key' => '', 'sign_key' => '', 'api_key' => '',
+            // 위루트가 가맹점별로 발급하는 AES 키/IV — 민감 필드 암호화용
+            'enc_key' => '', 'enc_iv' => '',
+            'noti_allow_ips' => '',
             'login_id' => '', 'login_pw' => '',
             'access_token' => '', 'token_expires_at' => null,
         ];
@@ -102,11 +105,14 @@ final class PgConfig
             'pay_key_masked'   => $mask((string) $c['pay_key']),
             'sign_key_masked'  => $mask((string) $c['sign_key']),
             'api_key_masked'   => $mask((string) $c['api_key']),
+            'enc_key_masked'   => $mask((string) $c['enc_key']),
+            'enc_iv_masked'    => $mask((string) $c['enc_iv']),
             'login_id'         => (string) $c['login_id'],
             'login_pw_masked'  => $mask((string) $c['login_pw']),
             'has_pay_key'      => trim((string) $c['pay_key']) !== '',
             'has_sign_key'     => trim((string) $c['sign_key']) !== '',
             'has_api_key'      => trim((string) $c['api_key']) !== '',
+            'has_enc_key'      => trim((string) $c['enc_key']) !== '' && trim((string) $c['enc_iv']) !== '',
             'is_ready'         => self::isReady(),
             'token_expires_at' => $c['token_expires_at'],
         ];
@@ -147,6 +153,7 @@ final class PgConfig
         db_execute(
             'UPDATE pg_config
                 SET driver = ?, mid = ?, tid = ?, pay_key = ?, sign_key = ?, api_key = ?,
+                    enc_key = ?, enc_iv = ?, noti_allow_ips = ?,
                     login_id = ?, login_pw = ?, updated_by = ?, updated_at = NOW()
               WHERE id = 1',
             [
@@ -156,6 +163,12 @@ final class PgConfig
                 $payKey,
                 $keep('sign_key'),
                 $keep('api_key'),
+                $keep('enc_key'),
+                $keep('enc_iv'),
+                // 허용 IP는 비밀값이 아니라 **빈 값도 의미가 있다**(검사 끄기) → keep 하지 않는다.
+                array_key_exists('noti_allow_ips', $data)
+                    ? trim((string) $data['noti_allow_ips'])
+                    : (string) $cur['noti_allow_ips'],
                 trim((string) ($data['login_id'] ?? $cur['login_id'])),
                 $keep('login_pw'),
                 ($adminId !== null && $adminId > 0) ? $adminId : null,

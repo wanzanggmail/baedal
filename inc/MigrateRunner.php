@@ -59,6 +59,7 @@ final class MigrateRunner
         self::migrateOrgCeoBizColumns();
         self::migrateWithdrawalFeeShare();
         self::migrateAutoTransferOnRequest();
+        self::migratePgWebhook();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1351,6 +1352,82 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * PG 결제통지(Webhook) — 수신 기록 + 허용 IP.
+     *
+     * 우리 결제는 요청→응답 동기 흐름이라 지갑은 이미 그 자리에서 충전된다.
+     * 웹훅은 **돈을 움직이는 경로가 아니라 대사(확인) 경로**다 — 받은 통지를 기록하고
+     * 기존 pg_payments 행에 붙여, 우리 기록과 PG 기록이 어긋나는 건을 드러내는 게 목적이다.
+     * (여기서 지갑을 또 충전하면 같은 결제가 두 번 반영된다.)
+     *
+     * 재전송이 1분 간격으로 오므로 `trx_id` UNIQUE 로 멱등을 보장한다.
+     */
+    private static function migratePgWebhook(): void
+    {
+        echo "== PG 결제통지(webhook) ==\n";
+
+        if (db_table_exists('pg_config')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM pg_config'), 'Field');
+
+            // 위루트는 카드번호 등 민감 필드를 AES 로 암호화해 보내라고 요구한다 —
+            // 키와 IV 를 가맹점별로 발급해 준다(2026-08-23 갑 전달).
+            $encAdds = [];
+            if (!in_array('enc_key', $cols, true)) {
+                $encAdds[] = "ADD COLUMN enc_key VARCHAR(255) NOT NULL DEFAULT '' COMMENT '외부연동 암호화 KEY(AES)'";
+            }
+            if (!in_array('enc_iv', $cols, true)) {
+                $encAdds[] = "ADD COLUMN enc_iv VARCHAR(64) NOT NULL DEFAULT '' COMMENT '외부연동 Initialization Vector'";
+            }
+            if ($encAdds !== []) {
+                db_execute('ALTER TABLE pg_config ' . implode(', ', $encAdds));
+                echo 'OK    pg_config ' . count($encAdds) . "개 암호화 컬럼 추가\n";
+            }
+
+            if (!in_array('noti_allow_ips', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE pg_config
+                     ADD COLUMN noti_allow_ips VARCHAR(255) NOT NULL DEFAULT '221.168.33.162'
+                         COMMENT '결제통지 허용 IP(쉼표 구분). 비우면 IP 검사 안 함'"
+                );
+                echo "OK    pg_config.noti_allow_ips 추가\n";
+            } else {
+                echo "SKIP  noti_allow_ips (이미 있음)\n";
+            }
+        }
+
+        if (db_table_exists('pg_webhook_events')) {
+            echo "SKIP  pg_webhook_events (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "CREATE TABLE `pg_webhook_events` (
+                `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `trx_id`      VARCHAR(100)  NOT NULL COMMENT 'PG 거래 고유번호 — 멱등 키',
+                `ord_num`     VARCHAR(60)   NOT NULL DEFAULT '' COMMENT '우리가 채번한 주문번호',
+                `mid`         VARCHAR(50)   NOT NULL DEFAULT '',
+                `module_type` VARCHAR(10)   NOT NULL DEFAULT '' COMMENT '4=빌링(우리 건)',
+                `amount`      INT           NOT NULL DEFAULT 0,
+                `payment_id`  BIGINT UNSIGNED NULL COMMENT '대조된 pg_payments.id',
+                `match_state` ENUM('matched','unmatched','mismatch','ignored') NOT NULL DEFAULT 'unmatched'
+                              COMMENT 'matched=금액까지 일치 / mismatch=찾았으나 금액 불일치 / ignored=우리 모듈 아님',
+                `verified`    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '서명 검증 통과 여부',
+                `source_ip`   VARCHAR(45)   NOT NULL DEFAULT '',
+                `raw_body`    TEXT          NULL COMMENT '원문 — 대사·분쟁 대비',
+                `note`        VARCHAR(300)  NOT NULL DEFAULT '',
+                `received_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_trx` (`trx_id`),
+                KEY `idx_ord` (`ord_num`),
+                KEY `idx_payment` (`payment_id`),
+                KEY `idx_state` (`match_state`, `received_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='PG 결제통지 수신 기록 — 대사용, 지갑을 움직이지 않는다'"
+        );
+        echo "OK    pg_webhook_events 생성\n";
     }
 
     /**
