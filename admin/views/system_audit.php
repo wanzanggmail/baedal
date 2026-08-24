@@ -11,6 +11,14 @@ $needsMigrate = false;
 $filterQ = trim((string) ($_GET['q'] ?? ''));
 $filterActor = trim((string) ($_GET['actor'] ?? ''));
 $filterPrefix = trim((string) ($_GET['action_prefix'] ?? ''));
+$filterFrom = trim((string) ($_GET['from'] ?? ''));
+$filterTo   = trim((string) ($_GET['to'] ?? ''));
+// 형식이 어긋난 값은 조용히 버린다 — SQL 로 넘겨봐야 안 걸리고 사용자만 헷갈린다.
+foreach (['filterFrom', 'filterTo'] as $v) {
+    if ($$v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $$v)) {
+        $$v = '';
+    }
+}
 $page = max(1, (int) ($_GET['page'] ?? 1));
 
 try {
@@ -21,6 +29,8 @@ try {
             'q'             => $filterQ,
             'actor'         => $filterActor,
             'action_prefix' => $filterPrefix,
+            'from'          => $filterFrom,
+            'to'            => $filterTo,
             'page'          => $page,
             'limit'         => 50,
         ]);
@@ -42,16 +52,20 @@ $exportQs = http_build_query(array_filter([
     'q'             => $filterQ !== '' ? $filterQ : null,
     'actor'         => $filterActor !== '' ? $filterActor : null,
     'action_prefix' => $filterPrefix !== '' ? $filterPrefix : null,
+    'from'          => $filterFrom !== '' ? $filterFrom : null,
+    'to'            => $filterTo !== '' ? $filterTo : null,
 ]));
 $exportUrl = $exportBase . ($exportQs !== '' ? ('?' . $exportQs) : '');
 
-function audit_page_url(string $base, int $page, string $q, string $actor, string $prefix): string
+function audit_page_url(string $base, int $page, string $q, string $actor, string $prefix, string $from = '', string $to = ''): string
 {
     $qs = http_build_query(array_filter([
         'route'         => 'system/audit',
         'q'             => $q !== '' ? $q : null,
         'actor'         => $actor !== '' ? $actor : null,
         'action_prefix' => $prefix !== '' ? $prefix : null,
+        'from'          => $from !== '' ? $from : null,
+        'to'            => $to !== '' ? $to : null,
         'page'          => $page > 1 ? $page : null,
     ]));
 
@@ -107,19 +121,27 @@ function audit_page_url(string $base, int $page, string $q, string $actor, strin
 		<div class="card-body py-5">
 			<form method="get" action="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="row g-4 align-items-end">
 				<input type="hidden" name="route" value="system/audit" />
-				<div class="col-md-4">
+				<div class="col-md-2">
+					<label class="form-label fs-7" for="audit_from">시작일</label>
+					<input type="date" class="form-control form-control-solid" id="audit_from" name="from" value="<?= htmlspecialchars($filterFrom, ENT_QUOTES, 'UTF-8') ?>" max="<?= htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8') ?>" />
+				</div>
+				<div class="col-md-2">
+					<label class="form-label fs-7" for="audit_to">종료일</label>
+					<input type="date" class="form-control form-control-solid" id="audit_to" name="to" value="<?= htmlspecialchars($filterTo, ENT_QUOTES, 'UTF-8') ?>" max="<?= htmlspecialchars(date('Y-m-d'), ENT_QUOTES, 'UTF-8') ?>" />
+				</div>
+				<div class="col-md-3">
 					<label class="form-label fs-7" for="audit_q">검색 (행동·대상·상세)</label>
 					<input type="search" class="form-control form-control-solid" id="audit_q" name="q" value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: login, notice, withdrawal" autocomplete="off" />
 				</div>
-				<div class="col-md-3">
+				<div class="col-md-2">
 					<label class="form-label fs-7" for="audit_actor">수행자</label>
 					<input type="text" class="form-control form-control-solid" id="audit_actor" name="actor" value="<?= htmlspecialchars($filterActor, ENT_QUOTES, 'UTF-8') ?>" placeholder="전체" />
 				</div>
-				<div class="col-md-3">
+				<div class="col-md-2">
 					<label class="form-label fs-7" for="audit_action_prefix">행동 접두사</label>
 					<input type="text" class="form-control form-control-solid" id="audit_action_prefix" name="action_prefix" value="<?= htmlspecialchars($filterPrefix, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: LOGIN, UPDATE, content_notices" />
 				</div>
-				<div class="col-md-2 d-flex gap-2">
+				<div class="col-md-1 d-flex gap-2">
 					<button type="submit" class="btn btn-primary flex-grow-1">필터</button>
 					<a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-light" title="초기화">↺</a>
 				</div>
@@ -171,10 +193,10 @@ function audit_page_url(string $base, int $page, string $q, string $actor, strin
 			<?php if ($pages > 1) : ?>
 			<div class="d-flex justify-content-center gap-2 mt-6">
 				<?php if ($page > 1) : ?>
-				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page - 1, $filterQ, $filterActor, $filterPrefix), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">이전</a>
+				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page - 1, $filterQ, $filterActor, $filterPrefix, $filterFrom, $filterTo), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">이전</a>
 				<?php endif; ?>
 				<?php if ($page < $pages) : ?>
-				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page + 1, $filterQ, $filterActor, $filterPrefix), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">다음</a>
+				<a href="<?= htmlspecialchars(audit_page_url($listUrl, $page + 1, $filterQ, $filterActor, $filterPrefix, $filterFrom, $filterTo), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">다음</a>
 				<?php endif; ?>
 			</div>
 			<?php endif; ?>

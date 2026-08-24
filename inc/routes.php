@@ -17,7 +17,7 @@ return [
     'promotion' => ['title' => '프로모션 지급', 'view' => 'promotion'],
     'promotion/detail' => ['title' => '프로모션 지급 상세', 'view' => 'promotion_detail'],
     'promotion/calculator' => ['title' => '프로모션 계산기', 'view' => 'promotion_calculator'],
-    'deduction/agency-fee' => ['title' => '선공제(대행 수수료) 설정', 'view' => 'deduction_agency_fee'],
+    'deduction/agency-fee' => ['title' => '대행수수료 설정', 'view' => 'deduction_agency_fee'],
     'deduction/debts' => ['title' => '미수금 원장', 'view' => 'debt_list'],
     'deduction/lease-fees' => ['title' => '리스 수수료 배분', 'view' => 'lease_fee_report'],
     'withdrawal/list' => ['title' => '출금 신청 목록', 'view' => 'withdrawal_list'],
@@ -42,5 +42,6 @@ return [
     'system/manual-adjust' => ['title' => '정산/잔액 수동 조정', 'view' => 'system_manual_adjust'],
     'system/pg-fee' => ['title' => '수수료 현황', 'view' => 'pg_fee_config'],
     'system/pg-integration' => ['title' => 'PG 연동·결제통지', 'view' => 'pg_integration'],
+    'system/pg-logs' => ['title' => 'PG 결제 이력', 'view' => 'pg_logs'],
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
 ];

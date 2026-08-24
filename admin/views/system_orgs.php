@@ -140,6 +140,17 @@ foreach ($agencyByParent as $orphans) {
 				</div>
 			</div>
 			<div class="card-toolbar gap-2">
+				<?php // 총판을 고르면 그 총판과 **하위 대리점이 함께** 보인다. 조직이 늘면 트리를 한눈에
+				     // 못 보므로 소속 단위로 좁혀 보는 게 실제로 자주 하는 일이다. ?>
+				<select id="org_filter_dist" class="form-select form-select-sm form-select-solid w-160px">
+					<option value="">총판 전체</option>
+					<?php foreach ($distributors as $d) : ?>
+					<option value="<?= (int) $d['id'] ?>"><?= htmlspecialchars((string) $d['name'], ENT_QUOTES, 'UTF-8') ?></option>
+					<?php endforeach; ?>
+					<?php if (($agencyByParent[0] ?? []) !== []) : ?>
+					<option value="0">총판 없음(본사 직속)</option>
+					<?php endif; ?>
+				</select>
 				<select id="org_filter_level" class="form-select form-select-sm form-select-solid w-125px">
 					<option value="">유형 전체</option>
 					<option value="distributor">총판</option>
@@ -182,6 +193,8 @@ foreach ($agencyByParent as $orphans) {
 							data-id="<?= (int) $row['id'] ?>"
 							data-level="<?= htmlspecialchars((string) $row['level'], ENT_QUOTES, 'UTF-8') ?>"
 							data-status="<?= $row['active'] ? 'active' : 'inactive' ?>"
+							<?php // 총판 자신은 자기 id, 대리점은 소속 총판 id — 한 값으로 묶어 필터한다. ?>
+							data-dist="<?= $row['level'] === Org::LEVEL_DISTRIBUTOR ? (int) $row['id'] : (int) ($row['parent_id'] ?? 0) ?>"
 							data-search="<?= htmlspecialchars($searchKey, ENT_QUOTES, 'UTF-8') ?>">
 							<td>
 								<?php if ($isChild) : ?><span class="text-muted me-1">└</span><?php endif; ?>
@@ -447,15 +460,18 @@ foreach ($agencyByParent as $orphans) {
 
 		// ── 검색·필터 ──────────────────────────────
 		var searchEl = $('org_search'), levelEl = $('org_filter_level'), statusEl = $('org_filter_status');
+		var distEl = $('org_filter_dist');
 		function applyFilter() {
 			var q = (searchEl.value || '').trim().toLowerCase();
 			var lv = levelEl.value, st = statusEl.value;
+			var dist = distEl ? distEl.value : '';
 			var rows = document.querySelectorAll('#org_tbody tr[data-id]');
 			var shown = 0;
 			rows.forEach(function (tr) {
 				var ok = (!q || tr.getAttribute('data-search').indexOf(q) !== -1)
 					&& (!lv || tr.getAttribute('data-level') === lv)
-					&& (!st || tr.getAttribute('data-status') === st);
+					&& (!st || tr.getAttribute('data-status') === st)
+					&& (dist === '' || tr.getAttribute('data-dist') === dist);
 				tr.classList.toggle('d-none', !ok);
 				if (ok) shown++;
 			});
@@ -466,6 +482,7 @@ foreach ($agencyByParent as $orphans) {
 			searchEl.addEventListener('input', applyFilter);
 			levelEl.addEventListener('change', applyFilter);
 			statusEl.addEventListener('change', applyFilter);
+			if (distEl) distEl.addEventListener('change', applyFilter);
 		}
 
 		// ── 상세 모달 ──────────────────────────────

@@ -68,7 +68,7 @@ $settingsUrl = admin_url('withdrawal/settings');
 		</div>
 		<div class="card-body pt-2">
 			<div class="table-responsive">
-				<table class="table table-row-bordered table-row-gray-300 align-middle gy-3 fs-7">
+				<table class="table table-row-bordered table-row-gray-300 align-middle gy-3 fs-7" id="pgFeeTable">
 					<thead>
 						<tr class="fw-bold text-muted">
 							<th class="min-w-140px">대리점</th>
@@ -112,4 +112,11 @@ $settingsUrl = admin_url('withdrawal/settings');
 	<?php endif; ?>
 	<?php endif; ?>
 
+<script src="<?= htmlspecialchars(web_asset('js/table-paginate.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script>
+	// 목록이 길어지면 스크롤만 길어져 찾기 어렵다. 서버가 내려준 결과를 그대로 두고
+	// 화면에서만 페이지로 나눈다(DataTables 없이 같은 UX — assets/js/table-paginate.js).
+	var tp_pgFeeTable = document.getElementById('pgFeeTable');
+	if (tp_pgFeeTable) { initTablePaginate(tp_pgFeeTable, { pageSize: 20, unit: '곳' }); }
+</script>
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

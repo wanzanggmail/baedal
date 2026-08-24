@@ -19,6 +19,9 @@ $csv = AuditLog::csvContent([
     'q'             => $_GET['q'] ?? '',
     'actor'         => $_GET['actor'] ?? '',
     'action_prefix' => $_GET['action_prefix'] ?? '',
+    // 화면에서 기간을 좁혀 놓고 내보냈는데 전체가 나오면 안 된다 — 필터를 그대로 넘긴다.
+    'from'          => $_GET['from'] ?? '',
+    'to'            => $_GET['to'] ?? '',
 ]);
 
 AuditLog::record('EXPORT', 'audit_logs', '감사 로그 CSV 내보내기');

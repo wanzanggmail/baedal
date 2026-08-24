@@ -320,6 +320,19 @@ final class AuditLog
             $params[] = $prefix . '%';
         }
 
+        // 기간 — 종료일은 그날 **전체**를 포함해야 한다. `created_at <= '2026-08-25'` 로 비교하면
+        // 시각이 00:00:00 으로 해석돼 그날 데이터가 통째로 빠진다.
+        $from = trim((string) ($filters['from'] ?? ''));
+        if ($from !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+            $where[]  = 'al.created_at >= ?';
+            $params[] = $from . ' 00:00:00';
+        }
+        $to = trim((string) ($filters['to'] ?? ''));
+        if ($to !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            $where[]  = 'al.created_at <= ?';
+            $params[] = $to . ' 23:59:59';
+        }
+
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {
             $where[] = '(al.action LIKE ? OR al.target_table LIKE ? OR al.after_value LIKE ? OR a.login_id LIKE ? OR CAST(al.target_id AS CHAR) LIKE ?)';

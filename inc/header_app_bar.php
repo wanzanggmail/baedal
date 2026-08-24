@@ -61,7 +61,7 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 									</div>
 									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">
 										<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
-											<span class="menu-title">선공제(대행)</span>
+											<span class="menu-title">대행수수료</span>
 										</a>
 									</div>
 									<div data-kt-menu-trigger="{default: 'click', lg: 'hover'}" data-kt-menu-placement="bottom-start" class="menu-item menu-lg-down-accordion me-lg-1">

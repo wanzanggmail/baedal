@@ -30,7 +30,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
 	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
-			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">선공제(대행 수수료) 설정</h1>
+			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">대행수수료 설정</h1>
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted">
 					<a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a>
@@ -38,7 +38,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-muted">차감·수수료</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-gray-900">선공제(대행)</li>
+				<li class="breadcrumb-item text-gray-900">대행수수료</li>
 			</ul>
 		</div>
 		<div class="d-flex gap-2">

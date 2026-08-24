@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * 선공제(대행 수수료) 설정 API
+ * 대행수수료 설정 API
  * GET  — 현재 설정 + 본사가 정한 최저금액
  * POST { "action": "save", fee_day_threshold, fee_per_tx_short, fee_per_tx_long }
  *      { "action": "save_min", min_fee_per_tx_short, min_fee_per_tx_long }  — **본사 전용**

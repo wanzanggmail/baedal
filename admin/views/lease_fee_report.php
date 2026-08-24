@@ -64,7 +64,7 @@ $currentUrl = admin_url('deduction/lease-fees');
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= $esc(admin_url('dashboard')) ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-muted">선공제(대행)</li>
+				<li class="breadcrumb-item text-muted">대행수수료</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">리스 수수료 배분</li>
 			</ul>

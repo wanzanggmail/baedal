@@ -12,7 +12,7 @@ final class RolePermission
     public const AREAS = [
         'dashboard'  => '대시보드',
         'settlement' => '정산 업로드',
-        'deduction'  => '차감·수수료(선공제/미수금)',
+        'deduction'  => '차감·수수료(대행수수료/미수금)',
         'promotion'  => '프로모션',
         'withdrawal' => '출금',
         'content'    => '콘텐츠',

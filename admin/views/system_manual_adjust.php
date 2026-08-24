@@ -8,6 +8,57 @@ $needsMigrate = !db_table_exists('agency_wallets') || !db_table_exists('rider_wa
 $agencies = $needsMigrate ? [] : db_rows(
     "SELECT id, name, code FROM organizations WHERE level = 'agency' AND is_active = 1 ORDER BY name ASC"
 );
+
+// 조정 이력 — ManualAdjust::audit() 가 audit_logs 에 MANUAL_ADJUST 로 남기는 게 유일한 기록처다.
+// before/after 는 JSON 이라 화면에서 풀어 보여준다(대상·이름·금액·사유).
+$adjLogs = [];
+if (db_table_exists('audit_logs')) {
+    $targetLabel = [
+        'agency_balance' => '대리점 잔액',
+        'agency_reserve' => '대리점 예수금',
+        'rider_wallet'   => '라이더 지갑',
+    ];
+    foreach (db_rows(
+        "SELECT al.id, al.target_table, al.target_id, al.before_value, al.after_value, al.created_at,
+                a.login_id AS admin_login_id
+           FROM audit_logs al
+           LEFT JOIN admins a ON al.actor_type = 'admin' AND a.id = al.actor_id
+          WHERE al.action = 'MANUAL_ADJUST'
+          ORDER BY al.id DESC
+          LIMIT 500"
+    ) as $r) {
+        $before = json_decode((string) $r['before_value'], true);
+        $after  = json_decode((string) $r['after_value'], true);
+        $before = is_array($before) ? $before : [];
+        $after  = is_array($after) ? $after : [];
+
+        $target = (string) ($before['target'] ?? '');
+        // 금액 키가 대상마다 다르다(balance / reserve). 있는 쪽을 집는다.
+        $pick = static function (array $a): ?int {
+            foreach (['balance', 'reserve'] as $k) {
+                if (array_key_exists($k, $a)) {
+                    return (int) $a[$k];
+                }
+            }
+
+            return null;
+        };
+        $bAmt = $pick($before);
+        $aAmt = $pick($after);
+
+        $adjLogs[] = [
+            'id'      => (int) $r['id'],
+            'at'      => (string) $r['created_at'],
+            'admin'   => (string) ($r['admin_login_id'] ?? '—'),
+            'target'  => $targetLabel[$target] ?? ($target !== '' ? $target : (string) $r['target_table']),
+            'name'    => (string) ($before['agency'] ?? $before['rider'] ?? $before['name'] ?? ('#' . (string) $r['target_id'])),
+            'before'  => $bAmt,
+            'after'   => $aAmt,
+            'diff'    => ($bAmt !== null && $aAmt !== null) ? $aAmt - $bAmt : null,
+            'reason'  => (string) ($after['reason'] ?? ''),
+        ];
+    }
+}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -265,4 +316,62 @@ $agencies = $needsMigrate ? [] : db_rows(
 	</script>
 	<?php endif; ?>
 
+<!--begin::조정 이력-->
+<div class="card card-flush mt-8">
+	<div class="card-header pt-5">
+		<div class="card-title">
+			<h3 class="fw-bold m-0">조정 이력</h3>
+			<span class="text-gray-500 fs-8 fw-semibold d-block mt-1">
+				최근 500건 · 감사 로그(<code>MANUAL_ADJUST</code>)에서 가져옵니다. 조정은 되돌릴 수 없으므로 기록만 남습니다.
+			</span>
+		</div>
+		<div class="card-toolbar">
+			<a href="<?= htmlspecialchars(admin_url('system/audit') . (str_contains(admin_url('system/audit'), '?') ? '&' : '?') . 'q=MANUAL_ADJUST', ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light">감사 로그에서 보기</a>
+		</div>
+	</div>
+	<div class="card-body pt-0">
+		<?php if ($adjLogs === []) : ?>
+		<div class="text-center text-gray-500 py-10">아직 수동 조정 이력이 없습니다.</div>
+		<?php else : ?>
+		<div class="table-responsive">
+			<table class="table table-row-bordered align-middle fs-8 gy-3" id="adjLogTable">
+				<thead>
+					<tr class="fw-bold text-muted">
+						<th class="min-w-130px">일시</th>
+						<th class="min-w-100px">대상</th>
+						<th class="min-w-140px">이름</th>
+						<th class="min-w-100px text-end">변경 전</th>
+						<th class="min-w-100px text-end">변경 후</th>
+						<th class="min-w-100px text-end">증감</th>
+						<th class="min-w-90px">수행자</th>
+						<th class="min-w-220px">사유</th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ($adjLogs as $l) : ?>
+					<tr>
+						<td class="text-muted text-nowrap"><?= htmlspecialchars($l['at'], ENT_QUOTES, 'UTF-8') ?></td>
+						<td><span class="badge badge-light-primary"><?= htmlspecialchars($l['target'], ENT_QUOTES, 'UTF-8') ?></span></td>
+						<td class="fw-semibold text-gray-800"><?= htmlspecialchars($l['name'], ENT_QUOTES, 'UTF-8') ?></td>
+						<td class="text-end text-gray-700"><?= $l['before'] !== null ? number_format($l['before']) . '원' : '—' ?></td>
+						<td class="text-end fw-bold text-gray-900"><?= $l['after'] !== null ? number_format($l['after']) . '원' : '—' ?></td>
+						<td class="text-end fw-semibold <?= ($l['diff'] ?? 0) < 0 ? 'text-danger' : 'text-success' ?>">
+							<?= $l['diff'] !== null ? (($l['diff'] > 0 ? '+' : '') . number_format($l['diff']) . '원') : '—' ?>
+						</td>
+						<td class="font-monospace text-gray-700"><?= htmlspecialchars($l['admin'], ENT_QUOTES, 'UTF-8') ?></td>
+						<td class="text-gray-700"><?= htmlspecialchars($l['reason'] !== '' ? $l['reason'] : '—', ENT_QUOTES, 'UTF-8') ?></td>
+					</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		</div>
+		<script src="<?= htmlspecialchars(web_asset('js/table-paginate.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script>
+			var adjLogTable = document.getElementById('adjLogTable');
+			if (adjLogTable) { initTablePaginate(adjLogTable, { pageSize: 20, unit: '건' }); }
+		</script>
+		<?php endif; ?>
+	</div>
+</div>
+<!--end::조정 이력-->
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

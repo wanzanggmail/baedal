@@ -99,7 +99,7 @@ try {
 		</div>
 		<div class="card-body pt-0">
 			<div class="table-responsive">
-				<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-4">
+				<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-4" id="adminListTable">
 					<thead>
 						<tr class="fw-bold text-muted">
 							<th class="min-w-140px">로그인 ID</th>
@@ -116,7 +116,7 @@ try {
 					</thead>
 					<tbody id="admin_tbody">
 						<?php if ($listError === null && $admins === []) : ?>
-						<tr><td colspan="<?= $canManage ? 8 : 7 ?>" class="text-center text-muted py-10">등록된 관리자가 없습니다.</td></tr>
+						<tr data-tp-skip><td colspan="<?= $canManage ? 8 : 7 ?>" class="text-center text-muted py-10">등록된 관리자가 없습니다.</td></tr>
 						<?php endif; ?>
 						<?php foreach ($admins as $row) :
 						    $role = (string) $row['role'];
@@ -311,4 +311,11 @@ try {
 	</script>
 	<?php endif; ?>
 
+<script src="<?= htmlspecialchars(web_asset('js/table-paginate.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script>
+	// 목록이 길어지면 스크롤만 길어져 찾기 어렵다. 서버가 내려준 결과를 그대로 두고
+	// 화면에서만 페이지로 나눈다(DataTables 없이 같은 UX — assets/js/table-paginate.js).
+	var tp_adminListTable = document.getElementById('adminListTable');
+	if (tp_adminListTable) { initTablePaginate(tp_adminListTable, { pageSize: 20, unit: '명' }); }
+</script>
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
