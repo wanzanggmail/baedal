@@ -177,7 +177,12 @@ $currentUrl = admin_url('system/pg-integration');
 					</div>
 				</div>
 
-				<button type="button" class="btn btn-primary" id="pg_save">설정 저장</button>
+				<div class="d-flex gap-2 flex-wrap">
+					<button type="button" class="btn btn-primary" id="pg_save">설정 저장</button>
+					<button type="button" class="btn btn-light-primary" id="pg_selftest"
+						title="돈이 움직이지 않는 호출만 써서 인증·가맹점 조회·요청 규격을 확인합니다.">연결 테스트</button>
+				</div>
+				<div id="pg_test_result" class="mt-4 d-none"></div>
 			</div>
 		</div>
 	</div>
@@ -283,6 +288,8 @@ $currentUrl = admin_url('system/pg-integration');
 	// ⚠️ admin_url() 은 index.php?route=... 라우터 URL 이라 API 파일에 닿지 않는다(404 HTML 이 돌아온다).
 	//    다른 화면과 동일하게 ADMIN_BASE 로 실제 파일 경로를 만든다.
 	var PG_CONFIG_API = <?= json_encode(ADMIN_BASE . '/api/pg_config.php', JSON_UNESCAPED_UNICODE) ?>;
+	var PG_SELFTEST_API = <?= json_encode(ADMIN_BASE . '/api/pg_selftest.php', JSON_UNESCAPED_UNICODE) ?>;
+	function esc(v) { var d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; }
 	var toast = document.getElementById('pg_toast');
 	var toastMsg = document.getElementById('pg_toast_msg');
 	function showToast(m, ok) {
@@ -304,6 +311,39 @@ $currentUrl = admin_url('system/pg-integration');
 		} catch (e) {
 			showToast('복사에 실패했습니다. 직접 선택해 복사하세요.', false);
 		}
+	});
+
+	document.getElementById('pg_selftest').addEventListener('click', function () {
+		var btn = this;
+		var box = document.getElementById('pg_test_result');
+		btn.disabled = true;
+		btn.textContent = '테스트 중…';
+		box.classList.remove('d-none');
+		box.innerHTML = '<div class="text-muted fs-8">실 API 를 호출하고 있습니다…</div>';
+
+		fetch(PG_SELFTEST_API, { method: 'POST', credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (j) {
+				if (!j.ok) { throw new Error(j.message || '실행 실패'); }
+				var h = '<div class="fw-bold mb-2">진단 결과 ' + j.passed + '/' + j.total
+				+ ' <span class="text-muted fw-normal fs-8">MID ' + esc(j.mid) + '</span></div>';
+				j.tests.forEach(function (t) {
+				h += '<div class="border border-gray-300 rounded p-3 mb-2">'
+					+ '<div><span class="badge badge-light-' + (t.pass ? 'success">정상' : 'danger">확인 필요') + '</span>'
+					+ ' <span class="fw-semibold ms-2">' + esc(t.name) + '</span></div>'
+					+ '<div class="text-gray-700 fs-8 mt-1">' + esc(t.detail) + '</div>'
+					+ '<div class="text-muted fs-9 mt-1">' + esc(t.expect) + '</div>'
+					+ '</div>';
+				});
+				box.innerHTML = h;
+			})
+			.catch(function (e) {
+				box.innerHTML = '<div class="alert alert-danger fs-8 mb-0">' + esc(e.message || String(e)) + '</div>';
+			})
+			.finally(function () {
+				btn.disabled = false;
+				btn.textContent = '연결 테스트';
+			});
 	});
 
 	document.getElementById('pg_save').addEventListener('click', function () {

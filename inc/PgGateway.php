@@ -220,26 +220,32 @@ final class MockPgGateway implements PgGateway
 /**
  * 게이트웨이 팩토리 — `pg_config.driver` 기준으로 분기한다.
  *
- * ⚠️ 실 드라이버(`RealPgGateway`)는 아직 없다. PG사 확인 4건(sign_key 발급처·Noti URL 등록·
- *    auth_num 기준·테스트 환경)이 남아 있어 구현을 미뤄둔 상태다 — REF_PG_WEROUTE.md §9.
- *    설정에서 weroute 를 골라도 드라이버가 없으면 Mock으로 폴백하고 그 사실을 알 수 있게 한다.
+ * 실 드라이버(`RealPgGateway`)는 2026-08-23 구현했다. 다만 **설정이 갖춰졌을 때만** 탄다 —
+ * driver=weroute 이고 mid·pay_key 가 있어야 한다. 하나라도 비면 Mock 으로 폴백해서,
+ * 설정을 덜 넣은 채 실 결제가 나가는 일이 없게 한다.
  */
 final class PgGatewayFactory
 {
     public static function make(): PgGateway
     {
         if (self::realAvailable()) {
-            // return new RealPgGateway(PgConfig::get());  // TODO: PG사 확인 4건 해소 후
-            return new MockPgGateway();
+            require_once __DIR__ . '/RealPgGateway.php';
+
+            return new RealPgGateway(PgConfig::get());
         }
 
         return new MockPgGateway();
     }
 
-    /** 실 드라이버가 준비됐고 설정도 갖춰졌는지 */
+    /** 실 드라이버로 나갈 조건 — driver 선택 + 최소 자격증명 */
     public static function realAvailable(): bool
     {
-        return class_exists('RealPgGateway') && PgConfig::isReady();
+        $cfg = PgConfig::get();
+        if ((string) $cfg['driver'] !== PgConfig::DRIVER_WEROUTE) {
+            return false;
+        }
+
+        return trim((string) $cfg['mid']) !== '' && trim((string) $cfg['pay_key']) !== '';
     }
 
     /** 화면에 "모의 모드" 배지를 띄울지 판단 */
