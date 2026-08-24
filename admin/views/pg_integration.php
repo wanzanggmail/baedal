@@ -280,6 +280,9 @@ $currentUrl = admin_url('system/pg-integration');
 <script>
 (function () {
 	'use strict';
+	// ⚠️ admin_url() 은 index.php?route=... 라우터 URL 이라 API 파일에 닿지 않는다(404 HTML 이 돌아온다).
+	//    다른 화면과 동일하게 ADMIN_BASE 로 실제 파일 경로를 만든다.
+	var PG_CONFIG_API = <?= json_encode(ADMIN_BASE . '/api/pg_config.php', JSON_UNESCAPED_UNICODE) ?>;
 	var toast = document.getElementById('pg_toast');
 	var toastMsg = document.getElementById('pg_toast_msg');
 	function showToast(m, ok) {
@@ -322,7 +325,7 @@ $currentUrl = admin_url('system/pg-integration');
 				if (v !== '') { payload[pair[1]] = v; }
 			});
 
-		fetch('<?= $esc(admin_url('api/pg_config')) ?>', {
+		fetch(PG_CONFIG_API, {
 			method: 'POST',
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
