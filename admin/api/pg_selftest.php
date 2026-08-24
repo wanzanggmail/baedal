@@ -70,7 +70,9 @@ $tests[] = [
 ];
 
 // ③ 빌키 발급 — 가맹점 조회 여부. 카드번호는 형식만 맞는 더미라 승인이 날 수 없고,
-//    "가맹점을 찾을 수 없습니다" 가 나오면 **PG 쪽 가맹점 설정 문제**다.
+//    "가맹점을 찾을 수 없습니다"(RV406) 가 나오면 **PG 쪽 가맹점 설정 문제**다.
+//    2026-08-23 실제로 이 상태였다 — 계약은 「빌키결제」로 돼 있는데 계약 시작일·종료일이
+//    비어 있었다. 가맹점 조회가 계약기간으로 거르는 것으로 보인다.
 $b = $gw->issueBillingKey(new PgBillingKeyRequest(
     cardNumber: '4000000000000000',
     expiry: '3012',
@@ -83,12 +85,12 @@ $b = $gw->issueBillingKey(new PgBillingKeyRequest(
 $merchantMissing = str_contains($b->failReason, '가맹점');
 $tests[] = [
     'name'   => '빌키 발급 (가맹점 조회)',
-    'expect' => '가맹점이 조회되면 카드 오류가 나옵니다. "가맹점을 찾을 수 없습니다" 면 PG 설정 문제입니다',
+    'expect' => '가맹점이 조회되면 카드 오류가 나옵니다. "가맹점을 찾을 수 없습니다" 면 계약기간·결제한도 등 PG 가맹점 설정 문제입니다',
     'pass'   => !$merchantMissing,
     'detail' => $b->success
         ? '⚠️ 더미 카드로 발급됨 — 확인 필요'
         : ($merchantMissing
-            ? 'MID ' . (string) $cfg['mid'] . ' 로 가맹점이 조회되지 않습니다 — PG사에 빌링(정기결제) 활성화를 문의하세요. (' . $b->failReason . ')'
+            ? 'MID ' . (string) $cfg['mid'] . ' 로 가맹점이 조회되지 않습니다. 가맹점 관리자에서 **계약 시작일·종료일**이 비어 있지 않은지, **결제한도**가 0으로 막혀 있지 않은지 확인하세요. (' . $b->failReason . ')'
             : $b->failReason),
 ];
 
