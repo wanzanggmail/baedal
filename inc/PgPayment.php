@@ -93,7 +93,16 @@ final class PgPayment
                 return self::result(true, $pgId, $netAmount, $fee, $total, $res->tid, '', $attempts, $cardId);
             }
             $lastFail = $res->failReason;
-            // 재시도 불가(비한도성) 실패면 다음 카드로 넘어가되 사유 기록 유지
+
+            // ⚠️ 예전엔 **어떤 실패든 무조건** 다음 카드로 넘어갔다(isRetriable()은 정의만 되고
+            //    아무도 안 썼다). 실 게이트웨이에선 두 가지가 위험하다.
+            //      · TIMEOUT — 망상취소를 보냈어도 승인 여부가 불확실한데 다음 카드까지 긁으면
+            //        이중 조달이 된다.
+            //      · 가맹점 오류 — 카드를 바꿔도 같은 결과라 등록 카드 수만큼 PG만 두드린다.
+            //    그래서 이런 실패는 폴백하지 않고 즉시 멈춘다.
+            if ($res->isFatal()) {
+                break;
+            }
         }
 
         // 전 카드 실패

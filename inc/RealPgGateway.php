@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/PgGateway.php';
 require_once __DIR__ . '/PgConfig.php';
+require_once __DIR__ . '/PgApiLog.php';
 
 /**
  * 위루트 실 연동 드라이버 — REF_PG_WEROUTE.md §1·§2·§4.
@@ -263,6 +264,7 @@ final class RealPgGateway implements PgGateway
                 'Content-Type: application/json',
             ],
         ]);
+        $startedAt = microtime(true);
         $raw     = curl_exec($ch);
         $errNo   = curl_errno($ch);
         $errMsg  = curl_error($ch);
@@ -277,7 +279,7 @@ final class RealPgGateway implements PgGateway
             }
         }
 
-        return [
+        $out = [
             'ok'      => $errNo === 0 && $http >= 200 && $http < 300,
             'http'    => $http,
             'code'    => (string) ($data['result_cd'] ?? ''),
@@ -286,5 +288,22 @@ final class RealPgGateway implements PgGateway
             'timeout' => $timeout,
             'err'     => $errNo !== 0 && !$timeout ? $errMsg : '',
         ];
+
+        // 이력 — 카드정보·키는 PgApiLog 가 지우고 넣는다. 헤더는 아예 넘기지 않는다
+        // (Authorization 에 pay_key 원문이 들어 있다).
+        PgApiLog::record(
+            endpoint: $path,
+            method: $method,
+            request: $body,
+            response: $data !== [] ? $data : ['_raw' => mb_substr((string) $raw, 0, 500)],
+            httpCode: $http,
+            resultCd: $out['code'],
+            resultMsg: $timeout ? '응답 시간 초과' : ($out['err'] !== '' ? $out['err'] : $out['msg']),
+            durationMs: (int) round((microtime(true) - $startedAt) * 1000),
+            ok: $out['ok'],
+            ordNum: (string) ($body['ord_num'] ?? '')
+        );
+
+        return $out;
     }
 }

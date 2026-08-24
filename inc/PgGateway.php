@@ -113,6 +113,19 @@ final class PgChargeResult
     {
         return in_array($this->failCode, ['LIMIT_EXCEEDED', 'CARD_DECLINED', 'INSUFFICIENT'], true);
     }
+
+    /**
+     * **다음 카드로 넘어가면 안 되는** 실패인지 — 카드를 바꿔도 소용없거나 위험한 경우.
+     *
+     * - `TIMEOUT` : 망상취소를 보냈지만 **승인 여부가 불확실**하다. 첫 카드가 실제로 승인됐는데
+     *   다음 카드까지 긁으면 **이중 조달**이 된다. 돈이 걸린 문제라 무조건 멈춘다.
+     * - 가맹점 오류 : 우리/PG 설정 문제다. 어떤 카드로 바꿔도 같은 결과이고, 카드 수만큼
+     *   PG를 두드리기만 한다(실제로 RV406 상황에서 등록 카드 전체를 헛되이 호출했다).
+     */
+    public function isFatal(): bool
+    {
+        return $this->failCode === 'TIMEOUT' || str_contains($this->failReason, '가맹점');
+    }
 }
 
 /** 빌키 발급 결과 */

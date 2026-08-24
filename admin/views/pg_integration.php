@@ -15,6 +15,7 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/PgConfig.php';
 require_once INC_PATH . '/PgWebhook.php';
+require_once INC_PATH . '/PgApiLog.php';
 
 $isSuper = admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN;
 if (!$isSuper) {
@@ -53,6 +54,10 @@ if (!$needsMigrate) {
         $params
     );
 }
+
+$apiOnly  = trim((string) ($_GET['api'] ?? ''));
+$apiLogs  = $needsMigrate ? [] : PgApiLog::recent(['only' => $apiOnly], 100);
+$apiStats = $needsMigrate ? ['total' => 0, 'fail' => 0, 'avg_ms' => 0] : PgApiLog::stats();
 
 $esc = static fn (?string $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 $stateBadge = [
@@ -281,6 +286,76 @@ $currentUrl = admin_url('system/pg-integration');
 	</div>
 </div>
 <!--end::수신 이력-->
+
+<!--begin::API 호출 이력-->
+<div class="card card-flush mt-8">
+	<div class="card-header pt-5">
+		<div class="card-title">
+			<h3 class="fw-bold m-0">PG 호출 이력</h3>
+			<span class="text-gray-500 fs-8 fw-semibold d-block mt-1">
+				누적 <?= number_format($apiStats['total']) ?>건 · 실패 <span class="text-danger fw-bold"><?= number_format($apiStats['fail']) ?></span>건 · 평균 <?= number_format($apiStats['avg_ms']) ?>ms
+				<span class="d-block">🔒 카드번호는 뒤 4자리만, 비밀번호·인증번호·키는 길이만 남기고 저장합니다.</span>
+			</span>
+		</div>
+		<div class="card-toolbar gap-2">
+			<?php foreach (['' => '전체', 'fail' => '실패만', 'ok' => '성공만'] as $k => $label) : ?>
+			<a href="<?= $esc($currentUrl . (str_contains($currentUrl, '?') ? '&' : '?') . 'api=' . $k) ?>"
+				class="btn btn-sm <?= $apiOnly === $k ? 'btn-primary' : 'btn-light' ?>"><?= $esc($label) ?></a>
+			<?php endforeach; ?>
+		</div>
+	</div>
+	<div class="card-body pt-0">
+		<?php if ($apiLogs === []) : ?>
+		<div class="text-center text-gray-500 py-10">
+			아직 PG 호출 이력이 없습니다.
+			<span class="d-block fs-8 mt-2">「연결 테스트」를 누르거나 카드 등록·결제가 일어나면 여기에 쌓입니다.</span>
+		</div>
+		<?php else : ?>
+		<div class="table-responsive">
+			<table class="table table-row-bordered align-middle fs-8 gy-3">
+				<thead>
+					<tr class="fw-bold text-muted">
+						<th class="min-w-130px">일시</th>
+						<th class="min-w-70px">결과</th>
+						<th class="min-w-160px">엔드포인트</th>
+						<th class="min-w-130px">주문번호</th>
+						<th class="min-w-60px text-end">소요</th>
+						<th class="min-w-220px">응답</th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ($apiLogs as $l) : ?>
+					<tr>
+						<td class="text-muted text-nowrap"><?= $esc((string) $l['created_at']) ?></td>
+						<td>
+							<?php if ((int) $l['ok'] === 1) : ?>
+							<span class="badge badge-light-success">성공</span>
+							<?php else : ?>
+							<span class="badge badge-light-danger"><?= (int) $l['http_code'] ?: '오류' ?></span>
+							<?php endif; ?>
+						</td>
+						<td class="font-monospace text-gray-800"><?= $esc((string) $l['method']) ?> <?= $esc((string) $l['endpoint']) ?></td>
+						<td class="font-monospace text-gray-700"><?= $esc((string) ($l['ord_num'] ?: '—')) ?></td>
+						<td class="text-end text-muted"><?= number_format((int) $l['duration_ms']) ?>ms</td>
+						<td class="text-gray-700">
+							<?php if ((string) $l['result_cd'] !== '') : ?><span class="badge badge-light-secondary me-1"><?= $esc((string) $l['result_cd']) ?></span><?php endif; ?>
+							<?= $esc((string) $l['result_msg']) ?>
+							<details class="mt-1">
+								<summary class="text-muted fs-9" style="cursor:pointer">요청/응답 원문</summary>
+								<div class="bg-light rounded p-2 mt-1 font-monospace text-break" style="white-space:pre-wrap">요청 <?= $esc((string) $l['request_body']) ?>
+
+응답 <?= $esc((string) $l['response_body']) ?></div>
+							</details>
+						</td>
+					</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		</div>
+		<?php endif; ?>
+	</div>
+</div>
+<!--end::API 호출 이력-->
 
 <script>
 (function () {

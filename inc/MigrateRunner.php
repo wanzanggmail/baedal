@@ -60,6 +60,7 @@ final class MigrateRunner
         self::migrateWithdrawalFeeShare();
         self::migrateAutoTransferOnRequest();
         self::migratePgWebhook();
+        self::migratePgApiLogs();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1428,6 +1429,47 @@ final class MigrateRunner
               COMMENT='PG 결제통지 수신 기록 — 대사용, 지갑을 움직이지 않는다'"
         );
         echo "OK    pg_webhook_events 생성\n";
+    }
+
+    /**
+     * PG API 호출 이력 — 요청/응답을 남겨 결제 문제를 사후에 추적한다.
+     *
+     * pg_payments 는 결과만 남긴다. 승인이 안 되거나 금액이 어긋났을 때 "우리가 뭘 보냈고
+     * PG가 뭘 돌려줬나"가 없으면 원인을 못 찾아서 따로 둔다.
+     * 🔒 카드번호·비밀번호·키는 PgApiLog::mask() 가 지우고 넣는다.
+     */
+    private static function migratePgApiLogs(): void
+    {
+        echo "== PG API 호출 이력 ==\n";
+
+        if (db_table_exists('pg_api_logs')) {
+            echo "SKIP  pg_api_logs (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "CREATE TABLE `pg_api_logs` (
+                `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `endpoint`      VARCHAR(120) NOT NULL DEFAULT '',
+                `method`        VARCHAR(10)  NOT NULL DEFAULT 'POST',
+                `ord_num`       VARCHAR(60)  NOT NULL DEFAULT '' COMMENT '우리 주문번호 — 결제 건과 연결',
+                `http_code`     SMALLINT     NOT NULL DEFAULT 0,
+                `result_cd`     VARCHAR(20)  NOT NULL DEFAULT '' COMMENT '위루트 result_cd',
+                `result_msg`    VARCHAR(300) NOT NULL DEFAULT '',
+                `ok`            TINYINT(1)   NOT NULL DEFAULT 0,
+                `duration_ms`   INT          NOT NULL DEFAULT 0,
+                `request_body`  TEXT         NULL COMMENT '민감값 마스킹 후 저장',
+                `response_body` TEXT         NULL,
+                `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_ord` (`ord_num`),
+                KEY `idx_created` (`created_at`),
+                KEY `idx_ok` (`ok`, `created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='PG API 호출 이력 — 카드정보는 저장하지 않는다'"
+        );
+        echo "OK    pg_api_logs 생성\n";
     }
 
     /**
