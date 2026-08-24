@@ -239,30 +239,32 @@ $platformLabels = [
 						<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-3">
 							<thead>
 								<tr class="fw-bold text-muted">
-									<th>귀속일</th>
-									<th>팀·지역</th>
+									<?php // 파일명만 늘어나게 두고 나머지는 고정 폭 + 줄바꿈 금지 — 한 줄씩 차지하면 표가 세로로 늘어난다. ?>
+									<th class="text-nowrap w-100px">귀속일</th>
+									<th class="w-125px">팀·지역</th>
 									<th>파일명</th>
-									<th>건수</th>
-									<th>상태</th>
-									<th>업로드자</th>
-									<th>일시</th>
+									<th class="text-nowrap w-100px">건수</th>
+									<th class="text-nowrap w-125px">상태</th>
+									<th class="text-nowrap w-100px">업로드자</th>
+									<th class="text-nowrap w-125px">일시</th>
 									<th class="min-w-70px"></th>
 								</tr>
 							</thead>
 							<tbody>
 							<?php foreach ($rows as $r) : $up = $r['up']; $st = $r['st']; ?>
 								<tr>
-									<td class="fw-bold"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
-									<td><?= htmlspecialchars($r['team'] !== '' ? $r['team'] : '-', ENT_QUOTES, 'UTF-8') ?></td>
-									<td class="text-gray-600 fs-7"><?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?></td>
-									<td><?= number_format((int) $up['total_rows']) ?>명
-										<span class="text-muted fs-8">(매칭 <?= number_format((int) $up['ok_rows']) ?>)</span>
+									<td class="fw-bold text-nowrap"><?= htmlspecialchars((string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?></td>
+									<?php // 팀·지역은 파일명에서 뽑히다 보니 아주 길어지는 값이 섞인다 — 잘라 보여주고 전체는 툴팁으로. ?>
+									<td class="fs-8 text-gray-700" title="<?= htmlspecialchars($r['team'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($r['team'] !== '' ? mb_strimwidth($r['team'], 0, 22, '…') : '-', ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-gray-600 fs-8 text-break"><?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-nowrap"><?= number_format((int) $up['total_rows']) ?>명
+										<span class="text-muted fs-8">(<?= number_format((int) $up['ok_rows']) ?>)</span>
 									</td>
-									<td><span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
+									<td class="text-nowrap"><span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span>
 										<span class="text-muted fs-8 ms-1"><?= htmlspecialchars($r['plat'], ENT_QUOTES, 'UTF-8') ?></span>
 									</td>
-									<td><?= htmlspecialchars($up['uploaded_by_name'] ?? '-', ENT_QUOTES, 'UTF-8') ?></td>
-									<td class="text-gray-600 fs-7"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-nowrap"><?= htmlspecialchars($up['uploaded_by_name'] ?? '-', ENT_QUOTES, 'UTF-8') ?></td>
+									<td class="text-gray-600 fs-7 text-nowrap"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
 									<td>
 										<a href="<?= htmlspecialchars($r['detailUrl'], ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light-primary">상세</a>
 									</td>

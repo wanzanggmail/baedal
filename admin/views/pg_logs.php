@@ -96,18 +96,22 @@ $linkFor = static function (string $only) use ($apiOrd): string {
 				🔒 카드번호는 뒤 4자리만, 비밀번호·인증번호·키는 길이만 남기고 저장합니다.
 			</span>
 		</div>
-		<div class="card-toolbar gap-2 flex-wrap">
-			<form method="get" action="<?= $esc(admin_url('system/pg-logs')) ?>" class="d-flex gap-2">
+		<?php // 검색 폼과 상태 버튼을 한 줄로 묶는다. flex-nowrap 과 text-nowrap 이 없으면
+		     // 좁은 폭에서 버튼 글자가 접히며 줄이 두 줄로 갈라진다. ?>
+		<div class="card-toolbar gap-2 flex-nowrap align-items-center">
+			<form method="get" action="<?= $esc(admin_url('system/pg-logs')) ?>" class="d-flex gap-2 flex-nowrap">
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
 					<input type="hidden" name="route" value="system/pg-logs" />
 				<?php endif; ?>
 				<input type="hidden" name="api" value="<?= $esc($apiOnly) ?>" />
-				<input type="text" name="ord" value="<?= $esc($apiOrd) ?>" class="form-control form-control-sm form-control-solid w-180px" placeholder="주문번호 검색" />
-				<button type="submit" class="btn btn-sm btn-light-primary">검색</button>
+				<input type="search" name="ord" value="<?= $esc($apiOrd) ?>" class="form-control form-control-sm form-control-solid w-175px" placeholder="주문번호 검색" />
+				<button type="submit" class="btn btn-sm btn-light-primary text-nowrap px-4">검색</button>
 			</form>
-			<?php foreach (['' => '전체', 'fail' => '실패만', 'ok' => '성공만'] as $k => $label) : ?>
-			<a href="<?= $esc($linkFor($k)) ?>" class="btn btn-sm <?= $apiOnly === $k ? 'btn-primary' : 'btn-light' ?>"><?= $esc($label) ?></a>
-			<?php endforeach; ?>
+			<div class="d-flex gap-1 flex-nowrap">
+				<?php foreach (['' => '전체', 'fail' => '실패만', 'ok' => '성공만'] as $k => $label) : ?>
+				<a href="<?= $esc($linkFor($k)) ?>" class="btn btn-sm <?= $apiOnly === $k ? 'btn-primary' : 'btn-light' ?> text-nowrap px-3"><?= $esc($label) ?></a>
+				<?php endforeach; ?>
+			</div>
 		</div>
 	</div>
 	<div class="card-body pt-0">

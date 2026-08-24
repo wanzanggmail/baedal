@@ -213,13 +213,14 @@ $queryParams = array_filter([
 				<input type="hidden" name="route" value="settlement/history" />
 				<?php endif; ?>
 				<input type="hidden" name="kind" value="<?= htmlspecialchars($filterKind, ENT_QUOTES, 'UTF-8') ?>" />
-				<div class="col-md-2">
-					<label class="form-label fw-semibold">귀속일 from</label>
-					<input type="date" class="form-control form-control-solid" name="from" value="<?= htmlspecialchars($filterFrom, ENT_QUOTES, 'UTF-8') ?>" />
-				</div>
-				<div class="col-md-2">
-					<label class="form-label fw-semibold">to</label>
-					<input type="date" class="form-control form-control-solid" name="to" value="<?= htmlspecialchars($filterTo, ENT_QUOTES, 'UTF-8') ?>" />
+				<div class="col-md-4">
+					<label class="form-label fw-semibold">귀속일</label>
+					<?php // 공통 패턴 — inc/shell_close.php 의 admin-datepickers.js 가 초기화한다. ?>
+					<div data-kt-daterange="true">
+						<input type="text" class="form-control form-control-solid" data-kt-daterange-display readonly placeholder="전체 기간" />
+						<input type="hidden" name="from" data-kt-daterange-from value="<?= htmlspecialchars($filterFrom, ENT_QUOTES, 'UTF-8') ?>" />
+						<input type="hidden" name="to" data-kt-daterange-to value="<?= htmlspecialchars($filterTo, ENT_QUOTES, 'UTF-8') ?>" />
+					</div>
 				</div>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">플랫폼</label>

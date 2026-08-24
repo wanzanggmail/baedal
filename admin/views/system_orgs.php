@@ -133,16 +133,16 @@ foreach ($agencyByParent as $orphans) {
 	<?php if ($listError === null) : ?>
 	<div class="card card-flush">
 		<div class="card-header align-items-center py-5 gap-3 flex-wrap">
-			<div class="card-title flex-grow-1">
+			<div class="card-title flex-grow-1 flex-shrink-1 min-w-0">
 				<div class="d-flex align-items-center position-relative w-100 mw-300px">
 					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
 					<input type="text" id="org_search" class="form-control form-control-solid ps-12" placeholder="이름·코드·대표계정 검색" />
 				</div>
 			</div>
-			<div class="card-toolbar gap-2">
+			<div class="card-toolbar gap-2 flex-nowrap">
 				<?php // 총판을 고르면 그 총판과 **하위 대리점이 함께** 보인다. 조직이 늘면 트리를 한눈에
 				     // 못 보므로 소속 단위로 좁혀 보는 게 실제로 자주 하는 일이다. ?>
-				<select id="org_filter_dist" class="form-select form-select-sm form-select-solid w-160px">
+				<select id="org_filter_dist" class="form-select form-select-sm form-select-solid w-175px">
 					<option value="">총판 전체</option>
 					<?php foreach ($distributors as $d) : ?>
 					<option value="<?= (int) $d['id'] ?>"><?= htmlspecialchars((string) $d['name'], ENT_QUOTES, 'UTF-8') ?></option>
@@ -156,7 +156,7 @@ foreach ($agencyByParent as $orphans) {
 					<option value="distributor">총판</option>
 					<option value="agency">대리점</option>
 				</select>
-				<select id="org_filter_status" class="form-select form-select-sm form-select-solid w-110px">
+				<select id="org_filter_status" class="form-select form-select-sm form-select-solid w-100px">
 					<option value="">상태 전체</option>
 					<option value="active">활성</option>
 					<option value="inactive">중지</option>

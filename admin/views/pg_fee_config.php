@@ -63,8 +63,14 @@ $settingsUrl = admin_url('withdrawal/settings');
 	<?php else : ?>
 
 	<div class="card card-flush">
-		<div class="card-header pt-5">
-			<h3 class="card-title fw-bold">대리점별 수수료 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($rows)) ?>곳</span></h3>
+		<div class="card-header pt-5 align-items-center gap-3 flex-wrap">
+			<h3 class="card-title fw-bold m-0">대리점별 수수료 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($rows)) ?>곳</span></h3>
+			<div class="card-toolbar">
+				<div class="d-flex align-items-center position-relative">
+					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
+					<input type="search" id="pgfee_search" class="form-control form-control-solid ps-12 w-250px" placeholder="대리점·코드·총판 검색" />
+				</div>
+			</div>
 		</div>
 		<div class="card-body pt-2">
 			<div class="table-responsive">
@@ -117,6 +123,6 @@ $settingsUrl = admin_url('withdrawal/settings');
 	// 목록이 길어지면 스크롤만 길어져 찾기 어렵다. 서버가 내려준 결과를 그대로 두고
 	// 화면에서만 페이지로 나눈다(DataTables 없이 같은 UX — assets/js/table-paginate.js).
 	var tp_pgFeeTable = document.getElementById('pgFeeTable');
-	if (tp_pgFeeTable) { initTablePaginate(tp_pgFeeTable, { pageSize: 20, unit: '곳' }); }
+	if (tp_pgFeeTable) { initTablePaginate(tp_pgFeeTable, { pageSize: 20, unit: '곳', searchInput: '#pgfee_search' }); }
 </script>
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

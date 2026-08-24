@@ -26,9 +26,11 @@ final class AdminAccount
     public static function listAll(): array
     {
         $rows = db_rows(
-            'SELECT id, login_id, name, email, role, is_active, last_login_at, created_at
-             FROM admins
-             ORDER BY id ASC'
+            'SELECT a.id, a.login_id, a.name, a.email, a.role, a.is_active, a.last_login_at, a.created_at,
+                    a.org_id, o.name AS org_name, o.level AS org_level, o.code AS org_code
+               FROM admins a
+               LEFT JOIN organizations o ON o.id = a.org_id
+              ORDER BY a.id ASC'
         );
 
         return array_map([self::class, 'mapRow'], $rows);
@@ -38,8 +40,11 @@ final class AdminAccount
     public static function find(int $id): ?array
     {
         $row = db_row(
-            'SELECT id, login_id, name, email, role, is_active, last_login_at, created_at
-             FROM admins WHERE id = ? LIMIT 1',
+            'SELECT a.id, a.login_id, a.name, a.email, a.role, a.is_active, a.last_login_at, a.created_at,
+                    a.org_id, o.name AS org_name, o.level AS org_level, o.code AS org_code
+               FROM admins a
+               LEFT JOIN organizations o ON o.id = a.org_id
+              WHERE a.id = ? LIMIT 1',
             [$id]
         );
 
@@ -196,6 +201,11 @@ final class AdminAccount
             'active'        => (int) ($row['is_active'] ?? 0) === 1,
             'last_login_at' => $last ? date('Y-m-d H:i', strtotime((string) $last)) : '',
             'created_at'    => $created ? date('Y-m-d', strtotime((string) $created)) : '',
+            'org_id'        => (int) ($row['org_id'] ?? 0),
+            'org_name'      => (string) ($row['org_name'] ?? ''),
+            'org_code'      => (string) ($row['org_code'] ?? ''),
+            // 본사 계정은 org_level 이 admin 이라 굳이 조직명을 강조할 필요가 없다 — 화면에서 구분한다.
+            'org_level'     => (string) ($row['org_level'] ?? ''),
         ];
     }
 

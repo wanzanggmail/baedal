@@ -178,12 +178,12 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 				<input type="hidden" name="route" value="settlement/order-details" />
 				<?php endif; ?>
 				<div class="col-auto">
-					<label class="form-label fs-8 mb-1">정산일 시작</label>
-					<input type="date" name="from" class="form-control form-control-sm" value="<?= $esc($filterFrom) ?>" />
-				</div>
-				<div class="col-auto">
-					<label class="form-label fs-8 mb-1">종료</label>
-					<input type="date" name="to" class="form-control form-control-sm" value="<?= $esc($filterTo) ?>" />
+					<label class="form-label fs-8 mb-1">정산일</label>
+					<div data-kt-daterange="true" class="w-225px">
+						<input type="text" class="form-control form-control-sm" data-kt-daterange-display readonly placeholder="전체 기간" />
+						<input type="hidden" name="from" data-kt-daterange-from value="<?= $esc($filterFrom) ?>" />
+						<input type="hidden" name="to" data-kt-daterange-to value="<?= $esc($filterTo) ?>" />
+					</div>
 				</div>
 				<?php if (!$isAgencyLevel) : ?>
 				<div class="col-auto">

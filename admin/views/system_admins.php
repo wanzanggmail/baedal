@@ -91,10 +91,16 @@ try {
 	</div>
 
 	<div class="card card-flush">
-		<div class="card-header align-items-center py-5">
+		<div class="card-header align-items-center py-5 gap-3 flex-wrap">
 			<div class="card-title">
 				<h3 class="fw-bold m-0">관리자 목록</h3>
-				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">로그인 ID · 역할 · 마지막 접속</span>
+				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">로그인 ID · 소속 · 역할 · 마지막 접속</span>
+			</div>
+			<div class="card-toolbar">
+				<div class="d-flex align-items-center position-relative">
+					<i class="ki-duotone ki-magnifier fs-3 position-absolute ms-4"><span class="path1"></span><span class="path2"></span></i>
+					<input type="search" id="admin_search" class="form-control form-control-solid ps-12 w-250px" placeholder="로그인ID·이름·소속 검색" />
+				</div>
 			</div>
 		</div>
 		<div class="card-body pt-0">
@@ -104,6 +110,7 @@ try {
 						<tr class="fw-bold text-muted">
 							<th class="min-w-140px">로그인 ID</th>
 							<th class="min-w-100px">이름</th>
+							<th class="min-w-140px">소속</th>
 							<th class="min-w-180px">이메일</th>
 							<th class="min-w-110px">역할</th>
 							<th class="min-w-80px">상태</th>
@@ -116,7 +123,7 @@ try {
 					</thead>
 					<tbody id="admin_tbody">
 						<?php if ($listError === null && $admins === []) : ?>
-						<tr data-tp-skip><td colspan="<?= $canManage ? 8 : 7 ?>" class="text-center text-muted py-10">등록된 관리자가 없습니다.</td></tr>
+						<tr data-tp-skip><td colspan="<?= $canManage ? 9 : 8 ?>" class="text-center text-muted py-10">등록된 관리자가 없습니다.</td></tr>
 						<?php endif; ?>
 						<?php foreach ($admins as $row) :
 						    $role = (string) $row['role'];
@@ -132,6 +139,18 @@ try {
 						<tr class="<?= !($row['active'] ?? false) ? 'opacity-75' : '' ?>" data-id="<?= (int) $row['id'] ?>">
 							<td class="font-monospace fw-bold"><?= htmlspecialchars((string) $row['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td><?= htmlspecialchars((string) $row['name'], ENT_QUOTES, 'UTF-8') ?><?= $isSelf ? ' <span class="badge badge-light-info fs-8">나</span>' : '' ?></td>
+							<td class="fs-7">
+								<?php $orgName = (string) ($row['org_name'] ?? ''); $orgLevel = (string) ($row['org_level'] ?? ''); ?>
+								<?php if ($orgName === '') : ?>
+									<span class="text-muted">—</span>
+								<?php else : ?>
+									<span class="fw-semibold text-gray-800"><?= htmlspecialchars($orgName, ENT_QUOTES, 'UTF-8') ?></span>
+									<?php $lvLabel = ['admin' => '본사', 'distributor' => '총판', 'agency' => '대리점'][$orgLevel] ?? ''; ?>
+									<?php if ($lvLabel !== '') : ?>
+									<span class="badge badge-light-<?= $orgLevel === 'admin' ? 'dark' : ($orgLevel === 'distributor' ? 'primary' : 'success') ?> fs-9 ms-1"><?= $lvLabel ?></span>
+									<?php endif; ?>
+								<?php endif; ?>
+							</td>
 							<td class="fs-7"><?= ($row['email'] ?? '') !== '' ? htmlspecialchars((string) $row['email'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
 							<td><span class="badge badge-light-<?= htmlspecialchars($badgeClass, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string) $row['role_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td><?= ($row['active'] ?? false) ? '<span class="badge badge-light-success">활성</span>' : '<span class="badge badge-light-dark">중지</span>' ?></td>
@@ -316,6 +335,6 @@ try {
 	// 목록이 길어지면 스크롤만 길어져 찾기 어렵다. 서버가 내려준 결과를 그대로 두고
 	// 화면에서만 페이지로 나눈다(DataTables 없이 같은 UX — assets/js/table-paginate.js).
 	var tp_adminListTable = document.getElementById('adminListTable');
-	if (tp_adminListTable) { initTablePaginate(tp_adminListTable, { pageSize: 20, unit: '명' }); }
+	if (tp_adminListTable) { initTablePaginate(tp_adminListTable, { pageSize: 20, unit: '명', searchInput: '#admin_search' }); }
 </script>
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
