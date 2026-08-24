@@ -254,14 +254,15 @@ $queryParams = array_filter([
 				<table class="table table-row-bordered table-row-gray-300 align-middle gs-0 gy-4">
 					<thead>
 						<tr class="fw-bold text-muted fs-7">
-							<th><?= $filterKind === 'weekly' ? '정산 기간' : '귀속일' ?></th>
-							<th>팀·지역</th>
+							<?php // 파일명·팀지역만 남는 폭을 쓰고 나머지는 고정폭 + 줄바꿈 금지 — 한 칸이 두 줄이 되면 표 전체가 세로로 늘어난다. ?>
+							<th class="text-nowrap w-125px"><?= $filterKind === 'weekly' ? '정산 기간' : '귀속일' ?></th>
+							<th class="w-125px">팀·지역</th>
 							<th>파일명</th>
-							<th>플랫폼</th>
-							<th><?= $filterKind === 'weekly' ? '라이더' : '건수' ?></th>
-							<th>상태</th>
-							<th>업로드자</th>
-							<th>일시</th>
+							<th class="text-nowrap w-100px">플랫폼</th>
+							<th class="text-nowrap w-125px"><?= $filterKind === 'weekly' ? '라이더' : '건수' ?></th>
+							<th class="text-nowrap w-100px">상태</th>
+							<th class="text-nowrap w-125px">업로드자</th>
+							<th class="text-nowrap w-125px">일시</th>
 							<th class="min-w-70px"><?= $filterKind === 'weekly' ? '반영 대상' : '' ?></th>
 						</tr>
 					</thead>
@@ -285,24 +286,25 @@ $queryParams = array_filter([
                             ?>
 						<?php $wk = $weeklySums[(int) $up['id']] ?? null; ?>
 						<tr>
-							<td class="fw-bold text-gray-900 fs-8">
+							<td class="fw-bold text-gray-900 fs-8 text-nowrap">
 								<?= htmlspecialchars($wk !== null ? $wk['week'] : (string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?>
 							</td>
-							<td><?= htmlspecialchars($teamLabel !== '' ? $teamLabel : '-', ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-gray-700 fs-7 text-break">
+							<?php // 팀·지역은 파일명에서 뽑히다 보니 아주 긴 값이 섞인다 — 잘라 두고 전체는 툴팁으로. ?>
+							<td class="fs-8 text-gray-700" title="<?= htmlspecialchars($teamLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($teamLabel !== '' ? mb_strimwidth($teamLabel, 0, 22, '…') : '-', ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-700 fs-8 text-break">
 							<?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?>
 						</td>
-							<td><?= htmlspecialchars($platLabel, ENT_QUOTES, 'UTF-8') ?></td>
-							<td>
+							<td class="text-nowrap"><?= htmlspecialchars($platLabel, ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-nowrap">
 								<?= number_format((int) $up['total_rows']) ?>명
-								<span class="text-muted fs-8">(매칭 <?= number_format((int) $up['ok_rows']) ?>)</span>
+								<span class="text-muted fs-8">(<?= number_format((int) $up['ok_rows']) ?>)</span>
 								<?php if ((int) $up['error_rows'] > 0) : ?>
 								<span class="text-warning fs-8 ms-1">미매칭 <?= number_format((int) $up['error_rows']) ?></span>
 								<?php endif; ?>
 							</td>
-							<td><span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span></td>
-							<td><?= htmlspecialchars((string) ($up['uploaded_by_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></td>
-							<td class="text-gray-600 fs-7"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-nowrap"><span class="badge <?= htmlspecialchars($st['badge'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($st['label'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td class="text-nowrap"><?= htmlspecialchars((string) ($up['uploaded_by_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-gray-600 fs-8 text-nowrap"><?= htmlspecialchars(substr((string) $up['created_at'], 0, 16), ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
 								<?php if ($filterKind === 'weekly') : ?>
 								<?php // 주간은 상세 화면이 없다(그 화면은 일간 전용) — 반영 대상 금액을 여기 직접 보여준다. ?>
