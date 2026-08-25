@@ -291,7 +291,7 @@ try {
                                   is_daily_settlement, withholding_tax_enabled, bank_code, bank_account, account_holder)
              VALUES (?, ?, ?, 1, ?, ?, \'active\', \'etc\', \'motor\', ?, ?, ?, ?, ?, ?)',
             [$riderCode, $loginId, $hash, $name, $phone, $agencyId,
-                $isDaily ? 1 : 0, $withhold ? 1 : 0, $bankCode, $bankAcct, $bankAcct !== '' ? $name : '']
+                $isDaily ? 1 : 0, $withhold ? 1 : 0, $bankCode, Crypto::encrypt($bankAcct), $bankAcct !== '' ? $name : '']
         );
 
         if ($platform !== '' && $licenseId !== '') {

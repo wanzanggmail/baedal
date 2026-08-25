@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 /**
  * 대리점 등록 카드 (agency_cards) — PG 결제 다건 카드/우선순위 (LOGIC §5.4 · §7 #8).
  *
@@ -144,7 +146,8 @@ final class AgencyCard
 
         $cols   = array_column(db_rows('SHOW COLUMNS FROM agency_cards'), 'Field');
         $fields = ['agency_id', 'alias', 'billing_key', 'brand', 'last4', 'priority', 'is_active', 'mock_limit'];
-        $values = [$agencyId, $alias, $billingKey, $brand, $last4, max(0, min(9999, $priority)), 1, max(0, $mockLimit)];
+        // 🔒 빌키는 pay_key 와 합치면 그대로 결제가 되는 자격증명이다 → 암호화 저장.
+        $values = [$agencyId, $alias, Crypto::encrypt($billingKey), $brand, $last4, max(0, min(9999, $priority)), 1, max(0, $mockLimit)];
 
         if (in_array('bill_code', $cols, true)) {
             $fields[] = 'bill_code';
@@ -198,7 +201,7 @@ final class AgencyCard
         require_once __DIR__ . '/PgPayment.php';
 
         $row        = db_row('SELECT billing_key FROM agency_cards WHERE id = ? LIMIT 1', [$id]);
-        $billingKey = (string) ($row['billing_key'] ?? '');
+        $billingKey = Crypto::decrypt((string) ($row['billing_key'] ?? ''));
 
         if ($billingKey !== '') {
             $res = PgGatewayFactory::make()->deleteBillingKey($billingKey, PgPayment::makeOrderNo($agencyId));
@@ -231,7 +234,8 @@ final class AgencyCard
             'mock_limit' => (int) ($r['mock_limit'] ?? 0),
             'bill_code'   => (string) ($r['bill_code'] ?? ''),
             'issuer_code' => (string) ($r['issuer_code'] ?? ''),
-            'billing_masked' => substr((string) ($r['billing_key'] ?? ''), 0, 10) . '…',
+            // 암호문 앞자리를 잘라 보여주면 매번 `enc:v1:…` 만 뜬다 → 복호화한 값에서 딴다.
+            'billing_masked' => substr(Crypto::decryptSafe((string) ($r['billing_key'] ?? ''), '(읽기실패)'), 0, 10) . '…',
         ];
     }
 }

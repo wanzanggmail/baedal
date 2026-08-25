@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 /**
  * 정산 엑셀 파일 열기 암호 (DB + 환경 변수)
  */
@@ -67,7 +69,7 @@ final class SettlementExcelConfig
         foreach ($rows as $row) {
             $p = (string) ($row['platform'] ?? '');
             if (in_array($p, self::PLATFORMS, true) && (string) ($row['open_password'] ?? '') !== '') {
-                $out[$p] = (string) $row['open_password'];
+                $out[$p] = Crypto::decryptSafe((string) $row['open_password']);
             }
         }
 
@@ -107,7 +109,7 @@ final class SettlementExcelConfig
             $p = (string) ($row['platform'] ?? '');
             $k = self::normalizeKind((string) ($row['kind'] ?? 'daily'));
             if (in_array($p, self::PLATFORMS, true) && (string) ($row['open_password'] ?? '') !== '') {
-                $out[$p . '|' . $k] = (string) $row['open_password'];
+                $out[$p . '|' . $k] = Crypto::decryptSafe((string) $row['open_password']);
             }
         }
 
@@ -163,7 +165,7 @@ final class SettlementExcelConfig
             return ['length' => 0, 'configured' => false];
         }
 
-        $pw = self::normalizePassword((string) ($row['open_password'] ?? ''));
+        $pw = self::normalizePassword(Crypto::decryptSafe((string) ($row['open_password'] ?? '')));
 
         return [
             'length'      => strlen($pw),
@@ -279,7 +281,7 @@ final class SettlementExcelConfig
             if ($r === null) {
                 return;
             }
-            $pw = self::normalizePassword((string) ($r['open_password'] ?? ''));
+            $pw = self::normalizePassword(Crypto::decryptSafe((string) ($r['open_password'] ?? '')));
             if ($pw !== '' && !in_array($pw, $out, true)) {
                 $out[] = $pw;
             }
@@ -363,17 +365,17 @@ final class SettlementExcelConfig
                 if ($exists) {
                     db_execute(
                         'UPDATE settlement_excel_config SET open_password = ?, updated_by = ? WHERE id = ?',
-                        [$pw, $updatedBy, (int) $exists['id']]
+                        [Crypto::encrypt($pw), $updatedBy, (int) $exists['id']]
                     );
                 } elseif ($hasKind) {
                     db_insert(
                         'INSERT INTO settlement_excel_config (platform, kind, org_id, open_password, updated_by) VALUES (?, ?, ?, ?, ?)',
-                        [$platform, $kind, $hasOrg ? $orgId : null, $pw, $updatedBy]
+                        [$platform, $kind, $hasOrg ? $orgId : null, Crypto::encrypt($pw), $updatedBy]
                     );
                 } else {
                     db_insert(
                         'INSERT INTO settlement_excel_config (platform, org_id, open_password, updated_by) VALUES (?, ?, ?, ?)',
-                        [$platform, $hasOrg ? $orgId : null, $pw, $updatedBy]
+                        [$platform, $hasOrg ? $orgId : null, Crypto::encrypt($pw), $updatedBy]
                     );
                 }
 

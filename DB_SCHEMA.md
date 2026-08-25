@@ -25,6 +25,34 @@ foreach (db_rows("SHOW TABLES") as $r) {
 
 ---
 
+## 🔒 암호화 저장 컬럼
+
+`inc/Crypto.php`(AES-256-GCM)로 **저장 시 암호화**하는 컬럼입니다. 저장 형식은 `enc:v1:` + base64(iv‖tag‖ciphertext).
+
+| 테이블 | 컬럼 | 이유 |
+|---|---|---|
+| `pg_config` | `pay_key`·`sign_key`·`api_key`·`enc_key`·`enc_iv`·`login_pw`·`access_token` | **그 자체로 카드 결제를 실행할 수 있는 자격증명** |
+| `agency_cards` | `billing_key` | `pay_key`와 합치면 결제 가능 |
+| `riders` | `bank_account` | 개인 금융정보 |
+| `withdrawal_requests` | `bank_account` | 〃 (신청 시점 스냅샷) |
+| `agency_bank_accounts` | `account_no`·`fintech_use_num` | 계좌·**이체 실행 키** |
+| `settlement_excel_config` | `open_password` | 정산 원본 열람 암호 |
+
+**키 관리** — `.env` 의 `APP_ENC_KEY`(base64 32바이트). `php tools/gen_enc_key.php` 로 생성합니다.
+
+- 키는 **DB 밖**에 둡니다. 같은 DB에 넣으면 덤프 한 번에 둘 다 나가 암호화한 의미가 없습니다.
+- **웹서버가 여러 대면 전부 같은 값**이어야 합니다. 다르면 서로가 저장한 값을 못 읽습니다.
+- **키를 잃으면 복구 방법이 없습니다.** 비밀번호 관리자나 AWS Secrets Manager에 따로 보관하세요.
+
+**주의사항**
+
+- 암호문은 평문보다 깁니다(원문 40자 → 약 99자). 컬럼 폭을 먼저 늘리지 않으면 **잘려 들어가 복구 불가**입니다.
+- 같은 값도 매번 다른 암호문이 되므로 **`LIKE` 검색·`GROUP BY`·유니크 제약에 쓸 수 없습니다.**
+- 빈 문자열은 암호화하지 않습니다 — `!== ''` 로 값 존재를 확인하는 기존 코드가 그대로 동작합니다.
+- 접두사가 없는 값은 평문으로 보고 그대로 돌려줍니다 → 이관 전 데이터도 읽히고, 마이그레이션을 여러 번 돌려도 안전합니다.
+- **비밀번호(`admins`·`riders`의 `password_hash`)는 bcrypt cost 12** 로 별개입니다. 대조만 하면 되므로 암호화하지 않습니다.
+- **주민등록번호는 시스템에 저장하지 않습니다.**
+
 ## 1. 전체 구조 개요
 
 ```
@@ -98,6 +126,7 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 | `withdrawal_hold` | 출금 보류 플래그 |
 | `is_daily_settlement` | 1=선정산(일일지급), 0=주정산 — `fee_calc_timing`은 이 값에서 파생(별도 컬럼 없음) |
 | `withholding_tax_enabled` | 🆕(2026-07-22) 원천세 공제 대상 여부, 대리점이 라이더별 설정. 세율(3.3%)은 `deduction_global_config`에서 고정 |
+| `bank_account` | 🔒 **암호화 저장**(`Crypto`, `enc:v1:…`). varchar(255) — 암호문이 평문보다 길다. 읽는 곳에서 `Crypto::decrypt()` 필요. **같은 계좌도 매번 다른 암호문이라 `LIKE` 검색·`GROUP BY` 불가.** |
 | `rider_code`, `login_id` | UNIQUE(겸업 시 대리점마다 별도 계정 — 이관 절차 없이 신규 등록) |
 
 ### `rider_platforms` — 라이더 1명이 여러 플랫폼(배민/쿠팡) 연동 가능

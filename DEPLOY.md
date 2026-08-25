@@ -64,7 +64,8 @@ bash scripts/deploy-rsync.sh -e "ssh -i /c/경로/key.pem" ec2-user@IP:/home/ec2
 
 ```powershell
 # WSL 설치된 경우
-wsl rsync -avz -e "ssh -i /mnt/c/경로/key.pem" --exclude '.env' --exclude 'uploads/' `
+# uploads/ 는 제외하되 .htaccess(PHP 실행 차단)는 보내야 한다.
+wsl rsync -avz -e "ssh -i /mnt/c/경로/key.pem" --exclude '.env' --exclude 'uploads/*' --include 'uploads/.htaccess' `
   /mnt/d/web/baedal/ ec2-user@IP:/home/ec2-user/baedal/
 ```
 
@@ -76,7 +77,7 @@ wsl rsync -avz -e "ssh -i /mnt/c/경로/key.pem" --exclude '.env' --exclude 'upl
 
 | 항목 | 설명 |
 |------|------|
-| `.env` | DB 비밀번호 등 — 서버에만 둠 |
+| `.env` | DB 비밀번호 + **`APP_ENC_KEY`(암호화 키)** — 서버에만 둠. **키를 잃으면 결제키·계좌번호 복구 불가** → 별도 보관 필수 |
 | `uploads/` | 배너·업로드 파일 |
 | `storage/` | 로그 등 |
 
@@ -89,6 +90,10 @@ Apache/가상호스트·DB(RDS) 설정은 그대로 두고, **코드만** Git과
 ```bash
 # 서버 SSH 접속 후, DEPLOY_PATH 안에서
 cp .env.example .env    # 이미 .env 있으면 생략
+# ⚠️ .env 에 DB 접속정보와 함께 APP_ENC_KEY 를 반드시 채운다.
+#    PG 결제키·계좌번호는 이 키로 암호화 저장되므로, 없으면 저장이 거부된다.
+#    이미 운영 중인 DB가 있다면 **기존 서버와 똑같은 키**를 넣어야 한다(다르면 못 읽는다).
+#    새로 만들 때만:  php tools/gen_enc_key.php
 mkdir -p uploads/banners
 chmod -R u+rwX uploads
 php migrate.php   # 스키마 (멱등, base_schema.sql 포함)

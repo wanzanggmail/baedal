@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 /**
  * PG(루트업) 연동 자격증명 — REF_PG_WEROUTE.md §2.
  *
@@ -13,15 +15,26 @@ declare(strict_types=1);
  *   - 대사(정산) API : `External-Api: Bearer {api_key}` + `Authorization: Bearer {access_token}`
  *     `access_token`은 `POST /api/v1/sign-in`으로 받고 **30시간** 유효 → 여기 캐시해 재사용한다.
  *
- * 🔒 비밀값(pay_key·sign_key·api_key·login_pw)은 현재 **평문 저장**이다. 대사 API 로그인에
- *    비밀번호 원문이 필요해 단방향 해시를 쓸 수 없고, 양방향 암호화는 키 관리 체계가 없으면
- *    실효가 없어서 지금은 도입하지 않았다. 대신 화면에는 마스킹만 내보낸다(`publicView()`).
- *    운영 전환 시 키 보관 방식을 다시 정할 것.
+ * 🔒 비밀값(pay_key·sign_key·api_key·enc_key·enc_iv·login_pw·access_token)은 **DB에 암호화해서**
+ *    저장한다(`Crypto`, AES-256-GCM). 대사 API 로그인에 원문이 필요해 단방향 해시는 쓸 수 없고,
+ *    이 값들은 **그 자체로 결제를 실행할 수 있는 자격증명**이라 평문으로 두면 DB 덤프 한 번이
+ *    곧 금전 피해가 된다. 키는 `.env` 의 `APP_ENC_KEY` — DB 밖에 있어야 의미가 있다.
+ *    화면에는 여전히 마스킹만 내보낸다(`publicView()`).
  */
 final class PgConfig
 {
     public const DRIVER_MOCK    = 'mock';
     public const DRIVER_WEROUTE = 'weroute';
+
+    /**
+     * 암호화해서 저장하는 필드.
+     *
+     * `mid`·`tid`·`login_id` 는 넣지 않는다 — 가맹점 식별자일 뿐 그것만으로는 아무것도 못 하고,
+     * 오히려 로그·문의에서 그대로 봐야 하는 값이다.
+     */
+    private const SECRET_FIELDS = [
+        'pay_key', 'sign_key', 'api_key', 'enc_key', 'enc_iv', 'login_pw', 'access_token',
+    ];
 
     /**
      * API 호스트.
@@ -65,8 +78,20 @@ final class PgConfig
             return $defaults;
         }
         $row = db_row('SELECT * FROM pg_config WHERE id = 1 LIMIT 1');
+        if ($row === null) {
+            return $defaults;
+        }
 
-        return $row === null ? $defaults : array_merge($defaults, $row);
+        // 이관 전 평문 행도 그대로 읽힌다(`Crypto::decrypt` 가 접두사 없는 값을 통과시킨다).
+        // 복호화 실패는 **삼키지 않는다** — 빈 값으로 넘기면 isReady() 가 false 가 되고
+        // 게이트웨이가 조용히 mock 으로 떨어져, 실제로는 안 긁힌 결제가 성공으로 기록된다.
+        foreach (self::SECRET_FIELDS as $f) {
+            if (isset($row[$f]) && $row[$f] !== null) {
+                $row[$f] = Crypto::decrypt((string) $row[$f]);
+            }
+        }
+
+        return array_merge($defaults, $row);
     }
 
     /**
@@ -167,17 +192,17 @@ final class PgConfig
                 $driver,
                 $mid,
                 trim((string) ($data['tid'] ?? $cur['tid'])),
-                $payKey,
-                $keep('sign_key'),
-                $keep('api_key'),
-                $keep('enc_key'),
-                $keep('enc_iv'),
+                Crypto::encrypt($payKey),
+                Crypto::encrypt($keep('sign_key')),
+                Crypto::encrypt($keep('api_key')),
+                Crypto::encrypt($keep('enc_key')),
+                Crypto::encrypt($keep('enc_iv')),
                 // 허용 IP는 비밀값이 아니라 **빈 값도 의미가 있다**(검사 끄기) → keep 하지 않는다.
                 array_key_exists('noti_allow_ips', $data)
                     ? trim((string) $data['noti_allow_ips'])
                     : (string) $cur['noti_allow_ips'],
                 trim((string) ($data['login_id'] ?? $cur['login_id'])),
-                $keep('login_pw'),
+                Crypto::encrypt($keep('login_pw')),
                 ($adminId !== null && $adminId > 0) ? $adminId : null,
             ]
         );
@@ -191,7 +216,7 @@ final class PgConfig
         }
         db_execute(
             'UPDATE pg_config SET access_token = ?, token_expires_at = DATE_ADD(NOW(), INTERVAL ? HOUR) WHERE id = 1',
-            [$token, max(1, $ttlHours)]
+            [Crypto::encrypt($token), max(1, $ttlHours)]
         );
     }
 

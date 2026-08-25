@@ -190,7 +190,7 @@ final class RiderAuth
             'status'              => (string) ($row['status'] ?? 'active'),
             'vehicle_type'        => (string) ($row['vehicle_type'] ?? ''),
             'bank_code'           => (string) ($row['bank_code'] ?? ''),
-            'bank_account'        => (string) ($row['bank_account'] ?? ''),
+            'bank_account'        => Crypto::decryptSafe((string) ($row['bank_account'] ?? '')),
             'account_holder'      => (string) ($row['account_holder'] ?? ''),
             'is_daily_settlement' => (int) ($row['is_daily_settlement'] ?? 0) === 1,
             'must_change_password' => (int) ($row['must_change_password'] ?? 0) === 1,

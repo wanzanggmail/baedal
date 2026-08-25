@@ -12,7 +12,7 @@ $bankLabelRow = $bankCode !== ''
     ? db_row("SELECT label FROM system_codes WHERE category = 'bank' AND code = ? LIMIT 1", [$bankCode])
     : null;
 $bankName = $bankLabelRow['label'] ?? ($bankCode !== '' ? $bankCode : '—');
-$account  = (string) ($row['bank_account'] ?? '');
+$account  = Crypto::decryptSafe((string) ($row['bank_account'] ?? ''));
 $holder   = (string) ($row['account_holder'] ?? ($row['name'] ?? ''));
 ?>
 <div class="alert alert-light d-flex fs-7 mb-5">

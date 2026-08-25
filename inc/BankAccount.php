@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 /**
  * 조직 계좌 (agency_bank_accounts) — LOGIC §5.4 · §7 #10.
  *
@@ -31,7 +33,21 @@ final class BankAccount
             return null;
         }
 
-        return db_row('SELECT * FROM agency_bank_accounts WHERE agency_id = ? LIMIT 1', [$agencyId]);
+        $row = db_row('SELECT * FROM agency_bank_accounts WHERE agency_id = ? LIMIT 1', [$agencyId]);
+        if ($row === null) {
+            return null;
+        }
+
+        // 🔒 계좌번호·핀테크이용번호는 암호화 저장한다. **읽기 지점이 여기 하나뿐**이라
+        //    (fintechNum·AgencyPayout·화면 모두 get() 을 거친다) 여기서만 풀면 된다.
+        //    이관 전 평문 행도 그대로 통과한다.
+        foreach (['account_no', 'fintech_use_num'] as $f) {
+            if (isset($row[$f]) && $row[$f] !== null) {
+                $row[$f] = Crypto::decrypt((string) $row[$f]);
+            }
+        }
+
+        return $row;
     }
 
     /**
@@ -110,12 +126,12 @@ final class BankAccount
         if ($exists !== null) {
             db_execute(
                 'UPDATE agency_bank_accounts SET bank_code = ?, account_no = ?, holder = ?, fintech_use_num = ?, updated_at = NOW() WHERE agency_id = ?',
-                [$bankCode, $account, $holder, $fintech, $agencyId]
+                [$bankCode, Crypto::encrypt($account), $holder, Crypto::encrypt($fintech), $agencyId]
             );
         } else {
             db_insert(
                 'INSERT INTO agency_bank_accounts (agency_id, bank_code, account_no, holder, fintech_use_num) VALUES (?, ?, ?, ?, ?)',
-                [$agencyId, $bankCode, $account, $holder, $fintech]
+                [$agencyId, $bankCode, Crypto::encrypt($account), $holder, Crypto::encrypt($fintech)]
             );
         }
     }

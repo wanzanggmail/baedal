@@ -59,7 +59,7 @@ if ($method === 'GET') {
 
     $phone   = preg_replace('/\D/', '', $rider['phone'] ?? '');
     $phoneMsk = preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $phone) ?: '—';
-    $acct    = $rider['bank_account'] ?? '';
+    $acct    = Crypto::decryptSafe((string) ($rider['bank_account'] ?? ''));
     $acctMsk = $acct !== '' && strlen($acct) > 4
                  ? substr($acct, 0, 3) . str_repeat('*', max(0, strlen($acct) - 5)) . substr($acct, -2)
                  : '****';
@@ -308,7 +308,7 @@ if ($method === 'POST' || $method === 'PATCH') {
               WHERE id = ?',
             [$name, $phone, $email, $birthDate,
              $vehicle, $address,
-             $bankCode, $bankAccount, $holder,
+             $bankCode, Crypto::encrypt($bankAccount), $holder,
              $kyc, $id]
         );
         AuditLog::record('rider.update_profile', (string) ($rider['rider_code'] ?? $id), '프로필 정보 수정');

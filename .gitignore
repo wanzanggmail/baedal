@@ -9,7 +9,10 @@
 /vendor/
 
 # PHP 업로드·임시 파일
-/uploads/
+# 업로드물은 제외하되 보안 설정은 버전관리한다(PHP 실행 차단).
+# 디렉터리째 제외하면 하위 예외가 먹지 않으므로 /uploads/* 로 적는다.
+/uploads/*
+!/uploads/.htaccess
 /storage/
 *.log
 

@@ -173,7 +173,7 @@ final class DailyPayout
 
         // 오픈뱅킹 이체(현재 mock). 성공 시에만 잔액 이동·완료 처리.
         require_once __DIR__ . '/Disbursement.php';
-        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], (string) $rider['bank_account'], $amount);
+        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], Crypto::decrypt((string) $rider['bank_account']), $amount);
 
         if (!$res->success) {
             // 실패 이력 기록(잔액 이동 없음) — 다른 라이더 지급은 계속 진행
@@ -286,7 +286,7 @@ final class DailyPayout
         }
 
         require_once __DIR__ . '/Disbursement.php';
-        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], (string) $rider['bank_account'], $balance);
+        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], Crypto::decrypt((string) $rider['bank_account']), $balance);
 
         if (!$res->success) {
             db_insert(

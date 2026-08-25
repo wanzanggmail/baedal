@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 require_once __DIR__ . '/RiderAuth.php';
 require_once __DIR__ . '/RiderLoginId.php';
 require_once __DIR__ . '/Org.php';
@@ -212,7 +214,7 @@ final class RiderRegistration
                     $v['birth'] !== '' ? $v['birth'] : null,
                     $v['teamCode'], $v['vehicle'], $v['address'],
                     $v['bankCode'] !== '' ? $v['bankCode'] : null,
-                    $v['bankAccount'] !== '' ? $v['bankAccount'] : null,
+                    $v['bankAccount'] !== '' ? Crypto::encrypt($v['bankAccount']) : null,
                     $v['accHolder'] !== '' ? $v['accHolder'] : null,
                     $v['agencyId'],
                 ]

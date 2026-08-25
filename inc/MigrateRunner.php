@@ -64,6 +64,7 @@ final class MigrateRunner
         self::migratePgCancel();
         self::migrateCardBuyer();
         self::migrateOrderDetailScaleIndexes();
+        self::migrateSecretEncryption();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1966,4 +1967,105 @@ final class MigrateRunner
             exit(1);
         }
     }
+
+
+    /**
+     * 비밀값 암호화 이관 — 컬럼 폭 확장 + 기존 평문 행 암호화.
+     *
+     * 암호문은 평문보다 길다(`enc:v1:` + base64(iv+tag+본문) ≈ 원문 40자 → 99자).
+     * 계좌 컬럼이 varchar(40) 이라 **폭을 먼저 늘리지 않으면 암호문이 잘려 들어가** 복구가
+     * 불가능해진다. 그래서 ALTER 를 반드시 먼저 한다.
+     *
+     * 이미 암호화된 행(`enc:v1:` 접두사)은 건너뛴다 — 여러 번 돌려도 안전하다.
+     * `APP_ENC_KEY` 가 없으면 아무것도 하지 않고 안내만 한다(평문으로 남는 게 잘린 것보다 낫다).
+     */
+    private static function migrateSecretEncryption(): void
+    {
+        echo "== 비밀값 암호화(계좌·PG키·빌키) ==\n";
+
+        require_once __DIR__ . '/Crypto.php';
+        if (!Crypto::available()) {
+            echo "  ! APP_ENC_KEY 가 없어 건너뜁니다. php tools/gen_enc_key.php 로 만들어 .env 에 넣고 다시 실행하세요.\n";
+
+            return;
+        }
+
+        // ── 1단계: 암호문이 들어갈 폭 확보 ──
+        $widen = [
+            ['riders', 'bank_account', 'VARCHAR(255)'],
+            ['withdrawal_requests', 'bank_account', 'VARCHAR(255)'],
+            ['agency_bank_accounts', 'account_no', 'VARCHAR(255)'],
+            ['agency_bank_accounts', 'fintech_use_num', 'VARCHAR(255)'],
+            // 대사 토큰은 JWT 라 길 수 있다 → 255 로는 모자랄 수 있어 TEXT 로 둔다.
+            ['pg_config', 'access_token', 'TEXT'],
+            ['daily_payouts', 'bank_account', 'VARCHAR(255)'],
+            // pg_config 비밀값도 암호문이 원문보다 길어진다. enc_iv 는 varchar(64) 라
+            // 16자짜리 IV 를 암호화하면(≈66자) 바로 넘친다 — 실제로 1406 으로 막혔다.
+            ['pg_config', 'pay_key', 'VARCHAR(255)'],
+            ['pg_config', 'sign_key', 'VARCHAR(255)'],
+            ['pg_config', 'api_key', 'VARCHAR(255)'],
+            ['pg_config', 'enc_key', 'VARCHAR(255)'],
+            ['pg_config', 'enc_iv', 'VARCHAR(255)'],
+            ['pg_config', 'login_pw', 'VARCHAR(255)'],
+        ];
+        foreach ($widen as [$table, $col, $type]) {
+            if (!db_table_exists($table)) {
+                continue;
+            }
+            $cur = db_row(
+                'SELECT COLUMN_TYPE t FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+                [$table, $col]
+            );
+            if ($cur === null || strcasecmp((string) $cur['t'], $type) === 0) {
+                continue;
+            }
+            db_execute("ALTER TABLE `{$table}` MODIFY `{$col}` {$type} NULL");
+            echo "  + {$table}.{$col} → {$type}\n";
+        }
+
+        // ── 2단계: 기존 평문 행 암호화 ──
+        $targets = [
+            ['riders', 'id', ['bank_account']],
+            ['withdrawal_requests', 'id', ['bank_account']],
+            ['agency_bank_accounts', 'agency_id', ['account_no', 'fintech_use_num']],
+            ['agency_cards', 'id', ['billing_key']],
+            ['settlement_excel_config', 'id', ['open_password']],
+            ['daily_payouts', 'id', ['bank_account']],
+            ['pg_config', 'id', ['pay_key', 'sign_key', 'api_key', 'enc_key', 'enc_iv', 'login_pw', 'access_token']],
+        ];
+        foreach ($targets as [$table, $pk, $cols]) {
+            if (!db_table_exists($table)) {
+                continue;
+            }
+            $have = array_column(db_rows("SHOW COLUMNS FROM `{$table}`"), 'Field');
+            $cols = array_values(array_intersect($cols, $have));
+            if ($cols === []) {
+                continue;
+            }
+            $sel  = '`' . implode('`, `', $cols) . '`';
+            $rows = db_rows("SELECT `{$pk}` AS __pk, {$sel} FROM `{$table}`");
+            $n    = 0;
+            foreach ($rows as $r) {
+                $set = [];
+                $val = [];
+                foreach ($cols as $c) {
+                    $v = (string) ($r[$c] ?? '');
+                    if ($v === '' || Crypto::isEncrypted($v)) {
+                        continue;
+                    }
+                    $set[] = "`{$c}` = ?";
+                    $val[] = Crypto::encrypt($v);
+                }
+                if ($set === []) {
+                    continue;
+                }
+                $val[] = $r['__pk'];
+                db_execute("UPDATE `{$table}` SET " . implode(', ', $set) . " WHERE `{$pk}` = ?", $val);
+                $n++;
+            }
+            echo $n > 0 ? "  + {$table}: {$n}행 암호화\n" : "  = {$table}: 이관할 평문 없음\n";
+        }
+    }
+
 }

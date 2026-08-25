@@ -143,7 +143,7 @@ $currentUrl = admin_url('system/pg-integration');
 					<div class="col-md-6">
 						<label class="form-label fw-bold" for="pg_login_pw">가맹점 관리자 비밀번호</label>
 						<input type="password" class="form-control form-control-solid" id="pg_login_pw" placeholder="<?= empty($cfg['login_pw']) ? '미설정' : '변경할 때만 입력' ?>" autocomplete="new-password" />
-						<div class="form-text">대사(정산) API 로그인에 원문이 필요해 평문 보관됩니다.</div>
+						<div class="form-text">대사(정산) API 로그인에 원문이 필요해 해시가 아닌 <strong>암호화</strong>로 보관합니다(AES-256-GCM). 키는 서버 <code>.env</code> 에만 있습니다.</div>
 					</div>
 					<div class="col-md-6">
 						<label class="form-label fw-bold" for="pg_tid">단말기 ID (tid)</label>
@@ -174,7 +174,7 @@ $currentUrl = admin_url('system/pg-integration');
 							<option value="mock"<?= ($cfg['driver'] ?? 'mock') === 'mock' ? ' selected' : '' ?>>mock (모의)</option>
 							<option value="weroute"<?= ($cfg['driver'] ?? '') === 'weroute' ? ' selected' : '' ?>>weroute (실연동)</option>
 						</select>
-						<div class="form-text">실 드라이버는 아직 미구현이라 weroute 를 골라도 mock 으로 동작합니다.</div>
+						<div class="form-text text-danger fw-semibold">⚠️ weroute 를 고르면 <strong>실제로 카드가 결제됩니다.</strong> 시험 중이라면 mock 으로 두세요.</div>
 					</div>
 				</div>
 

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Crypto.php';
+
 require_once __DIR__ . '/PgGateway.php';
 require_once __DIR__ . '/AgencyCard.php';
 require_once __DIR__ . '/AgencyWallet.php';
@@ -70,7 +72,7 @@ final class PgPayment
             $buyer = self::resolveBuyer($card, $rider, $agencyId);
 
             $res = $gateway->charge(new PgChargeRequest(
-                billingKey: (string) $card['billing_key'],
+                billingKey: Crypto::decrypt((string) $card['billing_key']),
                 amount: $total,
                 orderNo: $tryOrdNum,
                 buyerName: $buyer['name'],

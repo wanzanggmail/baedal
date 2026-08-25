@@ -57,7 +57,7 @@ if ($riderId > 0) {
     );
     if ($r) {
         $bankLabel  = (string) ($r['bank_label'] ?: $r['bank_code'] ?: '—');
-        $acct       = (string) ($r['bank_account'] ?? '');
+        $acct       = Crypto::decryptSafe((string) ($r['bank_account'] ?? ''));
         $bankAcct   = $acct !== '' && strlen($acct) > 4
             ? substr($acct, 0, 3) . str_repeat('*', max(0, strlen($acct) - 5)) . substr($acct, -2)
             : '미등록';

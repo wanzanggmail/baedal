@@ -87,8 +87,9 @@ final class Withdrawal
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {
             $like     = '%' . $q . '%';
-            $where[]  = '(r.name LIKE ? OR r.rider_code LIKE ? OR wr.bank_account LIKE ? OR wr.account_holder LIKE ?)';
-            $params   = array_merge($params, [$like, $like, $like, $like]);
+            // 계좌번호는 암호화 저장이라 LIKE 로 못 찾는다(같은 값도 매번 다른 암호문이 된다).
+            $where[]  = '(r.name LIKE ? OR r.rider_code LIKE ? OR wr.account_holder LIKE ?)';
+            $params   = array_merge($params, [$like, $like, $like]);
         }
 
         // 멀티테넌시: 라이더 소속 대리점 스코프
@@ -256,7 +257,7 @@ final class Withdrawal
             'rider_name'       => (string) $w['rider_name'],
             'bank'             => (string) ($w['bank_label'] ?: '—'),
             'bank_code'        => (string) ($w['bank_code'] ?? ''),
-            'account'          => (string) ($w['bank_account'] ?? ''),
+            'account'          => Crypto::decryptSafe((string) ($w['bank_account'] ?? '')),
             'holder'           => (string) ($w['account_holder'] ?? $w['rider_name']),
             'amount'           => (int) $w['amount'],
             'gross_amount'     => (int) ($w['gross_amount'] ?? 0),
@@ -520,7 +521,7 @@ final class Withdrawal
                 $res = $gateway->transfer(
                     $agencyId,
                     (string) ($row['bank_code'] ?? ''),
-                    (string) ($row['bank_account'] ?? ''),
+                    Crypto::decrypt((string) ($row['bank_account'] ?? '')),
                     (string) ($row['account_holder'] ?? ''),
                     $amount,
                     ['request_id' => $id, 'rider_code' => (string) ($row['rider_code'] ?? '')]

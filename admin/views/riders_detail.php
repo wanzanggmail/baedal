@@ -72,7 +72,7 @@ $initial = mb_substr($nm, 0, 1, 'UTF-8');
 $phone   = preg_replace('/\D/', '', $rider['phone'] ?? '');
 $phoneMsk = preg_replace('/(\d{3})\d{4}(\d{4})/', '$1-****-$2', $phone) ?: '—';
 
-$acct    = $rider['bank_account'] ?? '';
+$acct    = Crypto::decryptSafe((string) ($rider['bank_account'] ?? ''));
 $acctMsk = $acct !== '' && strlen($acct) > 4
              ? substr($acct, 0, 3) . str_repeat('*', max(0, strlen($acct) - 5)) . substr($acct, -2)
              : '****';
@@ -549,7 +549,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							</div>
 							<div class="mb-4">
 								<label class="form-label fs-7 fw-semibold">계좌번호</label>
-								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="ed_account" value="<?= htmlspecialchars((string) ($rider['bank_account'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="숫자·하이픈" maxlength="40" />
+								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="ed_account" value="<?= htmlspecialchars($acct, ENT_QUOTES, 'UTF-8') ?>" placeholder="숫자·하이픈" maxlength="40" />
 							</div>
 							<div class="mb-2">
 								<label class="form-label fs-7 fw-semibold">예금주</label>
