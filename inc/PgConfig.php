@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * PG(위루트) 연동 자격증명 — REF_PG_WEROUTE.md §2.
+ * PG(루트업) 연동 자격증명 — REF_PG_WEROUTE.md §2.
  *
  * 갑 확정(2026-08-15) **"결제하는 상점은 하나"** 이므로 대리점별이 아니라 **시스템 전역 1행**이다.
  * (대리점 지갑은 이 단일 가맹점 계좌를 조직별로 나눠 보여주는 내부 장부일 뿐이다.)
@@ -23,8 +23,15 @@ final class PgConfig
     public const DRIVER_MOCK    = 'mock';
     public const DRIVER_WEROUTE = 'weroute';
 
-    /** 위루트 API 호스트 */
-    public const HOST = 'https://api.weroutefincorp.com';
+    /**
+     * API 호스트.
+     *
+     * ⚠️ 2026-08-25 정정 — 처음 받은 문서(`api.weroutefincorp.com`)는 **우리 가맹점의 것이 아니었다.**
+     * 그 호스트로는 어떤 요청도 `RV406 가맹점을 찾을 수 없습니다` 로 떨어졌고, 실제 문서는
+     * `https://api.routeup.kr/docs/routeup.html`(루트업) 이다. 호스트만 바꾸니 같은 MID 로
+     * 가맹점 조회가 통과했다. **경로·필드·인증 방식은 두 문서가 동일**하다.
+     */
+    public const HOST = 'https://api.routeup.kr';
 
     /**
      * ⚠️ 경로 함정 — 폼 전송형(인증·간편결제)만 `/api` 접두어가 없고, 대사는 버전도 다르다.

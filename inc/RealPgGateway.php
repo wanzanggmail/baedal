@@ -7,26 +7,26 @@ require_once __DIR__ . '/PgConfig.php';
 require_once __DIR__ . '/PgApiLog.php';
 
 /**
- * 위루트 실 연동 드라이버 — REF_PG_WEROUTE.md §1·§2·§4.
+ * 루트업(routeup) 실 연동 드라이버 — REF_PG_WEROUTE.md §1·§2·§4·§11.
  *
- * ## 응답 규격 (2026-08-23 실 API 응답으로 확인)
- * 모든 응답이 아래 봉투를 쓴다.
- *   {"result_cd":"RV422","result_msg":"...","temp":[]}
- * 실패는 HTTP 4xx/5xx 와 함께 오고(RV422=검증오류, PV406=거래없음), 성공은 2xx 다.
- * 그래서 **성공 판정은 HTTP 2xx**를 1차 기준으로 하고 `result_cd`는 코드·사유 표기에 쓴다.
+ * ⚠️ **2026-08-25 문서 교체** — 처음 받은 `api.weroutefincorp.com` 문서는 우리 가맹점의 것이
+ * 아니었다(모든 요청이 `RV406 가맹점을 찾을 수 없습니다`). 실제는 `https://api.routeup.kr`.
+ * **경로·필드·인증은 두 문서가 동일**해서 호스트만 바꾸니 가맹점 조회가 통과했다.
+ *
+ * ## 응답 규격 (루트업 문서 + 실 호출로 확인)
+ *   {"result_cd":"0000","result_msg":"...", ...필드..., "temp":"..."}
+ * **성공은 `result_cd === '0000'`** 이고 실패는 그 외 코드가 HTTP 4xx 와 함께 온다.
+ * 승인 실패 시에는 `result_cd`·`result_msg` 만 오고 나머지 필드는 비어 있다.
  *
  * ## 인증 (확인됨)
- *   Authorization: {pay_key}     ← Bearer 아님. 원문 그대로. 실 호출로 확인했다.
+ *   Authorization: {pay_key}     ← Bearer 아님. 원문 그대로.
  *
  * ## ⚠️ 아직 확정하지 못한 것
- * 1. **응답 필드명** — `bill_key`·`trx_id` 등 성공 payload 키는 실제 성공 응답을 받아야
- *    확정된다(실패 응답만 확인함). 그래서 `pick()`으로 **후보 키를 여러 개 훑는다**.
- *    실 응답을 한 번이라도 받으면 그 키만 남기고 정리할 것.
- * 2. **카드 필드 암호화 여부** — 가맹점별 AES 키/IV를 받았으나(`PgCrypto`) 어느 필드에
- *    적용하는지 문서로 확인하지 못했다. 지금은 **평문(HTTPS)** 으로 보낸다.
- *    위루트가 암호화를 요구하면 `buildCardFields()` 한 곳만 고치면 된다.
- * 3. **한도초과 등 재시도 대상 코드** — 코드표를 못 받아 `result_msg` 문구로 판정한다.
- *    다음 카드 폴백이 걸린 부분이라 실 코드표를 받으면 반드시 코드 기준으로 바꿀 것.
+ * - **에러 코드표** — 루트업 문서에도 코드 목록이 없다("성공시 0000, 이외 에러코드"뿐).
+ *   한도초과 등 "다음 카드로 폴백" 판정을 `result_msg` **문구**로 하고 있다.
+ *   코드표를 받으면 **반드시 코드 기준으로 바꿀 것** — 문구는 PG가 바꾸면 폴백이 조용히 멈춘다.
+ * - **카드 필드 암호화** — 루트업 문서에 암호화 요구가 **없다**(평문 + HTTPS). 받아둔
+ *   AES 키/IV(`PgCrypto`)는 이 거래 API용이 아닌 것으로 보인다(대사/SAMW 쪽 가능성).
  */
 final class RealPgGateway implements PgGateway
 {
@@ -179,8 +179,8 @@ final class RealPgGateway implements PgGateway
     }
 
     /**
-     * 응답에서 쓸 만한 키를 골라 온다. 성공 응답 필드명을 아직 확정하지 못해
-     * 후보를 훑는다(클래스 주석 ⚠️ 1번).
+     * 응답에서 값을 꺼낸다. 필드명은 루트업 문서로 확정됐지만(2026-08-25),
+     * 혹시 모를 변형에 대비해 후보를 훑는 형태는 유지한다 — **첫 번째가 문서 확정 키**다.
      *
      * @param array<string,mixed> $data
      * @param list<string> $keys
@@ -279,10 +279,15 @@ final class RealPgGateway implements PgGateway
             }
         }
 
+        // 성공은 result_cd='0000' 이다(루트업 문서). HTTP 2xx 만 보고 판단하면 2xx 로 내려오는
+        // 업무 실패를 성공으로 오인할 수 있다. 코드가 아예 없는 응답은 HTTP 상태로만 판단한다.
+        $resultCd = (string) ($data['result_cd'] ?? '');
+        $code2xx  = $http >= 200 && $http < 300;
+
         $out = [
-            'ok'      => $errNo === 0 && $http >= 200 && $http < 300,
+            'ok'      => $errNo === 0 && $code2xx && ($resultCd === '' || $resultCd === '0000'),
             'http'    => $http,
-            'code'    => (string) ($data['result_cd'] ?? ''),
+            'code'    => $resultCd,
             'msg'     => (string) ($data['result_msg'] ?? ''),
             'data'    => $data,
             'timeout' => $timeout,

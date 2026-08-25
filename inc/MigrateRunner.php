@@ -1389,7 +1389,7 @@ final class MigrateRunner
             if (!in_array('noti_allow_ips', $cols, true)) {
                 db_execute(
                     "ALTER TABLE pg_config
-                     ADD COLUMN noti_allow_ips VARCHAR(255) NOT NULL DEFAULT '221.168.33.162'
+                     ADD COLUMN noti_allow_ips VARCHAR(255) NOT NULL DEFAULT '221.168.33.227'
                          COMMENT '결제통지 허용 IP(쉼표 구분). 비우면 IP 검사 안 함'"
                 );
                 echo "OK    pg_config.noti_allow_ips 추가\n";
