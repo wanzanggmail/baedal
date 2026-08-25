@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by INT UNSIGNED NULL,
     PRIMARY KEY (role, area)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='역할별 화면(area) 조회·쓰기 권한 (super 제외)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='역할별 화면(area) 조회·쓰기 권한 (super 제외)';
 
 INSERT IGNORE INTO role_permissions (role, area, can_view, can_write) VALUES
 ('admin',      'dashboard',  1, 0),
