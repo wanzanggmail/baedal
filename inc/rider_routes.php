@@ -10,6 +10,7 @@ return [
     'promotions' => ['title' => '프로모션 내역', 'view' => 'promotions'],
     'settlement/fee-detail' => ['title' => '수수료 상세', 'view' => 'settlement_fee_detail'],
     'settlement/detail' => ['title' => '정산 상세', 'view' => 'settlement_detail'],
+    'settlement/tax' => ['title' => '원천징수 내역', 'view' => 'settlement_tax'],
     'withdrawal/apply' => ['title' => '출금 신청', 'view' => 'withdrawal_apply'],
     'withdrawal/history' => ['title' => '출금 신청 내역', 'view' => 'withdrawal_history'],
     'withdrawal/detail' => ['title' => '정산조회 상세', 'view' => 'withdrawal_detail'],

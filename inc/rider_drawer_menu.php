@@ -43,6 +43,10 @@ $riderRoute = $riderRoute ?? '';
 					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 					<span class="menu-title">정산 상세</span>
 				</a>
+				<a class="menu-link<?= rider_nav_active('settlement/tax') ?>" href="<?= htmlspecialchars(rider_url('settlement/tax'), ENT_QUOTES, 'UTF-8') ?>">
+					<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+					<span class="menu-title">원천징수 내역</span>
+				</a>
 			</div>
 		</div>
 	</div>
