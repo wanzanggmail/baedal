@@ -64,12 +64,17 @@ final class PgPayment
             // 카드를 바꿔 재시도할 때마다 주문번호도 새로 딴다 — 같은 ord_num으로 두 번 승인
             // 요청이 나가면 PG 쪽에서 중복 주문으로 막히거나 대사가 꼬인다.
             $tryOrdNum = $attempts === 1 ? $ordNum : self::makeOrderNo($agencyId);
+            // 구매자명·연락처는 **결제에도 PG 필수값**이다(없으면 PV422).
+            // 라이더가 없는 경로(수동 PG 충전)도 있어 카드에 저장해 둔 명의자를 기본으로 쓰고,
+            // 라이더 건이면 라이더 정보를 우선한다(실제 그 사람 몫을 조달하는 것이므로).
+            $buyer = self::resolveBuyer($card, $rider, $agencyId);
+
             $res = $gateway->charge(new PgChargeRequest(
                 billingKey: (string) $card['billing_key'],
                 amount: $total,
                 orderNo: $tryOrdNum,
-                buyerName: (string) ($rider['name'] ?? ''),
-                buyerPhone: preg_replace('/\D/', '', (string) ($rider['phone'] ?? '')) ?? '',
+                buyerName: $buyer['name'],
+                buyerPhone: $buyer['phone'],
                 itemName: '라이더 정산금 조달',
                 installment: 0,
                 meta: ['mock_limit' => (int) ($card['mock_limit'] ?? 0)],
@@ -109,6 +114,48 @@ final class PgPayment
         $pgId = self::record($agencyId, $riderId, $uploadId, null, $netAmount, $fee, $total, 'failed', '', $lastFail, $attempts, $adminId, $ordNum);
 
         return self::result(false, $pgId, $netAmount, $fee, $total, '', $lastFail, $attempts, null);
+    }
+
+    /**
+     * 결제 요청에 실을 구매자 정보를 정한다.
+     *
+     * 우선순위: 라이더 → 카드 명의자 → 대리점(대표자·담당자·조직명).
+     * 라이더를 먼저 쓰는 건 실제로 그 사람 몫을 조달하는 결제라 대사할 때 알아보기 쉬워서다.
+     * 어느 것도 없으면 빈 값이 나가고 PG 가 PV422 로 거절한다 — 그 전에 호출부가 막는다.
+     *
+     * @param array<string,mixed> $card
+     * @param array<string,mixed>|null $rider
+     * @return array{name:string, phone:string}
+     */
+    private static function resolveBuyer(array $card, ?array $rider, int $agencyId): array
+    {
+        $digits = static fn (?string $v): string => preg_replace('/\D/', '', (string) $v) ?? '';
+
+        $name  = trim((string) ($rider['name'] ?? ''));
+        $phone = $digits($rider['phone'] ?? '');
+
+        if ($name === '') {
+            $name = trim((string) ($card['buyer_name'] ?? ''));
+        }
+        if ($phone === '') {
+            $phone = $digits($card['buyer_phone'] ?? '');
+        }
+
+        if ($name === '' || $phone === '') {
+            $org = db_row(
+                'SELECT name, ceo_name, ceo_phone, contact_name, contact_phone
+                   FROM organizations WHERE id = ? LIMIT 1',
+                [$agencyId]
+            ) ?? [];
+            if ($name === '') {
+                $name = trim((string) ($org['ceo_name'] ?: $org['contact_name'] ?: $org['name'] ?? ''));
+            }
+            if ($phone === '') {
+                $phone = $digits($org['ceo_phone'] ?: $org['contact_phone'] ?: '');
+            }
+        }
+
+        return ['name' => mb_substr($name, 0, 50), 'phone' => mb_substr($phone, 0, 20)];
     }
 
     /**

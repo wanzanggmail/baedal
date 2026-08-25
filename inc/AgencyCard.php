@@ -87,6 +87,9 @@ final class AgencyCard
         $billingKey = trim((string) ($data['billing_key'] ?? ''));
         $billCode   = '';
         $issuerCode = '';
+        // 빌키를 직접 넣는 경로에서도 명의자는 받아 둔다 — 아래 발급 분기에서 덮어쓴다.
+        $buyerName  = trim((string) ($data['buyer_name'] ?? ''));
+        $buyerPhone = preg_replace('/\D/', '', (string) ($data['buyer_phone'] ?? '')) ?? '';
         $last4      = substr(preg_replace('/\D/', '', (string) ($data['last4'] ?? '')) ?? '', -4);
 
         if ($billingKey === '') {
@@ -100,8 +103,6 @@ final class AgencyCard
 
             // 빌키 생성 규격상 구매자명·전화도 **필수**다. 비우고 보내면 PG가 PV422 로 거절하는데,
             // 그 왕복을 돌기 전에 여기서 막아야 사용자가 무엇을 빠뜨렸는지 바로 안다.
-            $buyerName  = trim((string) ($data['buyer_name'] ?? ''));
-            $buyerPhone = preg_replace('/\D/', '', (string) ($data['buyer_phone'] ?? '')) ?? '';
             if ($buyerName === '') {
                 throw new InvalidArgumentException('카드 명의자를 입력하세요. (PG 필수 항목)');
             }
@@ -152,6 +153,17 @@ final class AgencyCard
         if (in_array('issuer_code', $cols, true)) {
             $fields[] = 'issuer_code';
             $values[] = $issuerCode;
+        }
+
+        // 명의자 정보는 **결제할 때도 PG 필수값**이다(없으면 PV422). 결제는 라이더가 없는
+        // 경로(수동 PG 충전)도 있어 매번 긁어모을 수 없으므로 카드에 붙여 저장한다.
+        if (in_array('buyer_name', $cols, true)) {
+            $fields[] = 'buyer_name';
+            $values[] = mb_substr($buyerName ?? '', 0, 50);
+        }
+        if (in_array('buyer_phone', $cols, true)) {
+            $fields[] = 'buyer_phone';
+            $values[] = mb_substr($buyerPhone ?? '', 0, 20);
         }
 
         $id = db_insert(

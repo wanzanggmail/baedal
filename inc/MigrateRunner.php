@@ -62,6 +62,7 @@ final class MigrateRunner
         self::migratePgWebhook();
         self::migratePgApiLogs();
         self::migratePgCancel();
+        self::migrateCardBuyer();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1521,6 +1522,41 @@ final class MigrateRunner
         } else {
             echo "SKIP  status enum (이미 canceled 있음)\n";
         }
+    }
+
+    /**
+     * 카드 명의자 정보 — `buyer_name`·`buyer_phone`.
+     *
+     * 빌키 **생성**뿐 아니라 빌키 **결제**에도 PG 필수값이다(없으면 PV422). 그런데 결제는
+     * 라이더 조달·프로모션·수동충전 등 여러 경로로 들어오고 그중 「PG 충전」처럼 라이더가
+     * 아예 없는 경우도 있다. 매번 어디선가 긁어모으는 대신 **카드에 붙여 저장**한다 —
+     * 어차피 그 카드로 긁는 것이므로 명의자는 카드에 종속된 값이 맞다.
+     */
+    private static function migrateCardBuyer(): void
+    {
+        echo "== agency_cards 명의자 정보 ==\n";
+
+        if (!db_table_exists('agency_cards')) {
+            echo "SKIP  agency_cards (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM agency_cards'), 'Field');
+        $adds = [];
+        if (!in_array('buyer_name', $cols, true)) {
+            $adds[] = "ADD COLUMN buyer_name VARCHAR(50) NOT NULL DEFAULT '' COMMENT '카드 명의자 — PG 결제 필수값'";
+        }
+        if (!in_array('buyer_phone', $cols, true)) {
+            $adds[] = "ADD COLUMN buyer_phone VARCHAR(20) NOT NULL DEFAULT '' COMMENT '명의자 연락처(숫자만) — PG 결제 필수값'";
+        }
+        if ($adds === []) {
+            echo "SKIP  명의자 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE agency_cards ' . implode(', ', $adds));
+        echo 'OK    agency_cards ' . count($adds) . "개 컬럼 추가\n";
     }
 
     /**

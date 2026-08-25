@@ -18,7 +18,13 @@ declare(strict_types=1);
 final class PgApiLog
 {
     /** 마스킹 대상 키 — 값 전체를 지운다(길이만 남긴다). */
-    private const SECRET_KEYS = ['card_num', 'card_no', 'card_pw', 'auth_num', 'pay_key', 'sign_key', 'api_key', 'enc_key', 'enc_iv'];
+    private const SECRET_KEYS = [
+        'card_num', 'card_no', 'card_pw', 'auth_num',
+        'pay_key', 'sign_key', 'api_key', 'enc_key', 'enc_iv',
+        // 빌키는 카드번호가 아니지만 pay_key 와 합치면 **결제가 가능한 자격증명**이다.
+        // 로그에 평문으로 남기면 로그 열람 권한이 곧 결제 권한이 된다.
+        'bill_key', 'billkey', 'billing_key',
+    ];
 
     /** 저장할 본문 최대 길이 — 응답이 커도 로그가 DB를 잡아먹지 않게 자른다. */
     private const MAX_BODY = 4000;
