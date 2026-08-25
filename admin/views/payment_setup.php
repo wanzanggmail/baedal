@@ -47,6 +47,17 @@ $account = $canUse ? BankAccount::get($agencyId) : null;
 $wallet  = $canUse ? AgencyWallet::withdrawable($agencyId) : ['balance' => 0];
 $banks   = db_table_exists('system_codes') ? db_rows("SELECT code, label FROM system_codes WHERE category = 'bank' AND is_active = 1 ORDER BY label ASC") : [];
 $setupBaseUrl = admin_url('withdrawal/payment-setup');
+
+// 카드 명의자·연락처 기본값 — 조직에 있는 값으로 채워 두고 화면에서 고칠 수 있게 한다.
+$buyerNameDefault  = '';
+$buyerPhoneDefault = '';
+if ($agencyId > 0) {
+    $org = db_row('SELECT name, ceo_name, ceo_phone, contact_name, contact_phone FROM organizations WHERE id = ? LIMIT 1', [$agencyId]);
+    if ($org !== null) {
+        $buyerNameDefault  = trim((string) ($org['ceo_name'] ?: $org['contact_name'] ?: $org['name']));
+        $buyerPhoneDefault = preg_replace('/\D/', '', (string) ($org['ceo_phone'] ?: $org['contact_phone'] ?: '')) ?? '';
+    }
+}
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -167,23 +178,40 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 
 						<div class="col-12"><div class="separator separator-dashed my-1"></div></div>
 
-						<div class="col-md-5">
+						<?php // 빌키 생성 규격상 buyer_name·buyer_phone 도 **필수**다. 없으면 PG가 PV422 로 거절한다.
+						     // 조직에 대표자 정보가 있으면 채워 두되, 카드 명의가 다를 수 있어 고칠 수 있게 둔다. ?>
+						<?php // 명의 확인에 쓰는 값 세 개를 한 줄로 묶는다 — 카드 자체 정보(번호·유효기간·비번)와
+						     // 성격이 달라 섞어 두면 어느 칸이 무엇인지 헷갈린다. ?>
+						<div class="col-md-4">
+							<label class="form-label fs-8 required" for="ps_buyername">카드 명의자</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_buyername"
+								maxlength="50" autocomplete="off" value="<?= htmlspecialchars($buyerNameDefault, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: 홍길동 / (주)도깨비" />
+						</div>
+						<div class="col-md-4">
+							<label class="form-label fs-8" for="ps_authnum">생년월일/사업자번호</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_authnum"
+								inputmode="numeric" maxlength="12" autocomplete="off" placeholder="YYMMDD 또는 사업자번호" />
+						</div>
+						<div class="col-md-4">
+							<label class="form-label fs-8 required" for="ps_buyerphone">연락처</label>
+							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_buyerphone"
+								inputmode="numeric" maxlength="20" autocomplete="off" value="<?= htmlspecialchars($buyerPhoneDefault, ENT_QUOTES, 'UTF-8') ?>" placeholder="01000000000" />
+						</div>
+
+						<div class="col-12"><div class="separator separator-dashed my-1"></div></div>
+
+						<div class="col-md-6">
 							<label class="form-label fs-8 required" for="ps_cardnum">카드번호</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_cardnum"
 								inputmode="numeric" maxlength="19" autocomplete="off" placeholder="숫자만 입력" />
 						</div>
-						<div class="col-md-2">
+						<div class="col-md-3">
 							<label class="form-label fs-8 required" for="ps_yymm">유효기간</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_yymm"
 								inputmode="numeric" maxlength="4" autocomplete="off" placeholder="YYMM" />
 							<div class="form-text fs-9">예: 2509</div>
 						</div>
 						<div class="col-md-3">
-							<label class="form-label fs-8" for="ps_authnum">생년월일/사업자번호</label>
-							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_authnum"
-								inputmode="numeric" maxlength="12" autocomplete="off" placeholder="YYMMDD 또는 사업자번호" />
-						</div>
-						<div class="col-md-2">
 							<label class="form-label fs-8" for="ps_cardpw">카드 비번</label>
 							<input type="password" class="form-control form-control-sm form-control-solid" id="ps_cardpw"
 								inputmode="numeric" maxlength="2" autocomplete="new-password" placeholder="앞 2자리" />
@@ -296,6 +324,9 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 				priority: parseInt(document.getElementById('ps_priority').value, 10) || 100,
 				mock_limit: mockLimitEl ? (parseInt(mockLimitEl.value, 10) || 0) : 0,
 				// 카드 정보 — 서버가 PG로 전달만 하고 저장하지 않는다.
+				// PG 필수값 — 빠지면 PV422 로 거절된다.
+				buyer_name: document.getElementById('ps_buyername').value.trim(),
+				buyer_phone: document.getElementById('ps_buyerphone').value.replace(/\D/g, ''),
 				card_num: document.getElementById('ps_cardnum').value.trim(),
 				yymm: document.getElementById('ps_yymm').value.trim(),
 				auth_num: document.getElementById('ps_authnum').value.trim(),

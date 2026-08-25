@@ -98,6 +98,17 @@ final class AgencyCard
                 throw new InvalidArgumentException('유효기간은 YYMM 4자리로 입력하세요. (예: 2509)');
             }
 
+            // 빌키 생성 규격상 구매자명·전화도 **필수**다. 비우고 보내면 PG가 PV422 로 거절하는데,
+            // 그 왕복을 돌기 전에 여기서 막아야 사용자가 무엇을 빠뜨렸는지 바로 안다.
+            $buyerName  = trim((string) ($data['buyer_name'] ?? ''));
+            $buyerPhone = preg_replace('/\D/', '', (string) ($data['buyer_phone'] ?? '')) ?? '';
+            if ($buyerName === '') {
+                throw new InvalidArgumentException('카드 명의자를 입력하세요. (PG 필수 항목)');
+            }
+            if ($buyerPhone === '') {
+                throw new InvalidArgumentException('연락처를 입력하세요. (PG 필수 항목)');
+            }
+
             $gateway = PgGatewayFactory::make();
             $res     = $gateway->issueBillingKey(new PgBillingKeyRequest(
                 cardNumber: $cardNum,
@@ -105,8 +116,8 @@ final class AgencyCard
                 authNum: $authNum,
                 cardPw: $cardPw,
                 orderNo: PgPayment::makeOrderNo($agencyId),
-                buyerName: trim((string) ($data['buyer_name'] ?? '')),
-                buyerPhone: preg_replace('/\D/', '', (string) ($data['buyer_phone'] ?? '')) ?? '',
+                buyerName: $buyerName,
+                buyerPhone: $buyerPhone,
             ));
 
             if (!$res->success) {
