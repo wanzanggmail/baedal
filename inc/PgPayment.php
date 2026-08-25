@@ -217,7 +217,16 @@ final class PgPayment
                 $res->failReason
             ));
 
-            return ['ok' => false, 'message' => 'PG 취소 실패: ' . $res->failReason];
+            // 승인 직후에는 PG 쪽에 원거래가 아직 안 잡혀 "원거래를 찾을 수 없습니다"(PV406)가 난다.
+            // 2026-08-25 실측: 같은 초에 취소하면 실패, 38초 뒤 재시도하면 성공. 영구 실패가 아니라
+            // 잠깐 기다렸다 다시 누르면 되는 상황이므로 그렇게 안내한다 —
+            // 그냥 "취소 실패"로만 보이면 카드사에 전화하게 된다.
+            $msg = 'PG 취소 실패: ' . $res->failReason;
+            if (str_contains($res->failReason, '원거래')) {
+                $msg .= "\n승인 직후에는 PG에 거래가 아직 등록되지 않았을 수 있습니다. 1분쯤 뒤 다시 시도해 주세요.";
+            }
+
+            return ['ok' => false, 'message' => $msg];
         }
 
         // ② 우리 기록 되돌리기 — 여기부터는 한 트랜잭션으로 묶는다.
