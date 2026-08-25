@@ -144,6 +144,41 @@ final class RealPgGateway implements PgGateway
         return $res['ok'] ? PgSimpleResult::ok() : PgSimpleResult::fail($this->failMessage($res));
     }
 
+    // ── 취소 ────────────────────────────────────────────────────────────
+
+    /**
+     * 승인 취소 — `POST /api/v2/pay/cancel` (mid·tid·amount·trx_id).
+     *
+     * 정산이 D+1 이라 **당일 취소는 받아준다**. 정산이 넘어간 건은 PG 가 거절하므로
+     * 그 사유를 그대로 화면에 올려 사람이 판단하게 한다(우리가 임의로 성공 처리하지 않는다).
+     *
+     * ⚠️ 타임아웃은 **취소 여부를 모르는 상태**다. 취소는 승인과 달리 다시 불러도 안전하지
+     *    않다(이미 취소된 건을 또 취소하면 PG 가 거절하거나, 최악은 중복 취소로 대사가 꼬인다).
+     *    그래서 자동 재시도하지 않고 실패로 두되, 거래조회로 확인하라고 알린다.
+     */
+    public function cancel(string $trxId, int $amount): PgCancelResult
+    {
+        $res = $this->post(PgConfig::EP_CANCEL, [
+            'mid'    => (string) $this->cfg['mid'],
+            'tid'    => (string) $this->cfg['tid'],
+            'amount' => (string) $amount,
+            'trx_id' => $trxId,
+        ]);
+
+        if ($res['timeout']) {
+            return PgCancelResult::fail(
+                'TIMEOUT',
+                '응답 시간 초과 — 취소 여부가 불확실합니다. PG 가맹점 관리자나 거래조회로 확인한 뒤 다시 시도하세요.'
+            );
+        }
+        if (!$res['ok']) {
+            return PgCancelResult::fail($this->failCode($res), $this->failMessage($res));
+        }
+
+        // 취소 응답의 trx_id 는 **취소 거래번호**다(원거래는 ori_trx_id 로 따로 온다).
+        return PgCancelResult::ok($this->pick($res['data'], ['trx_id', 'cancel_trx_id']));
+    }
+
     // ── 보조 ────────────────────────────────────────────────────────────
 
     /**

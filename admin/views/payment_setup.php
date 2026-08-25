@@ -133,7 +133,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 							<thead><tr class="fw-bold text-muted"><th>우선</th><th>별칭</th><th>카드</th><?php if (PgGatewayFactory::isMock()) : ?><th>모의한도</th><?php endif; ?><th class="text-center">상태</th><th></th></tr></thead>
 							<tbody id="ps_cards">
 								<?php if ($cards === []) : ?>
-								<tr><td colspan="6" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>
+								<tr><td colspan="<?= PgGatewayFactory::isMock() ? 6 : 5 ?>" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>
 								<?php else : foreach ($cards as $c) : ?>
 								<tr data-id="<?= (int) $c['id'] ?>">
 									<td style="width:70px"><input type="number" class="form-control form-control-sm form-control-solid ps-pri" value="<?= (int) $c['priority'] ?>" /></td>
@@ -282,7 +282,8 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 		function renderEmptyIfNone() {
 			var tbody = document.getElementById('ps_cards');
 			if (!tbody.querySelector('tr[data-id]')) {
-				tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>';
+				// 컬럼 수는 모의/실 연동에 따라 달라진다 — 서버 판정을 그대로 받아 쓴다.
+				tbody.innerHTML = '<tr><td colspan="<?= PgGatewayFactory::isMock() ? 6 : 5 ?>" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>';
 			}
 		}
 

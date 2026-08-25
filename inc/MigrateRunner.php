@@ -61,6 +61,7 @@ final class MigrateRunner
         self::migrateAutoTransferOnRequest();
         self::migratePgWebhook();
         self::migratePgApiLogs();
+        self::migratePgCancel();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1470,6 +1471,56 @@ final class MigrateRunner
               COMMENT='PG API 호출 이력 — 카드정보는 저장하지 않는다'"
         );
         echo "OK    pg_api_logs 생성\n";
+    }
+
+    /**
+     * 결제 취소 — `pg_payments` 에 취소 상태·이력 컬럼.
+     *
+     * 정산이 D+1 이라 **당일 취소는 PG 에서 받아준다**(갑 확인). 승인이 잘못 나갔을 때
+     * 우리 시스템에서 바로 되돌릴 수 있어야 하므로, 기존 `status` enum 에 'canceled' 를 더한다.
+     * 부분취소(cxl_seq)는 쓰지 않는다 — 우리 결제는 라이더 1명 조달 단위라 쪼갤 이유가 없다.
+     */
+    private static function migratePgCancel(): void
+    {
+        echo "== pg_payments 결제취소 ==\n";
+
+        if (!db_table_exists('pg_payments')) {
+            echo "SKIP  pg_payments (테이블 없음)\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
+        $adds = [];
+        if (!in_array('canceled_at', $cols, true)) {
+            $adds[] = "ADD COLUMN canceled_at DATETIME NULL COMMENT '취소 시각'";
+        }
+        if (!in_array('cancel_reason', $cols, true)) {
+            $adds[] = "ADD COLUMN cancel_reason VARCHAR(300) NOT NULL DEFAULT '' COMMENT '취소 사유(필수 입력)'";
+        }
+        if (!in_array('canceled_by', $cols, true)) {
+            $adds[] = "ADD COLUMN canceled_by INT UNSIGNED NULL COMMENT '취소 실행 관리자'";
+        }
+        if (!in_array('cancel_trx_id', $cols, true)) {
+            $adds[] = "ADD COLUMN cancel_trx_id VARCHAR(80) NOT NULL DEFAULT '' COMMENT 'PG 취소 거래번호'";
+        }
+        if ($adds !== []) {
+            db_execute('ALTER TABLE pg_payments ' . implode(', ', $adds));
+            echo 'OK    pg_payments ' . count($adds) . "개 취소 컬럼 추가\n";
+        }
+
+        // status enum 확장 — 기존 값은 그대로 두고 'canceled' 만 더한다.
+        $type = (string) (db_row("SHOW COLUMNS FROM pg_payments LIKE 'status'")['Type'] ?? '');
+        if (!str_contains($type, 'canceled')) {
+            db_execute(
+                "ALTER TABLE pg_payments
+                 MODIFY COLUMN status ENUM('success','failed','canceled') NOT NULL DEFAULT 'failed'
+                 COMMENT 'canceled=승인 후 취소(지갑도 되돌림)'"
+            );
+            echo "OK    status enum 에 canceled 추가\n";
+        } else {
+            echo "SKIP  status enum (이미 canceled 있음)\n";
+        }
     }
 
     /**

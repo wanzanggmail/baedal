@@ -29,6 +29,14 @@ interface PgGateway
     /** 카드 해지 — 빌키 삭제 */
     public function deleteBillingKey(string $billingKey, string $orderNo): PgSimpleResult;
 
+    /**
+     * 승인 취소 — `trx_id` 기준 전액 취소.
+     *
+     * 부분취소(`cxl_seq`)는 지원하지 않는다. 우리 결제는 라이더 1명 조달 단위라 쪼갤 이유가 없고,
+     * 회차 관리를 들이면 대사만 복잡해진다.
+     */
+    public function cancel(string $trxId, int $amount): PgCancelResult;
+
     /** 화면·로그 표기용 이름 */
     public function label(): string;
 }
@@ -154,6 +162,29 @@ final class PgBillingKeyResult
     }
 }
 
+/** 승인 취소 결과 */
+final class PgCancelResult
+{
+    public function __construct(
+        public readonly bool $success,
+        /** PG 가 발급한 **취소 거래번호**(원거래와 별개) */
+        public readonly string $cancelTrxId = '',
+        public readonly string $failCode = '',
+        public readonly string $failReason = ''
+    ) {
+    }
+
+    public static function ok(string $cancelTrxId = ''): self
+    {
+        return new self(true, $cancelTrxId);
+    }
+
+    public static function fail(string $code, string $reason): self
+    {
+        return new self(false, '', $code, $reason);
+    }
+}
+
 /** 삭제 등 단순 성공/실패 */
 final class PgSimpleResult
 {
@@ -222,6 +253,15 @@ final class MockPgGateway implements PgGateway
     public function deleteBillingKey(string $billingKey, string $orderNo): PgSimpleResult
     {
         return PgSimpleResult::ok();
+    }
+
+    public function cancel(string $trxId, int $amount): PgCancelResult
+    {
+        if (str_starts_with($trxId, 'FAIL-')) {
+            return PgCancelResult::fail('CANCEL_DENIED', '모의: 취소 거절');
+        }
+
+        return PgCancelResult::ok('MOCKCXL-' . date('YmdHis') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 6)));
     }
 
     public function label(): string

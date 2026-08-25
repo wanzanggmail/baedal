@@ -112,6 +112,99 @@ final class PgPayment
     }
 
     /**
+     * 승인 취소 — PG 취소 후 지갑을 되돌린다.
+     *
+     * 정산이 D+1 이라 **당일 취소는 PG 가 받아준다**(갑 확인). 정산이 넘어간 건은 PG 가 거절하고,
+     * 그 사유를 그대로 올린다 — 우리가 임의로 성공 처리하면 카드에는 청구가 남은 채 지갑만 줄어든다.
+     *
+     * 순서가 중요하다: **PG 취소가 성공해야만** 지갑을 되돌린다. 반대로 하면 PG 거절 시
+     * 지갑만 줄어든 상태가 된다.
+     *
+     * ⚠️ 지갑이 음수가 될 수 있다 — 조달한 돈을 이미 라이더에게 지급했으면 되돌릴 재원이 없다.
+     *    그래도 차감한다. 카드에서는 실제로 돈이 빠졌으므로 **음수가 곧 "정산이 어긋났다"는 신호**이고,
+     *    숨기면 나중에 원인을 못 찾는다(리스 수수료·주정산 출금과 같은 판단).
+     *
+     * @return array{ok:bool, message:string, balance_after?:int}
+     */
+    public static function cancel(int $paymentId, string $reason, ?int $adminId = null): array
+    {
+        require_once __DIR__ . '/PgGateway.php';
+        require_once __DIR__ . '/AuditLog.php';
+
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new InvalidArgumentException('취소 사유를 입력하세요.');
+        }
+        if (!db_table_exists('pg_payments')) {
+            throw new RuntimeException('pg_payments 테이블이 없습니다. php migrate.php 를 실행하세요.');
+        }
+
+        $row = db_row('SELECT * FROM pg_payments WHERE id = ? LIMIT 1', [$paymentId]);
+        if ($row === null) {
+            throw new InvalidArgumentException('결제 건을 찾을 수 없습니다.');
+        }
+        $status = (string) $row['status'];
+        if ($status === 'canceled') {
+            return ['ok' => false, 'message' => '이미 취소된 결제입니다.'];
+        }
+        if ($status !== 'success') {
+            return ['ok' => false, 'message' => '승인 성공 건만 취소할 수 있습니다. (현재: ' . $status . ')'];
+        }
+        $trxId = trim((string) $row['pg_tid']);
+        if ($trxId === '') {
+            return ['ok' => false, 'message' => 'PG 거래번호가 없어 취소를 요청할 수 없습니다.'];
+        }
+
+        $agencyId = (int) $row['agency_id'];
+        $net      = (int) $row['net_amount'];
+        $total    = (int) $row['total_charged'];
+
+        // ① PG 취소 — 청구 총액(수수료 포함) 기준이다. 지갑에 들어간 건 net 이지만
+        //    카드에 청구된 건 total 이므로 되돌릴 금액도 total 이다.
+        $res = PgGatewayFactory::make()->cancel($trxId, $total);
+        if (!$res->success) {
+            AuditLog::record('PG_CANCEL_FAIL', 'pg_payments', sprintf(
+                '#%d 취소 실패 · %s원 · %s',
+                $paymentId,
+                number_format($total),
+                $res->failReason
+            ));
+
+            return ['ok' => false, 'message' => 'PG 취소 실패: ' . $res->failReason];
+        }
+
+        // ② 우리 기록 되돌리기 — 여기부터는 한 트랜잭션으로 묶는다.
+        $balanceAfter = 0;
+        db_transaction(static function () use ($paymentId, $agencyId, $net, $reason, $adminId, $res, &$balanceAfter): void {
+            db_execute(
+                'UPDATE pg_payments
+                    SET status = ?, canceled_at = NOW(), cancel_reason = ?, canceled_by = ?, cancel_trx_id = ?
+                  WHERE id = ? AND status = ?',
+                ['canceled', mb_substr($reason, 0, 300), ($adminId !== null && $adminId > 0) ? $adminId : null,
+                 mb_substr($res->cancelTrxId, 0, 80), $paymentId, 'success']
+            );
+            // 충전할 때 net 을 넣었으므로 되돌릴 때도 net 이다(수수료는 애초에 지갑에 안 들어갔다).
+            AgencyWallet::debit($agencyId, $net, 'pg_fund_rev', $paymentId, 'PG 결제 취소 · ' . $reason, $adminId);
+            $balanceAfter = (int) AgencyWallet::get($agencyId)['balance'];
+        });
+
+        AuditLog::record('PG_CANCEL', 'pg_payments', sprintf(
+            '#%d 취소 · 청구 %s원 회수 · 지갑 −%s원 · 잔액 %s · 사유: %s',
+            $paymentId,
+            number_format($total),
+            number_format($net),
+            number_format($balanceAfter),
+            $reason
+        ));
+
+        return [
+            'ok'            => true,
+            'message'       => sprintf('취소했습니다. 카드 %s원 취소 · 지갑 %s원 회수', number_format($total), number_format($net)),
+            'balance_after' => $balanceAfter,
+        ];
+    }
+
+    /**
      * PG 주문번호 채번 — 위루트 `ord_num` 최대 **30 byte** 제약을 지킨다.
      *
      * 형식: `PG{agency}-{YmdHis}-{rand4}`  (예: PG13-20260815093012-A1B2 = 24자)

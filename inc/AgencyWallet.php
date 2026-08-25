@@ -18,6 +18,7 @@ final class AgencyWallet
     /** @var array<string, string> */
     public const REASON_LABELS = [
         'pg_fund'          => 'PG 정산 조달',
+        'pg_fund_rev'      => 'PG 결제 취소(조달 회수)',
         'pg_fee_in'         => '플랫폼 수수료 수입',
         'rider_payout'      => '라이더 지급',
         'agency_payout'     => '자체 인출',

@@ -51,8 +51,11 @@ $agencyOptions = $isAgencyLevel ? [] : Organization::agencyOptions();
 
 $listUrl = admin_url('settlement/platform-fee');
 
-$statusLabel = ['success' => '성공', 'failed' => '실패'];
-$statusBadge = ['success' => 'badge-light-success', 'failed' => 'badge-light-danger'];
+$statusLabel = ['success' => '성공', 'failed' => '실패', 'canceled' => '취소됨'];
+$statusBadge = ['success' => 'badge-light-success', 'failed' => 'badge-light-danger', 'canceled' => 'badge-light-dark'];
+
+// 취소는 돈을 되돌리는 작업이라 본사 최고관리자만 — API 도 같은 조건으로 막는다.
+$canCancel = admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN;
 
 $quickRanges = [
     '오늘'      => [date('Y-m-d'), date('Y-m-d')],
@@ -142,6 +145,7 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 						<option value="">전체</option>
 						<option value="success" <?= $filterStatus === 'success' ? 'selected' : '' ?>>성공</option>
 						<option value="failed" <?= $filterStatus === 'failed' ? 'selected' : '' ?>>실패</option>
+						<option value="canceled" <?= $filterStatus === 'canceled' ? 'selected' : '' ?>>취소됨</option>
 					</select>
 				</div>
 				<div class="col-auto">
@@ -225,6 +229,7 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 							<th class="text-end">대리점</th>
 							<th>카드</th>
 							<th>상태</th>
+							<?php if ($canCancel) : ?><th class="text-end min-w-90px">관리</th><?php endif; ?>
 						</tr>
 					</thead>
 					<tbody>
@@ -248,7 +253,26 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 								<?php if ($st === 'failed' && (string) ($r['fail_reason'] ?? '') !== '') : ?>
 								<div class="text-danger fs-9 mt-1"><?= $esc((string) $r['fail_reason']) ?></div>
 								<?php endif; ?>
+								<?php if ($st === 'canceled') : ?>
+								<div class="text-muted fs-9 mt-1">
+									<?= $esc(substr((string) ($r['canceled_at'] ?? ''), 0, 16)) ?>
+									<?php if ((string) ($r['cancel_reason'] ?? '') !== '') : ?><span class="d-block"><?= $esc((string) $r['cancel_reason']) ?></span><?php endif; ?>
+								</div>
+								<?php endif; ?>
 							</td>
+							<?php if ($canCancel) : ?>
+							<td class="text-end">
+								<?php if ($st === 'success') : ?>
+								<button type="button" class="btn btn-sm btn-light-danger py-1 px-3 fs-8 pf-cancel"
+									data-id="<?= (int) $r['id'] ?>"
+									data-total="<?= (int) $r['total_charged'] ?>"
+									data-net="<?= (int) $r['net_amount'] ?>"
+									data-who="<?= $esc((string) ($r['rider_name'] ?? '—')) ?>">결제 취소</button>
+								<?php else : ?>
+								<span class="text-muted fs-9">—</span>
+								<?php endif; ?>
+							</td>
+							<?php endif; ?>
 						</tr>
 						<?php endforeach; ?>
 					</tbody>
@@ -265,4 +289,59 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 	</div>
 	<?php endif; ?>
 
+<?php if ($canCancel) : ?>
+<script>
+(function () {
+	'use strict';
+	var API = <?= json_encode(ADMIN_BASE . '/api/pg_cancel.php', JSON_UNESCAPED_UNICODE) ?>;
+
+	function won(n) { return Number(n || 0).toLocaleString('ko-KR') + '원'; }
+
+	document.addEventListener('click', function (ev) {
+		var btn = ev.target.closest('.pf-cancel');
+		if (!btn) { return; }
+
+		var id = btn.getAttribute('data-id');
+		var total = btn.getAttribute('data-total');
+		var net = btn.getAttribute('data-net');
+		var who = btn.getAttribute('data-who') || '';
+
+		// 사유는 필수다 — 취소는 되돌릴 수 없고 나중에 반드시 "왜"를 묻게 된다.
+		var reason = window.prompt(
+			'결제를 취소합니다.\n\n'
+			+ '대상: ' + who + '\n'
+			+ '카드 취소액: ' + won(total) + '\n'
+			+ '지갑 회수액: ' + won(net) + '\n\n'
+			+ '※ 정산이 넘어간 건은 PG가 거절합니다(D+1 정산).\n'
+			+ '※ 지갑에 재원이 없으면 잔액이 음수가 될 수 있습니다.\n\n'
+			+ '취소 사유를 입력하세요.'
+		);
+		if (reason === null) { return; }
+		reason = reason.trim();
+		if (reason === '') { window.alert('취소 사유를 입력해야 합니다.'); return; }
+
+		btn.disabled = true;
+		btn.textContent = '취소 중…';
+
+		fetch(API, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ payment_id: Number(id), reason: reason })
+		})
+			.then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+			.then(function (res) {
+				if (!res.ok || !res.j.ok) { throw new Error(res.j.message || '취소 실패'); }
+				window.alert(res.j.message || '취소했습니다.');
+				window.location.reload();
+			})
+			.catch(function (e) {
+				window.alert(e.message || String(e));
+				btn.disabled = false;
+				btn.textContent = '결제 취소';
+			});
+	});
+})();
+</script>
+<?php endif; ?>
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
