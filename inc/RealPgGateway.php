@@ -41,7 +41,7 @@ final class RealPgGateway implements PgGateway
 
     public function label(): string
     {
-        return '위루트';
+        return '루트업';
     }
 
     // ── 결제 ────────────────────────────────────────────────────────────

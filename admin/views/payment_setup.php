@@ -108,7 +108,12 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 	<div class="alert alert-info mb-8">위에서 설정할 대리점을 선택하세요.</div>
 	<?php else : ?>
 
+	<?php // 배너는 실제 상태를 따라간다 — 실 연동인데 "모의"라고 떠 있으면 진짜 카드를 마음 놓고 넣는다. ?>
+	<?php if (PgGatewayFactory::isMock()) : ?>
 	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 <?= $isHqAccount ? '핀테크이용번호는' : '빌링키/핀테크번호는' ?> 모의 값으로 동작합니다.<?php if (!$isHqAccount) : ?> 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.<?php endif; ?></div>
+	<?php else : ?>
+	<div class="alert bg-light-danger fs-8 p-3 mb-6">⚠️ <strong>실 연동(<?= htmlspecialchars(PgGatewayFactory::make()->label(), ENT_QUOTES, 'UTF-8') ?>)</strong> — 카드를 등록하면 <strong>실제 빌키가 발급</strong>되고, 결제 기능은 <strong>실제로 청구</strong>됩니다. 취소는 우리 시스템이 아니라 PG 가맹점 관리자에서 해야 합니다.</div>
+	<?php endif; ?>
 
 	<div id="ps_toast" class="alert alert-dismissible d-none mb-6" role="alert">
 		<span id="ps_toast_msg"></span>
@@ -125,7 +130,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 				<div class="card-body pt-2">
 					<div class="table-responsive mb-4">
 						<table class="table table-row-bordered align-middle fs-7 gy-2">
-							<thead><tr class="fw-bold text-muted"><th>우선</th><th>별칭</th><th>카드</th><th>모의한도</th><th class="text-center">상태</th><th></th></tr></thead>
+							<thead><tr class="fw-bold text-muted"><th>우선</th><th>별칭</th><th>카드</th><?php if (PgGatewayFactory::isMock()) : ?><th>모의한도</th><?php endif; ?><th class="text-center">상태</th><th></th></tr></thead>
 							<tbody id="ps_cards">
 								<?php if ($cards === []) : ?>
 								<tr><td colspan="6" class="text-center text-muted py-4">등록된 카드가 없습니다.</td></tr>
@@ -134,7 +139,7 @@ $setupBaseUrl = admin_url('withdrawal/payment-setup');
 									<td style="width:70px"><input type="number" class="form-control form-control-sm form-control-solid ps-pri" value="<?= (int) $c['priority'] ?>" /></td>
 									<td class="fw-bold"><?= htmlspecialchars($c['alias'], ENT_QUOTES, 'UTF-8') ?></td>
 									<td class="text-muted"><?= htmlspecialchars(trim($c['brand'] . ' ' . ($c['last4'] ? '****' . $c['last4'] : '')), ENT_QUOTES, 'UTF-8') ?: '—' ?></td>
-									<td class="text-muted"><?= $c['mock_limit'] > 0 ? number_format($c['mock_limit']) . '원' : '무제한' ?></td>
+									<?php if (PgGatewayFactory::isMock()) : ?><td class="text-muted"><?= $c['mock_limit'] > 0 ? number_format($c['mock_limit']) . '원' : '무제한' ?></td><?php endif; ?>
 									<td class="text-center"><span class="badge badge-light-<?= $c['active'] ? 'success' : 'secondary' ?> ps-toggle" role="button"><?= $c['active'] ? '활성' : '비활성' ?></span></td>
 									<td class="text-end"><button type="button" class="btn btn-sm btn-icon btn-light-danger ps-del">×</button></td>
 								</tr>
