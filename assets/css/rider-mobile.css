@@ -346,3 +346,97 @@
 		font-size: 16px;
 	}
 }
+
+/* ═════════════════ 터치 타깃 최소 크기 (2026-08-26) ═════════════════
+
+   왜 필요한가 — 루트 font-size 가 12px 이라 rem 기반인 Metronic 컴포넌트가
+   전부 작게 나온다. 실측(375px 뷰포트):
+
+     기본 버튼            40.4px
+     .btn-sm              32.3px
+     .btn-sm + py-1       23.1px   ← 손가락으로 누르기 어렵다
+     .btn-sm + py-1 + fs-8 21.3px  ← 최악
+     .form-control        40.4px
+     .form-control-sm     32.3px
+
+   iOS HIG·Material 권장 최소는 44x44px. 여기서는 **글자 크기는 그대로 두고
+   높이만** 끌어올린다 — 화면 밀도를 유지하면서 누르는 면적만 확보하는 게
+   목적이고, 글자까지 키우면 카드 레이아웃이 전부 틀어진다.
+
+   min-height 를 쓰는 이유: `py-1` 같은 유틸리티가 padding 을 줄여도
+   min-height 는 살아남아 실제 높이를 보장한다.                               */
+
+.rider-mobile-root .btn,
+.rider-mobile-root .form-control,
+.rider-mobile-root .form-select {
+	min-height: 44px;
+}
+
+/* padding 유틸리티(py-1 등)로 눌린 버튼도 글자가 세로 중앙에 오게 한다.
+   min-height 만 주면 글자가 위로 붙는다. */
+.rider-mobile-root .btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* 보조 버튼(「전체」·「달력」 같은 카드 헤더 링크)은 44px 이면 헤더가 뜬다.
+   40px 로 타협한다 — 32px 보다 확실히 낫고 레이아웃도 견딘다. */
+.rider-mobile-root .btn-sm {
+	min-height: 40px;
+}
+
+/* 전폭 버튼은 그 화면의 주요 동작이다(「조회」·「신청」) → 40px 로 깎지 않는다. */
+.rider-mobile-root .btn-sm.w-100 {
+	min-height: 44px;
+}
+
+/* iOS 는 입력 글자가 16px 미만이면 **포커스 시 화면을 확대**한다.
+   확대되면 레이아웃이 틀어지고 사용자가 손으로 되돌려야 한다.
+   보이는 크기는 그대로 두고 확대만 막으려면 16px 이 필요하다. */
+.rider-mobile-root input,
+.rider-mobile-root select,
+.rider-mobile-root textarea {
+	font-size: 16px;
+}
+
+/* 체크박스는 위 규칙의 대상이 아니다(글자가 아니라 상자 크기가 중요).
+   기본 21px 는 너무 작아 라벨까지 눌러야 하므로 상자 자체를 키운다. */
+.rider-mobile-root .form-check-input {
+	width: 22px;
+	height: 22px;
+	min-height: 0;
+}
+/* 체크박스 행 자체를 44px 로 잡아 세로 여유를 준다 — 상자(22px)만 키우면
+   손가락이 조금만 빗나가도 안 눌린다. */
+.rider-mobile-root .form-check {
+	min-height: 44px;
+	align-items: center;
+}
+.rider-mobile-root .form-check-label {
+	padding-left: 4px;
+	min-height: 22px;
+	display: inline-flex;
+	align-items: center;
+}
+
+/* 드로어 메뉴 항목 — Metronic 기본이 35px 라 손가락으로 고르기 빠듯하다.
+   메뉴는 화면 전체를 덮으므로 44px 로 키워도 레이아웃에 영향이 없다. */
+.rider-mobile-root .menu-link {
+	min-height: 44px;
+}
+
+/* 도움말 줄(.form-text) 안의 링크는 글자 높이 그대로라 14px 밖에 안 된다.
+   (예: 출금 신청의 「계좌 변경」) 글자 크기는 두고 눌리는 면적만 넓힌다. */
+.rider-mobile-root .form-text a {
+	display: inline-block;
+	padding: 12px 6px;
+	margin: -6px;
+}
+
+/* 정산 목록의 한 줄짜리 행 — px-3 py-3 만으로는 36px 이라 목록에서 고르기 빠듯하다.
+   행 전체가 링크이므로 높이만 올리면 누르는 면적이 그대로 넓어진다. */
+.rider-mobile-root .rider-settle-list > a,
+.rider-mobile-root .rider-settle-list-row {
+	min-height: 48px;
+}

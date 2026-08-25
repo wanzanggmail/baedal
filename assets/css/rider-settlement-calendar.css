@@ -39,8 +39,10 @@
 }
 
 .rider-cal-nav-btn {
-	width: 2.75rem;
-	height: 2.75rem;
+	/* ⚠️ 2.75rem 은 44px 의도였지만 루트 font-size 가 12px 이라 33px 로 나왔다.
+	   터치 타깃이라 rem 에 맡기지 않고 px 로 고정한다(파일 상단 경고와 같은 함정). */
+	width: 44px;
+	height: 44px;
 	border: 0;
 	border-radius: 0.5rem;
 	background: var(--bs-body-bg);

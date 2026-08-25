@@ -33,7 +33,6 @@ if ($next === 'login' || $next === 'logout') {
 				<input class="form-check-input" type="checkbox" name="remember" value="1" id="rider_remember" checked />
 				<label class="form-check-label text-gray-800" for="rider_remember">로그인 상태 유지 (30일)</label>
 			</div>
-			<p class="text-gray-500 fs-8 mb-5">시드·테스트 계정 비밀번호는 보통 <strong>Rider1234!</strong> 입니다. (운영에서는 반드시 변경하세요.)</p>
 			<button type="submit" class="btn btn-primary w-100 py-3">로그인</button>
 		</form>
 	</div>

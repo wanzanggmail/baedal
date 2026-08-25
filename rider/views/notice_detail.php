@@ -5,11 +5,15 @@ declare(strict_types=1);
 require_once INC_PATH . '/Notice.php';
 
 $noticeId = Notice::parseId($_GET['id'] ?? null);
-if ($noticeId === null) {
-    header('Location: ' . rider_url('notices'), true, 302);
-    exit;
-}
-$notice = Notice::findForRider($noticeId, rider_current_agency_id());
+
+// ⚠️ 여기서 `header('Location: …')` 를 부르면 안 된다.
+//    이 뷰는 레이아웃(헤더·드로어 메뉴)이 **이미 출력된 뒤** include 되므로
+//    "Cannot modify header information — headers already sent" 경고가 화면에
+//    그대로 찍힌다. 서버 절대경로까지 노출된다.
+//    id 가 없거나 잘못된 경우는 아래 "찾을 수 없음" 화면으로 안내한다(이미 있는 분기다).
+$notice = $noticeId === null
+    ? null
+    : Notice::findForRider($noticeId, rider_current_agency_id());
 ?>
 <div class="card card-flush shadow-sm">
 	<div class="card-body">
