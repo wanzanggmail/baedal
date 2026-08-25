@@ -44,24 +44,21 @@ foreach ($unwithdrawn as $c) {
 }
 $lastDate = $unwithdrawn !== [] ? (string) $unwithdrawn[count($unwithdrawn) - 1]['settlement_date'] : '';
 
-$bankLabel = '—';
-$bankAcct  = '—';
-$bankHolder = $riderUser['name'] ?? '';
+// 여기서는 **은행명만** 보여준다.
+// 계좌번호를 마스킹해 걸었더니(`123**********44`) 별표가 길어 암호화된 값처럼 보였고,
+// 어차피 자기 계좌라 가려 봐야 확인에 도움이 안 된다. 전체 번호는 「계좌 변경」(profile/bank)에서 본다.
+// 덤으로 이 화면은 이제 계좌를 복호화하지 않는다 — 안 꺼내면 샐 일도 없다.
+$bankLabel = '';
 if ($riderId > 0) {
     $r = db_row(
-        'SELECT r.bank_code, r.bank_account, r.account_holder, r.name, sc.label AS bank_label
+        'SELECT r.bank_code, sc.label AS bank_label
          FROM riders r
          LEFT JOIN system_codes sc ON sc.category = \'bank\' AND sc.code = r.bank_code
          WHERE r.id = ? LIMIT 1',
         [$riderId]
     );
     if ($r) {
-        $bankLabel  = (string) ($r['bank_label'] ?: $r['bank_code'] ?: '—');
-        $acct       = Crypto::decryptSafe((string) ($r['bank_account'] ?? ''));
-        $bankAcct   = $acct !== '' && strlen($acct) > 4
-            ? substr($acct, 0, 3) . str_repeat('*', max(0, strlen($acct) - 5)) . substr($acct, -2)
-            : '미등록';
-        $bankHolder = (string) ($r['account_holder'] ?: $r['name']);
+        $bankLabel = (string) ($r['bank_label'] ?: $r['bank_code'] ?: '');
     }
 }
 
@@ -159,9 +156,11 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 		<div class="mb-5">
 			<label class="form-label fs-7">입금 계좌</label>
 			<div class="form-control form-control-solid bg-light">
+				<?php if ($bankLabel !== '') : ?>
 				<?= htmlspecialchars($bankLabel, ENT_QUOTES, 'UTF-8') ?>
-				<?= htmlspecialchars($bankAcct, ENT_QUOTES, 'UTF-8') ?>
-				· <?= htmlspecialchars($bankHolder, ENT_QUOTES, 'UTF-8') ?>
+				<?php else : ?>
+				<span class="text-danger">계좌 미등록</span>
+				<?php endif; ?>
 			</div>
 			<div class="form-text"><a href="<?= htmlspecialchars(rider_url('profile/bank'), ENT_QUOTES, 'UTF-8') ?>">계좌 변경</a></div>
 		</div>
