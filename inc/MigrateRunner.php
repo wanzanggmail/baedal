@@ -63,6 +63,7 @@ final class MigrateRunner
         self::migratePgApiLogs();
         self::migratePgCancel();
         self::migrateCardBuyer();
+        self::migrateOrderDetailScaleIndexes();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -1557,6 +1558,51 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE agency_cards ' . implode(', ', $adds));
         echo 'OK    agency_cards ' . count($adds) . "개 컬럼 추가\n";
+    }
+
+    /**
+     * 대용량 대비 인덱스 — `settlement_order_details`.
+     *
+     * 이 표는 **라이더 1명당 하루 31건**(실측) 쌓인다. 라이더 2,000명이면 하루 6.3만 건,
+     * 연 2,280만 건이다. 그런데 「오더별 상세 내역」의 기본 조회는 기간 범위인데
+     * `settlement_date` 단독 인덱스가 없어 **풀스캔 + filesort** 로 돌고 있었다
+     * (2026-08-25 EXPLAIN: type=ALL, Using filesort). 지금은 9천 건이라 티가 안 나지만
+     * 수백만 건이 되면 화면이 멈춘다.
+     *
+     * `(settlement_date, id)` 로 잡는 이유: 화면이 `ORDER BY settlement_date DESC, id DESC`
+     * 로 정렬하므로 정렬까지 인덱스로 끝나 filesort 가 사라진다.
+     */
+    private static function migrateOrderDetailScaleIndexes(): void
+    {
+        echo "== settlement_order_details 대용량 인덱스 ==\n";
+
+        if (!db_table_exists('settlement_order_details')) {
+            echo "SKIP  테이블 없음\n";
+
+            return;
+        }
+
+        $have = [];
+        foreach (db_rows('SHOW INDEX FROM settlement_order_details') as $i) {
+            $have[(string) $i['Key_name']] = true;
+        }
+
+        $adds = [];
+        if (!isset($have['idx_sod_date_id'])) {
+            $adds[] = 'ADD INDEX idx_sod_date_id (settlement_date, id)';
+        }
+        // 대리점 스코프 조회는 uploads 를 거쳐 걸리므로 그쪽도 함께 본다.
+        if (!isset($have['idx_sod_upload_date'])) {
+            $adds[] = 'ADD INDEX idx_sod_upload_date (upload_id, settlement_date)';
+        }
+
+        if ($adds === []) {
+            echo "SKIP  인덱스 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE settlement_order_details ' . implode(', ', $adds));
+        echo 'OK    ' . count($adds) . "개 인덱스 추가\n";
     }
 
     /**
