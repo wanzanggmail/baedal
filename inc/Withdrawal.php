@@ -460,7 +460,7 @@ final class Withdrawal
      * (`hasOpenRiderRequest()`가 'failed'도 진행중으로 취급).
      *
      * @param list<int> $ids
-     * @return array{completed:int, failed:int, skipped:int, results:list<array{id:int, ok:bool, message:string}>}
+     * @return array{completed:int, accepted:int, failed:int, skipped:int, results:list<array{id:int, ok:bool, message:string}>}
      */
     public static function executeTransfers(array $ids): array
     {
@@ -497,13 +497,16 @@ final class Withdrawal
 
         $gateway = FirmBankingGatewayFactory::make();
 
+        // ── 1단계: 사전 검증 + 접수 대기열 만들기 ──
+        // 이체를 보내기 **전에** 막을 수 있는 것은 여기서 다 막는다. 특히 대리점 잔액은
+        // 이체부터 하고 나면 실제 돈은 나갔는데 지갑이 음수가 되어 되돌릴 수 없다.
+        /** @var array<string, array<string,mixed>> $queue transactionId => 접수 정보 */
+        $queue = [];
         foreach ($rows as $row) {
             $id       = (int) $row['id'];
             $amount   = (int) ($row['amount'] ?? 0);
             $agencyId = (int) ($row['agency_id'] ?: $row['rider_agency_id'] ?: 0);
 
-            // 라이더에게 나가는 돈은 대리점 지갑에서 조달된다 — 잔액이 모자라면 **이체 전에** 막는다.
-            // (이체부터 하고 나면 실제 돈은 나갔는데 지갑은 음수가 되어 되돌릴 수 없다.)
             if ((string) ($row['kind'] ?? '') === 'rider_manual' && $agencyId > 0) {
                 $agencyBalance = AgencyWallet::get($agencyId)['balance'];
                 if ($agencyBalance < $amount) {
@@ -512,13 +515,7 @@ final class Withdrawal
                         number_format($agencyBalance),
                         number_format($amount)
                     );
-                    db_execute(
-                        "UPDATE withdrawal_requests SET status = 'failed', fail_reason = ?
-                          WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
-                        [mb_substr($msg, 0, 300), $id]
-                    );
-                    $out['failed']++;
-                    $out['results'][] = ['id' => $id, 'ok' => false, 'message' => $msg];
+                    self::failTransfer($id, $msg, $out);
                     continue;
                 }
             }
@@ -527,19 +524,173 @@ final class Withdrawal
             // 같아야 웹훅이 왔을 때 어느 건인지 찾을 수 있다.
             $txId = BaumFirmGateway::makeTransactionId('WD', $id);
 
+            $queue[$txId] = [
+                'id'        => $id,
+                'row'       => $row,
+                'amount'    => $amount,
+                'agency_id' => $agencyId,
+                'bank'      => (string) ($row['bank_code'] ?? ''),
+                'account'   => Crypto::decryptSafe((string) ($row['bank_account'] ?? '')),
+                'holder'    => (string) ($row['account_holder'] ?? ''),
+            ];
+        }
+
+        // ── 2단계: 접수 ──
+        if ($queue !== []) {
+            if ($gateway instanceof BaumFirmGateway) {
+                // 바움은 **한 번에 100건**까지 받는다. 건별로 보내면 왕복이 그만큼 쌓인다.
+                self::submitBatched($gateway, $queue, $out);
+            } else {
+                self::submitOneByOne($gateway, $queue, $out);
+            }
+        }
+
+        $out['skipped'] = max(0, count($ids) - count($rows));
+
+        return $out;
+    }
+
+    /**
+     * 이체 실패 기록 — 사전 검증 실패와 접수 거절이 같은 모양으로 남게 한다.
+     *
+     * @param array<string,mixed> $out
+     */
+    private static function failTransfer(int $id, string $reason, array &$out): void
+    {
+        db_execute(
+            "UPDATE withdrawal_requests
+                SET status = 'failed', fail_reason = ?
+              WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
+            [mb_substr($reason, 0, 300), $id]
+        );
+        $out['failed']++;
+        $out['results'][] = ['id' => $id, 'ok' => false, 'message' => $reason];
+    }
+
+    /**
+     * 접수 성공 처리 — 「접수중」으로 두고 장부에 남긴다. **돈이 나간 게 아니다.**
+     *
+     * @param array<string,mixed> $q
+     * @param array<string,mixed> $out
+     */
+    private static function acceptTransfer(string $txId, array $q, string $receptionId, string $provider, array &$out, string $note = ''): void
+    {
+        $id = (int) $q['id'];
+        db_execute(
+            "UPDATE withdrawal_requests
+                SET status = 'transferring', fail_reason = '',
+                    note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
+              WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+            ['펌뱅킹 이체 접수 · ' . $provider . ' · 접수번호 ' . $receptionId . ($note !== '' ? ' · ' . $note : ''), $id]
+        );
+
+        try {
+            FirmTransfer::record([
+                'transaction_id' => $txId,
+                'reception_id'   => $receptionId,
+                'kind'           => FirmTransfer::KIND_WITHDRAWAL,
+                'ref_id'         => $id,
+                'agency_id'      => (int) $q['agency_id'],
+                'rider_id'       => (int) ($q['row']['rider_id'] ?? 0),
+                'amount'         => (int) $q['amount'],
+                'bank_code'      => (string) $q['bank'],
+                'account'        => (string) $q['account'],
+            ]);
+        } catch (Throwable $e) {
+            // 장부에 못 남기면 결과를 이어붙일 방법이 사라진다 — 반드시 눈에 띄게 남긴다.
+            error_log('[FirmTransfer] 접수 기록 실패 wd#' . $id . ' tx=' . $txId . ' — ' . $e->getMessage());
+        }
+
+        $out['accepted']++;
+        $out['results'][] = ['id' => $id, 'ok' => true, 'message' => '이체 접수됨 (결과 대기) · ' . $receptionId];
+    }
+
+    /**
+     * 배치 접수 — 바움은 한 번에 최대 100건을 받는다.
+     *
+     * ⚠️ **요청이 터졌다고 실패로 단정하지 않는다.** 타임아웃이면 바움에 도달했는지 알 수 없고,
+     *    실패로 찍고 재시도하면 **같은 돈이 두 번 나갈 수 있다.** 그래서 「접수중」으로 남기고
+     *    보정 조회(`FirmReconciler`)가 실제 상태를 확인하게 한다. 도달하지 않았다면 미확정으로
+     *    남아 사람 눈에 띈다 — 이중 이체보다 낫다.
+     *
+     * @param array<string, array<string,mixed>> $queue
+     * @param array<string,mixed> $out
+     */
+    private static function submitBatched(BaumFirmGateway $gateway, array $queue, array &$out): void
+    {
+        require_once INC_PATH . '/FirmConfig.php';
+
+        foreach (array_chunk($queue, FirmConfig::MAX_BATCH, true) as $chunk) {
+            $items = [];
+            foreach ($chunk as $txId => $q) {
+                $items[] = [
+                    'transactionId' => $txId,
+                    'bankCode'      => (string) $q['bank'],
+                    'accountNumber' => (string) $q['account'],
+                    'amount'        => (int) $q['amount'],
+                    // 예금주명을 넣으면 바움이 이체 시점에 한 번 더 검증해 준다.
+                    'accountHolder' => (string) $q['holder'],
+                    'receiverMemo'  => (string) $q['holder'],
+                    'metadata'      => (string) json_encode([
+                        'wd'    => (int) $q['id'],
+                        'org'   => (int) $q['agency_id'],
+                        'rider' => (string) ($q['row']['rider_code'] ?? ''),
+                    ], JSON_UNESCAPED_UNICODE),
+                ];
+            }
+
+            try {
+                $res = $gateway->submit($items);
+            } catch (Throwable $e) {
+                foreach ($chunk as $txId => $q) {
+                    self::acceptTransfer($txId, $q, $txId, $gateway->providerLabel(), $out, '응답 불명 — 보정 조회 필요');
+                }
+                error_log('[Withdrawal] 배치 접수 응답 불명 (' . count($chunk) . '건): ' . $e->getMessage());
+                continue;
+            }
+
+            foreach ($chunk as $txId => $q) {
+                if (isset($res['errors'][$txId])) {
+                    $e   = $res['errors'][$txId];
+                    $msg = trim(((string) ($e['errorCode'] ?? '')) . ' ' . ((string) ($e['errorMessage'] ?? '접수 거절')));
+                    self::failTransfer((int) $q['id'], $msg, $out);
+                    continue;
+                }
+                if (!isset($res['accepted'][$txId])) {
+                    // 응답에 아예 없다 — 접수됐는지 알 수 없으므로 실패로 단정하지 않는다.
+                    self::acceptTransfer($txId, $q, $txId, $gateway->providerLabel(), $out, '응답 누락 — 보정 조회 필요');
+                    continue;
+                }
+                $a = $res['accepted'][$txId];
+                self::acceptTransfer($txId, $q, (string) ($a['receptionId'] ?? $txId), $gateway->providerLabel(), $out);
+            }
+        }
+    }
+
+    /**
+     * 건별 접수 — 모의 게이트웨이용. 응답이 곧 결과이므로 그 자리에서 확정한다.
+     *
+     * @param array<string, array<string,mixed>> $queue
+     * @param array<string,mixed> $out
+     */
+    private static function submitOneByOne(FirmBankingGateway $gateway, array $queue, array &$out): void
+    {
+        foreach ($queue as $txId => $q) {
+            $id = (int) $q['id'];
+
             try {
                 $res = $gateway->transfer(
-                    $agencyId,
-                    (string) ($row['bank_code'] ?? ''),
-                    Crypto::decrypt((string) ($row['bank_account'] ?? '')),
-                    (string) ($row['account_holder'] ?? ''),
-                    $amount,
+                    (int) $q['agency_id'],
+                    (string) $q['bank'],
+                    (string) $q['account'],
+                    (string) $q['holder'],
+                    (int) $q['amount'],
                     [
                         'transaction_id' => $txId,
                         'request_id'     => $id,
-                        'rider_code'     => (string) ($row['rider_code'] ?? ''),
+                        'rider_code'     => (string) ($q['row']['rider_code'] ?? ''),
                         'kind'           => 'WD',
-                        'receiver_memo'  => (string) ($row['account_holder'] ?? ''),
+                        'receiver_memo'  => (string) $q['holder'],
                     ]
                 );
             } catch (Throwable $e) {
@@ -548,51 +699,15 @@ final class Withdrawal
             }
 
             if (!$res->success) {
-                db_execute(
-                    "UPDATE withdrawal_requests
-                        SET status = 'failed', fail_reason = ?
-                      WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
-                    [mb_substr($res->failReason, 0, 300), $id]
-                );
-                $out['failed']++;
-                $out['results'][] = ['id' => $id, 'ok' => false, 'message' => $res->failReason];
+                self::failTransfer($id, $res->failReason, $out);
                 continue;
             }
 
-            // ── 비동기 게이트웨이(바움) ──
-            // 여기서 성공한 건 **접수**일 뿐 돈이 나간 게 아니다. 완료로 찍고 지갑을 깎으면
-            // 이후 이체가 실패했을 때 "돈은 안 갔는데 잔액만 사라진" 상태가 된다.
-            // 접수 사실만 남기고, 확정은 웹훅(`FirmWebhook`)이나 보정 조회가 한다.
             if ($gateway->isAsync()) {
-                db_execute(
-                    "UPDATE withdrawal_requests
-                        SET status = 'transferring', fail_reason = '',
-                            note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
-                      WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
-                    ['펌뱅킹 이체 접수 · ' . $gateway->providerLabel() . ' · 접수번호 ' . $res->txId, $id]
-                );
-                try {
-                    FirmTransfer::record([
-                        'transaction_id' => $txId,
-                        'reception_id'   => $res->txId,
-                        'kind'           => FirmTransfer::KIND_WITHDRAWAL,
-                        'ref_id'         => $id,
-                        'agency_id'      => $agencyId,
-                        'rider_id'       => (int) $row['rider_id'],
-                        'amount'         => $amount,
-                        'bank_code'      => (string) ($row['bank_code'] ?? ''),
-                        'account'        => Crypto::decryptSafe((string) ($row['bank_account'] ?? '')),
-                    ]);
-                } catch (Throwable $e) {
-                    // 장부에 못 남기면 결과를 이어붙일 방법이 사라진다 — 반드시 눈에 띄게 남긴다.
-                    error_log('[FirmTransfer] 접수 기록 실패 wd#' . $id . ' tx=' . $txId . ' — ' . $e->getMessage());
-                }
-                $out['accepted']++;
-                $out['results'][] = ['id' => $id, 'ok' => true, 'message' => '이체 접수됨 (결과 대기) · ' . $res->txId];
+                self::acceptTransfer($txId, $q, $res->txId, $gateway->providerLabel(), $out);
                 continue;
             }
 
-            // ── 동기 게이트웨이(모의) ── 응답이 곧 결과이므로 그 자리에서 확정한다.
             $note = '펌뱅킹 이체 완료 · ' . $gateway->providerLabel() . ' · 거래번호 ' . $res->txId;
             if (self::finalizeSuccess($id, $note)) {
                 $out['completed']++;
@@ -602,10 +717,6 @@ final class Withdrawal
                 $out['results'][] = ['id' => $id, 'ok' => false, 'message' => '이미 처리된 건입니다.'];
             }
         }
-
-        $out['skipped'] = max(0, count($ids) - count($rows));
-
-        return $out;
     }
 
     /**

@@ -139,8 +139,8 @@ RECEPTION → PROGRESS → NEED_CHECK → SUCCESS / FAILED / CANCELLED
 - [x] **「접수중」 상태** — `withdrawal_requests.status` 에 `transferring` 추가, 지갑 차감을 통보 수신 뒤로 이동
 - [x] **이체 장부** (`FirmTransfer`) — 접수와 결과 확정을 잇는다. `transaction_id` UNIQUE 로 멱등
 - [x] 미확정 건 보정 조회 (`FirmReconciler`) — 설정 화면 「보정 조회」 버튼
-- [ ] 예금주 조회를 계좌 등록 화면에 연결
-- [ ] 배치 접수(100건) 를 출금 대행에 적용
+- [x] **예금주 조회를 계좌 등록 화면에 연결** — 라이더 상세·라이더 등록·조직 계좌·일정산 등록 모달 5곳
+- [x] **배치 접수(100건)** 를 출금 대행에 적용 — 건별 왕복을 100분의 1로
 
 ## 11. 비동기 처리 구현 (2026-08-26 완료)
 
@@ -180,3 +180,42 @@ RECEPTION → PROGRESS → NEED_CHECK → SUCCESS / FAILED / CANCELLED
 | GET 요청 | 405 |
 | 설정 미완료 | 503 (평문 — 암호화할 키가 없으므로) |
 | 정상 응답 | 200 + **암호화된** `{"success":true}` |
+
+## 12. 계좌 확인·배치 접수 (2026-08-26 완료)
+
+### 예금주 조회 연결
+
+계좌번호는 **한 자리만 틀려도 모르는 사람에게 돈이 간다.** 계좌이체는 받은 사람이
+동의하지 않으면 되찾기가 매우 어렵다. 등록 시점에 한 번 확인하는 것이 가장 싸다.
+
+| 화면 | 버튼 |
+|---|---|
+| 라이더 상세 → 정보 수정 | `ed_verify` |
+| 라이더 목록 → 신규 등록 | `reg_verify` |
+| 결제 설정(카드·계좌) | `ps_verify` |
+| 정산 업로드 → 일정산 등록 모달 (2곳) | `qrVerify` |
+
+- 공용 로직: `inc/AccountVerifier.php` · `admin/api/account_verify.php` · `assets/js/account-verify.js`
+- 조회된 예금주로 입력칸을 **채워 준다** — 옮겨 적다 틀리는 걸 막는다
+- 라이더는 확인 결과를 `riders.bank_verified_at` / `bank_verified_name` 에 남겨
+  상세 화면에 「확인됨」 배지를 띄운다. **계좌가 바뀌면 지운다**(옛 확인이 새 계좌를 보증하지 않는다)
+- **실 연동이 꺼져 있으면 "확인 불가"** 를 돌려주고 저장은 막지 않는다 — 연동 전에도 등록은 돼야 한다
+- 저장 직전 `AccountVerify.confirmUnverified()` 로 한 번 되묻는다(계좌를 **바꿨을 때만**)
+- 남용 방지: 세션당 분당 30회
+
+### 배치 접수
+
+`Withdrawal::executeTransfers()` 를 두 단계로 나눴다.
+
+1. **사전 검증** — 대리점 잔액 등 이체 전에 막을 수 있는 것을 모두 거른다
+   (이체부터 하면 돈은 나갔는데 지갑이 음수가 되어 되돌릴 수 없다)
+2. **접수** — 바움이면 `submitBatched()`(100건씩), 모의면 `submitOneByOne()`
+
+⚠️ **요청이 터졌다고 실패로 단정하지 않는다.** 타임아웃은 바움에 도달했는지 알 수 없고,
+실패로 찍고 재시도하면 **같은 돈이 두 번 나갈 수 있다.** 그래서 「접수중」으로 남기고
+보정 조회가 실제 상태를 확인하게 한다. 도달하지 않았다면 미확정으로 남아 사람 눈에 띈다 —
+이중 이체보다 낫다. 응답에 해당 건이 아예 없을 때도 같게 처리한다.
+
+**호출부 3곳도 함께 고쳤다** — `completed` 만 보고 있어서 실 연동에서는 **접수 성공을
+"이체 실패"로 표시**했을 것이다: `admin/api/withdrawals.php` ·
+`admin/api/withdrawal_proxy.php` · `inc/DailyAutoWithdrawal.php`.

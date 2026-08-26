@@ -117,19 +117,30 @@ if ($method === 'POST') {
         // 「출금 확정」 — 펌뱅킹으로 건별 즉시 이체. 실패해도 멈추지 않고 다음 건을 계속하며,
         // 실제로 이체된 건만 완료 처리된다(LOGIC §5.4).
         if ($action === 'execute_transfer') {
-            $r = Withdrawal::executeTransfers($ids);
-            if ($r['completed'] === 0 && $r['failed'] === 0) {
+            $r        = Withdrawal::executeTransfers($ids);
+            $accepted = (int) ($r['accepted'] ?? 0);
+            if ($r['completed'] === 0 && $accepted === 0 && $r['failed'] === 0) {
                 $err('이체할 수 있는 건이 없습니다. (대기·다운로드 완료·이체 실패 상태만 가능)');
             }
 
-            $msg = "{$r['completed']}건 이체 완료";
-            if ($r['failed'] > 0) {
-                $msg .= " · {$r['failed']}건 실패(재시도 가능)";
+            // ⚠️ 실 연동(바움)은 **접수만** 즉시 응답한다 — 완료로 적으면 거짓말이 된다.
+            //    돈이 나갔는지는 처리결과 통보를 받아야 알 수 있다.
+            $parts = [];
+            if ($r['completed'] > 0) {
+                $parts[] = "{$r['completed']}건 이체 완료";
             }
+            if ($accepted > 0) {
+                $parts[] = "{$accepted}건 이체 접수(결과 대기)";
+            }
+            if ($r['failed'] > 0) {
+                $parts[] = "{$r['failed']}건 실패(재시도 가능)";
+            }
+            $msg = implode(' · ', $parts);
             AuditLog::record('withdrawal.transfer', implode(',', $ids), $msg);
             echo json_encode([
                 'ok'        => true,
                 'completed' => $r['completed'],
+                'accepted'  => $accepted,
                 'failed'    => $r['failed'],
                 'results'   => $r['results'],
                 'message'   => $msg,

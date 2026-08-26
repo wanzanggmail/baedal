@@ -311,6 +311,14 @@ if ($method === 'POST' || $method === 'PATCH') {
              $bankCode, Crypto::encrypt($bankAccount), $holder,
              $kyc, $id]
         );
+        // 계좌가 바뀌면 이전 「예금주 확인」 기록은 더 이상 그 계좌를 보증하지 않는다 → 지운다.
+        // (같은 계좌를 그대로 두고 이름만 고친 경우까지 지우면 확인 배지가 헛되이 사라진다.)
+        $prevAccount = Crypto::decryptSafe((string) ($rider['bank_account'] ?? ''));
+        if ((string) $bankAccount !== $prevAccount || $bankCode !== ($rider['bank_code'] ?? null)) {
+            require_once INC_PATH . '/AccountVerifier.php';
+            AccountVerifier::clearRiderVerified($id);
+        }
+
         AuditLog::record('rider.update_profile', (string) ($rider['rider_code'] ?? $id), '프로필 정보 수정');
         echo json_encode(['ok' => true, 'message' => '라이더 정보가 저장되었습니다.'], JSON_UNESCAPED_UNICODE);
         exit;

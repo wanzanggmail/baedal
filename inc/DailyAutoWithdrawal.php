@@ -175,11 +175,15 @@ final class DailyAutoWithdrawal
             $res  = Withdrawal::executeTransfers([$reqId]);
             $first = $res['results'][0] ?? null;
 
-            if ((int) $res['completed'] > 0) {
+            // 실 연동(바움)은 접수만 즉시 응답한다 — 접수도 성공으로 센다.
+            // 최종 확정은 처리결과 통보(`FirmWebhook`)나 보정 조회가 한다.
+            $accepted = (int) ($res['accepted'] ?? 0) > 0;
+            if ((int) $res['completed'] > 0 || $accepted) {
                 $out['paid']++;
                 $out['paid_amount'] += $amount;
                 $out['results'][] = [
-                    'rider_id' => $riderId, 'name' => $name, 'status' => 'paid',
+                    'rider_id' => $riderId, 'name' => $name,
+                    'status' => $accepted ? 'accepted' : 'paid',
                     'amount' => $amount, 'message' => (string) ($first['message'] ?? ''),
                 ];
                 continue;

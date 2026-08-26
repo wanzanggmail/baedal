@@ -457,7 +457,12 @@ $platformLabels = [
 							</div>
 							<div class="col-md-6 mb-4">
 								<label class="form-label required">계좌번호</label>
-								<input type="text" class="form-control form-control-solid font-monospace" id="qrAccount" maxlength="40" placeholder="숫자·하이픈" />
+								<div class="d-flex gap-2">
+									<input type="text" class="form-control form-control-solid font-monospace" id="qrAccount" maxlength="40" placeholder="숫자·하이픈" />
+									<button type="button" class="btn btn-light-primary text-nowrap px-3" id="qrVerify">확인</button>
+								</div>
+								<?php // 일정산 라이더는 대리점이 매일 출금 대행한다 — 계좌가 틀리면 매일 잘못 나간다. ?>
+								<div class="fs-8 mt-2" id="qrVerifyMsg"></div>
 							</div>
 						</div>
 						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>
@@ -881,6 +886,8 @@ $platformLabels = [
 		document.getElementById('qrWithholding').checked = false;
 		document.getElementById('qrBank').value = '';
 		document.getElementById('qrAccount').value = '';
+		var qrVMsg = document.getElementById('qrVerifyMsg');
+		if (qrVMsg) { qrVMsg.innerHTML = ''; qrVMsg.dataset.state = ''; }
 		document.getElementById('qrBankWrap').classList.add('d-none');
 		const al = document.getElementById('quickRiderAlert'); al.className = 'd-none mb-4'; al.textContent = '';
 		const pfLabels = { coupang: '쿠팡이츠', baemin: '배달의민족', other: '기타' };
@@ -1086,6 +1093,13 @@ $platformLabels = [
 	function escHtml(s) {
 		return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 	}
+
+	// ── 계좌 확인 ── 일정산 라이더는 매일 출금 대행이 나간다.
+	document.addEventListener('DOMContentLoaded', function () {
+		if (!window.AccountVerify) { return; }
+		AccountVerify.attach({ bank: 'qrBank', account: 'qrAccount', holder: 'qrName',
+			button: 'qrVerify', result: 'qrVerifyMsg' });
+	});
 })();
 </script>
 

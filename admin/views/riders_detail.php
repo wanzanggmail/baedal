@@ -549,11 +549,21 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							</div>
 							<div class="mb-4">
 								<label class="form-label fs-7 fw-semibold">계좌번호</label>
-								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="ed_account" value="<?= htmlspecialchars($acct, ENT_QUOTES, 'UTF-8') ?>" placeholder="숫자·하이픈" maxlength="40" />
+								<input type="text" class="form-control form-control-sm form-control-solid font-monospace" id="ed_account" value="<?= htmlspecialchars($acct, ENT_QUOTES, 'UTF-8') ?>" data-orig="<?= htmlspecialchars($acct, ENT_QUOTES, 'UTF-8') ?>" placeholder="숫자·하이픈" maxlength="40" />
 							</div>
 							<div class="mb-2">
 								<label class="form-label fs-7 fw-semibold">예금주</label>
-								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_holder" value="<?= htmlspecialchars((string) ($rider['account_holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="80" />
+								<div class="d-flex gap-2">
+									<input type="text" class="form-control form-control-sm form-control-solid" id="ed_holder" value="<?= htmlspecialchars((string) ($rider['account_holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="80" />
+									<button type="button" class="btn btn-sm btn-light-primary text-nowrap px-3" id="ed_verify">계좌 확인</button>
+								</div>
+								<?php // 계좌번호가 한 자리만 틀려도 모르는 사람에게 송금된다 — 저장 전에 확인한다. ?>
+								<div class="fs-8 mt-2" id="ed_verify_msg">
+									<?php if (!empty($rider['bank_verified_at'])) : ?>
+									<span class="badge badge-light-success me-1">확인됨</span>
+									<span class="text-gray-600"><?= htmlspecialchars((string) ($rider['bank_verified_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(substr((string) $rider['bank_verified_at'], 0, 10), ENT_QUOTES, 'UTF-8') ?></span>
+									<?php endif; ?>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -987,6 +997,12 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 				editAlert.textContent = '이름을 입력하세요.';
 				return;
 			}
+			// 계좌를 **바꿨을 때만** 확인을 되묻는다. 이름만 고치는데 계좌 경고가 뜨면 성가시다.
+			// (원래 값은 입력칸의 data-orig 에 담아 둔다 — 스크립트 블록이 달라 전역 변수를 못 쓴다.)
+			var acctEl = document.getElementById('ed_account');
+			if (payload.bank_account !== ((acctEl && acctEl.dataset.orig) || '') && payload.bank_account !== '') {
+				if (!window.AccountVerify || !AccountVerify.confirmUnverified('ed_verify_msg')) { return; }
+			}
 			profileBtn.disabled = true;
 			profileBtn.textContent = '저장 중…';
 			fetch(API, {
@@ -1217,6 +1233,17 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 				.catch(function () { alert('네트워크 오류'); });
 		});
 	});
+
+	// ── 계좌 확인 ──
+	document.addEventListener('DOMContentLoaded', function () {
+		if (!window.AccountVerify) { return; }
+		AccountVerify.attach({
+			bank: 'ed_bank', account: 'ed_account', holder: 'ed_holder',
+			button: 'ed_verify', result: 'ed_verify_msg',
+			riderId: <?= (int) ($rider['id'] ?? 0) ?>
+		});
+	});
+
 })();
 </script>
 <?php endif; ?>

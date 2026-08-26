@@ -67,6 +67,7 @@ final class MigrateRunner
         self::migrateSecretEncryption();
         self::migrateFirmBanking();
         self::migrateFirmTransfers();
+        self::migrateAccountVerified();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -2216,6 +2217,34 @@ final class MigrateRunner
         } else {
             echo "SKIP  withdrawal_requests.status (이미 transferring 있음)\n";
         }
+    }
+
+
+    /** 라이더 계좌 확인 기록 — 「예금주 조회」로 실재를 확인한 시각과 그때의 예금주명. */
+    private static function migrateAccountVerified(): void
+    {
+        echo "== 라이더 계좌 확인 기록 ==\n";
+
+        if (!db_table_exists('riders')) {
+            echo "SKIP  riders 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+        $adds = [];
+        if (!in_array('bank_verified_at', $cols, true)) {
+            $adds[] = "ADD COLUMN `bank_verified_at` DATETIME NULL COMMENT '예금주 조회로 확인한 시각'";
+        }
+        if (!in_array('bank_verified_name', $cols, true)) {
+            $adds[] = "ADD COLUMN `bank_verified_name` VARCHAR(80) NOT NULL DEFAULT '' COMMENT '확인 당시 예금주명'";
+        }
+        if ($adds === []) {
+            echo "SKIP  riders 계좌 확인 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE `riders` ' . implode(', ', $adds));
+        echo '  + riders 계좌 확인 컬럼 ' . count($adds) . "개\n";
     }
 
 }

@@ -402,7 +402,12 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							</div>
 							<div class="col-md-4">
 								<label class="form-label">계좌번호</label>
-								<input type="text" class="form-control form-control-solid" id="reg_bank_account" maxlength="40" />
+								<div class="d-flex gap-2">
+									<input type="text" class="form-control form-control-solid" id="reg_bank_account" maxlength="40" />
+									<button type="button" class="btn btn-light-primary text-nowrap px-3" id="reg_verify">확인</button>
+								</div>
+								<?php // 계좌번호가 한 자리만 틀려도 모르는 사람에게 송금된다. ?>
+								<div class="fs-8 mt-2" id="reg_verify_msg"></div>
 							</div>
 						</div>
 						<div class="d-flex justify-content-end gap-3">
@@ -704,6 +709,13 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 		alertEl.innerHTML = '';
 		previewArea.classList.add('d-none');
 		confirmBtn.classList.add('d-none');
+	});
+
+	// ── 계좌 확인 ── 계좌번호 오타는 되돌리기 어려운 오송금으로 이어진다.
+	document.addEventListener('DOMContentLoaded', function () {
+		if (!window.AccountVerify) { return; }
+		AccountVerify.attach({ bank: 'reg_bank_code', account: 'reg_bank_account', holder: 'reg_account_holder',
+			button: 'reg_verify', result: 'reg_verify_msg' });
 	});
 })();
 </script>

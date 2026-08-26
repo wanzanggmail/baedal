@@ -270,7 +270,15 @@ if ($agencyId > 0) {
 						</select>
 					</div>
 					<div class="mb-3"><label class="form-label required">계좌번호</label><input type="text" class="form-control form-control-solid" id="ps_account" value="<?= htmlspecialchars((string) ($account['account_no'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
-					<div class="mb-3"><label class="form-label">예금주</label><input type="text" class="form-control form-control-solid" id="ps_holder" value="<?= htmlspecialchars((string) ($account['holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" /></div>
+					<div class="mb-3">
+						<label class="form-label">예금주</label>
+						<div class="d-flex gap-2">
+							<input type="text" class="form-control form-control-solid" id="ps_holder" value="<?= htmlspecialchars((string) ($account['holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" />
+							<button type="button" class="btn btn-light-primary text-nowrap px-3" id="ps_verify">계좌 확인</button>
+						</div>
+						<?php // 정산금이 실제로 나가는 계좌다 — 틀리면 되돌리기 어렵다. ?>
+						<div class="fs-8 mt-2" id="ps_verify_msg"></div>
+					</div>
 					<?php // 핀테크이용번호는 **출금 원천 계좌**(본사)에만 필요하다. 수령 계좌엔 쓰이지 않아 표시하지 않는다. ?>
 					<button type="button" class="btn btn-primary" id="ps_account_save">계좌 저장</button>
 				</div>
@@ -367,7 +375,14 @@ if ($agencyId > 0) {
 			if (amt <= 0) { showToast('충전 금액을 입력하세요.', false); return; }
 			post({ action: 'pg_charge', amount: amt }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); if (r.wallet) document.getElementById('ps_balance').textContent = (r.wallet.balance || 0).toLocaleString('ko-KR') + '원'; }).catch(function (e) { showToast(e.message, false); });
 		});
-	})();
+	
+	// ── 계좌 확인 ── 정산금이 실제로 나가는 계좌다.
+	document.addEventListener('DOMContentLoaded', function () {
+		if (!window.AccountVerify) { return; }
+		AccountVerify.attach({ bank: 'ps_bank', account: 'ps_account', holder: 'ps_holder',
+			button: 'ps_verify', result: 'ps_verify_msg' });
+	});
+})();
 	</script>
 	<?php endif; // $canUse — 대상 대리점 선택됨 ?>
 	<?php endif; // 마이그레이션 / 권한 ?>

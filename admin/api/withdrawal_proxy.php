@@ -224,7 +224,10 @@ $payOne = static function (int $riderId, ?string $toDate) use ($assertMine): arr
     // 2) 즉시 이체 — 대리점이 「출금하기」를 누른 것이므로 확정까지 진행한다.
     $res    = Withdrawal::executeTransfers([$reqId]);
     $first  = $res['results'][0] ?? null;
-    $paid   = (int) $res['completed'] > 0;
+    // 실 연동에서는 접수까지가 즉시 결과다 — 접수도 '진행됨'으로 본다(실패가 아니다).
+    $done     = (int) $res['completed'] > 0;
+    $accepted = (int) ($res['accepted'] ?? 0) > 0;
+    $paid     = $done || $accepted;
     $amount = (int) ($req['amount'] ?? 0);
 
     AuditLog::record(
@@ -236,7 +239,7 @@ $payOne = static function (int $riderId, ?string $toDate) use ($assertMine): arr
             (string) $rider['rider_code'],
             $toDate !== null ? $toDate . '까지' : '전액',
             number_format($amount),
-            $paid ? '이체 완료' : '이체 실패'
+            $done ? '이체 완료' : ($accepted ? '이체 접수(결과 대기)' : '이체 실패')
         )
     );
 
@@ -245,9 +248,11 @@ $payOne = static function (int $riderId, ?string $toDate) use ($assertMine): arr
         'name'       => (string) $rider['name'],
         'amount'     => $amount,
         'request_id' => $reqId,
-        'message'    => $paid
+        'message'    => $done
             ? sprintf('%s님에게 %s원 지급 완료', (string) $rider['name'], number_format($amount))
-            : '이체 실패: ' . (string) ($first['message'] ?? '사유 미상') . ' (신청 #' . $reqId . ' 은 남아 있어 재시도할 수 있습니다)',
+            : ($accepted
+                ? sprintf('%s님 %s원 이체 접수 — 은행 처리 결과가 오면 완료로 바뀝니다', (string) $rider['name'], number_format($amount))
+                : '이체 실패: ' . (string) ($first['message'] ?? '사유 미상') . ' (신청 #' . $reqId . ' 은 남아 있어 재시도할 수 있습니다)'),
     ];
 };
 
