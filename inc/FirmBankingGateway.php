@@ -5,14 +5,17 @@ declare(strict_types=1);
 require_once __DIR__ . '/OpenBankingGateway.php'; // TransferResult 재사용
 
 /**
- * 펌뱅킹 이체 게이트웨이 (쿠콘·하이픈 등 중계사) — LOGIC §5.4 · §7 #10.
+ * 펌뱅킹 이체 게이트웨이 (중계사: 바움P&S) — LOGIC §5.4 · §7 #10.
  *
  * 기존 흐름은 "은행 이체파일 다운로드 → 은행에서 수동 이체 → 관리자가 입금완료 클릭"이었다.
  * 여기서는 **대리점이 「출금 확정」을 누르면 그 자리에서 이체가 실행**된다.
  *
- * ⚠️ 실 API 미도착 — 현재는 `MockFirmBankingGateway`가 결과를 시뮬레이션한다.
- *    쿠콘/하이픈 스펙이 오면 `FirmBankingGateway`를 구현한 Real 클래스를 추가하고
- *    `FirmBankingGatewayFactory::make()`만 교체하면 된다(호출부 수정 불필요).
+ * 중계사는 **바움P&S** 로 확정됐다(2026-08-26, 매뉴얼 v1.1.8). 실 구현은 `BaumFirmGateway`,
+ * 설정은 `FirmConfig` 에 있고 `FirmBankingGatewayFactory::make()` 가 둘을 갈라준다.
+ *
+ * ⚠️ **바움의 이체는 비동기다** — 접수(RECEPTION)만 즉시 응답하고 성공/실패는 웹훅으로 온다.
+ *    따라서 `transfer()` 의 성공은 "접수됨" 이지 "돈이 나갔음" 이 아니다.
+ *    호출부를 고치기 전까지는 `firm_config.driver` 를 `mock` 으로 두어야 한다.
  *
  * 오픈뱅킹(`OpenBankingGateway`, 금융결제원)과 별도로 둔 이유 — 사업자·인증 체계가 다르고
  * 라이더 출금은 펌뱅킹으로, 기존 일일정산·대리점 인출은 그대로 오픈뱅킹 경로를 쓰기 때문.
@@ -44,7 +47,7 @@ interface FirmBankingGateway
  */
 final class MockFirmBankingGateway implements FirmBankingGateway
 {
-    public function __construct(private readonly string $provider = '쿠콘(모의)')
+    public function __construct(private readonly string $provider = '모의 펌뱅킹')
     {
     }
 
@@ -72,11 +75,25 @@ final class MockFirmBankingGateway implements FirmBankingGateway
 final class FirmBankingGatewayFactory
 {
     /**
-     * 실 연동 시 이 메서드만 교체한다.
-     * 중계사 선택(쿠콘/하이픈)은 스펙 도착 후 설정값으로 분기할 예정.
+     * 설정(`firm_config.driver`)에 따라 실 게이트웨이/모의를 고른다.
+     *
+     * 중계사는 **바움P&S** 로 확정됐다(2026-08-26 매뉴얼 v1.1.8 수령).
+     * 자격증명이 하나라도 빠지면 **조용히 모의로 떨어진다** — 설정 화면에서 "실 연동 준비됨"
+     * 배지로 상태를 확인할 수 있다. 안 되는 걸 되는 척하는 것보다 낫다.
+     *
+     * ⚠️ 실 연동은 이체 결과가 **비동기**로 온다(`BaumFirmGateway` 주석). 호출부가
+     *    접수를 완료로 처리하지 않도록 고친 뒤에 `driver=baum` 으로 바꿀 것.
      */
     public static function make(): FirmBankingGateway
     {
+        require_once __DIR__ . '/FirmConfig.php';
+
+        if (FirmConfig::isReady()) {
+            require_once __DIR__ . '/BaumFirmGateway.php';
+
+            return new BaumFirmGateway();
+        }
+
         return new MockFirmBankingGateway();
     }
 

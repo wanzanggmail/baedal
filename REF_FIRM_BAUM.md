@@ -1,0 +1,142 @@
+# 펌뱅킹 연동 참고 — 바움P&S
+
+출처: `바움P&S_펌뱅킹_API_연동_매뉴얼_v1.1.8` (2026-07)
+구현: `inc/BaumFirmGateway.php` · `inc/FirmConfig.php` · `inc/BaumCrypto.php` · `inc/FirmApiLog.php`
+화면: 시스템 관리 → **펌뱅킹 연동** (`system/firm-integration`)
+
+---
+
+## 1. 서버
+
+| 구분 | URL |
+|---|---|
+| 개발 | `https://dev-firm-api.baumpns.com` |
+| 운영 | `https://firm-api.baumpns.com` |
+
+## 2. 인증
+
+`POST /auth/access_token` — **이 요청만 암호화하지 않는다.**
+
+```
+authorization: Basic base64("{Client_ID}:{Secret_Key}")
+```
+
+응답의 `access_token` 을 이후 모든 요청에 `authorization: Bearer {token}` 으로 넣는다.
+
+> ⚠️ **확인 대기** — 응답 `expires_in` 의 단위. 문서 설명은 "초" 인데 예시값이 `86400000` 이다.
+> 초로 보면 1,000일이라 토큰을 영원히 갱신하지 않게 된다. 24시간을 밀리초로 적은 것으로 보고
+> **10만 이상이면 밀리초로 간주**하도록 구현했다(`FirmConfig::storeAccessToken()`).
+
+## 3. 암호화 — 우리 시스템의 두 암호화와 헷갈리지 말 것
+
+| 클래스 | 용도 | 알고리즘 | 키 출처 |
+|---|---|---|---|
+| `Crypto` | **우리 DB 저장** | AES-256-**GCM** | `.env` 의 `APP_ENC_KEY` |
+| `BaumCrypto` | **바움과 송수신** | AES-256-**CBC** / PKCS5 / Base64 | 바움 발급 KEY·IV |
+
+바움 KEY/IV 자체도 우리 DB 에 넣을 때 `Crypto` 로 한 번 더 감싼다. 이중 구조가 맞다.
+
+**적용 범위** — `/auth/access_token` 을 제외한 **모든 요청·응답 Body 전체**. 바움이 우리에게
+보내는 「계좌이체 처리결과 통보」도 암호화돼 있고, **우리가 돌려주는 응답 Body 도 암호화해야**
+정상 처리된다.
+
+Java `AES/CBC/PKCS5Padding` 과 PHP `aes-256-cbc` 는 블록 16바이트에서 동일하다.
+`openssl` CLI 로 교차 검증 완료(같은 키·IV·평문 → 같은 암호문).
+
+## 4. 엔드포인트
+
+| 기능 | Method | Path |
+|---|---|---|
+| 토큰 발급 | POST | `/auth/access_token` |
+| 예금주 조회 | POST | `/api/firm/account-holder` ⚠️ |
+| 잔액(전체 포켓) | GET | `/api/firm/account-pocket` |
+| 잔액(특정 포켓) | GET | `/api/firm/pocket/{포켓코드}` |
+| 계좌이체 접수 | POST | `/api/firm/transfer-submission` |
+| 이체 정보 조회 | GET | `/api/firm/transfer-info/{transactionId}` |
+| 계좌이체 취소 | POST | `/api/firm/transfer-cancel` |
+| 통보 URL 관리 | POST/GET/PUT/DELETE | `/api/firm/webhook` |
+
+> ⚠️ **확인 대기** — 예금주 조회 경로가 문서 안에서 어긋난다.
+> API 목록 표에는 `/api/firm/depositor-name`, 상세 페이지와 curl 예시에는 `/api/firm/account-holder`.
+> **상세 페이지 기준(`account-holder`)으로 구현**했다.
+
+## 5. 이체는 비동기다 — 이 연동의 핵심
+
+```
+RECEPTION → PROGRESS → NEED_CHECK → SUCCESS / FAILED / CANCELLED
+```
+
+`transfer-submission` 은 **접수(RECEPTION)만 즉시 응답**한다. 실제 성공/실패는 나중에
+「계좌이체 처리결과 통보」(웹훅)로 온다.
+
+**우리 코드의 기존 전제와 어긋나는 지점이다.** `Withdrawal::executeTransfers()` 는
+`transfer()` 성공을 곧 "이체 완료"로 보고 지갑을 깎는다. 그대로 실 연동을 켜면
+**접수만 된 건이 출금 완료로 찍히고 라이더 지갑이 먼저 줄어든다.**
+
+→ `withdrawal_requests` 에 「접수중(결과 대기)」 상태를 넣고, 지갑 차감은 웹훅에서
+`SUCCESS` 를 받은 뒤로 미뤄야 한다. **그 작업 전에는 `firm_config.driver` 를 `mock` 으로 유지할 것.**
+
+- 취소는 **RECEPTION 상태만** 가능하다. 진행 중이면 못 막는다.
+- 웹훅은 **1분 간격 최대 10회** 재시도 후 포기한다(Read Timeout 60초).
+  → 유실 대비로 미확정 건을 `transfer-info` 로 조회하는 보정 경로가 필요하다.
+
+## 6. 계좌이체 접수 요청
+
+**Body 는 배열이다** — 개별 객체가 아니라 배열 하위 객체. **최대 100건**을 한 번에 보낸다.
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| `transactionId` | ✅ | 우리가 만드는 고유 ID. 중복 접수 방지 · 조회 · 취소에 쓰인다 |
+| `bankCode` | ✅ | `C` + 3자리 (아래 참고) |
+| `accountNumber` | ✅ | 숫자만 |
+| `amount` | ✅ | 출금 금액 |
+| `accountHolder` | | **입력하면 예금주명을 검증**한다 — 넣는 게 안전하다 |
+| `receiverMemo` | | 받는 분 통장 표시 (미입력 시 사용자 이름) |
+| `memo` | | 출금 메모 (미입력 시 수취 예금주명) |
+| `pocketCode` | | 출금 포켓 (미입력 시 기본 포켓) |
+| `reservationTime` | | `yyyyMMddHHmm` 예약 (미입력 시 즉시) |
+| `metadata` | | 부가 정보, 최대 4096 bytes |
+
+**Query String (선택)** — 수취 은행 AML 대응:
+`delayedPeriodMinute` · `delayedReservationCount` (예: 1분당 최대 3건)
+
+## 7. 은행 코드
+
+바움 코드 = `C` + **우리가 쓰는 표준 3자리**. 예: `004` → `C004`(국민), `088` → `C088`(신한).
+
+**우리 `system_codes` 의 은행 13개가 전부 바움 목록에 있음을 대조 확인했다.**
+변환은 `BaumFirmGateway::bankCode()` 한 곳에서만 한다.
+
+## 8. 오류 코드
+
+| 구분 | 코드 |
+|---|---|
+| 공통 | `VALIDATION_FAILED` · `NOT_CLASSIFIED` · `EXCEPTION` · `RESOURCE_NOT_EXISTS` |
+| 접수 | `DUPLICATE_SUBMISSION` · `BEING_PROCESSED` · `ALREADY_PROCESSED` · `POCKET_NOT_EXISTS` · `INSUFFICIENT_SUBMISSION_AMOUNT` · `TRANSFER_RESTRICTED_TIME` |
+| 취소 | `TRANSACTION_NOT_EXISTS` · `BEING_PROCESSED` · `ALREADY_PROCESSED` |
+
+개발환경 실패 테스트용 계좌번호: `9999999999999` (13자)
+
+## 9. 바움에 문의·수령해야 할 것
+
+- [ ] **Client ID / Secret Key**
+- [ ] **암호화 KEY (Base64 32바이트) / IV (Base64 16바이트)**
+- [ ] **포켓코드** (기본·추가)
+- [ ] **처리결과 통보 발신 IP** — ⚠️ **매뉴얼에 없다.** 없으면 통보를 위조당할 수 있다.
+      암호화 키를 아는 쪽만 유효한 본문을 만들 수 있어 사실상 인증 역할을 하지만,
+      IP 제한이 있으면 훨씬 안전하다. 서명 검증 수단도 문서에 보이지 않는다.
+- [ ] `expires_in` 단위 (§2)
+- [ ] 예금주 조회 경로 (§4)
+
+## 10. 진행 상태
+
+- [x] 암복호화 (`BaumCrypto`) — openssl CLI 교차 검증 완료
+- [x] 설정 저장 (`FirmConfig`, 비밀값 암호화) · 마이그레이션 · 관리자 화면
+- [x] 게이트웨이 (`BaumFirmGateway`) — 토큰 · 예금주 조회 · 잔액 · 접수 · 조회 · 취소
+- [x] API 호출 로그 (`FirmApiLog`, 계좌번호 뒤 4자리만)
+- [x] 팩토리 분기 — 자격증명이 없으면 자동으로 모의
+- [ ] **처리결과 통보 수신** (`/firm/noti.php`) — 응답도 암호화해야 함
+- [ ] **「접수중」 상태** — `withdrawal_requests` 상태 추가 + 지갑 차감 시점 이동
+- [ ] 미확정 건 보정 조회 (`transfer-info` 폴링)
+- [ ] 예금주 조회를 계좌 등록 화면에 연결
+- [ ] 배치 접수(100건) 를 출금 대행에 적용

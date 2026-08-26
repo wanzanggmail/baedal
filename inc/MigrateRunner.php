@@ -65,6 +65,7 @@ final class MigrateRunner
         self::migrateCardBuyer();
         self::migrateOrderDetailScaleIndexes();
         self::migrateSecretEncryption();
+        self::migrateFirmBanking();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -2065,6 +2066,68 @@ final class MigrateRunner
                 $n++;
             }
             echo $n > 0 ? "  + {$table}: {$n}행 암호화\n" : "  = {$table}: 이관할 평문 없음\n";
+        }
+    }
+
+
+    /**
+     * 펌뱅킹(바움P&S) 연동 설정 + API 호출 로그.
+     *
+     * 비밀값은 `Crypto`(APP_ENC_KEY)로 암호화해 저장하므로 컬럼을 넉넉히 잡는다
+     * (원문 40자 → 약 99자. 좁게 잡으면 잘려 들어가 복구가 안 된다).
+     */
+    private static function migrateFirmBanking(): void
+    {
+        echo "== 펌뱅킹(바움P&S) 연동 ==\n";
+
+        if (!db_table_exists('firm_config')) {
+            db_execute(
+                "CREATE TABLE `firm_config` (
+                    `id`               TINYINT UNSIGNED NOT NULL DEFAULT 1,
+                    `driver`           VARCHAR(20)  NOT NULL DEFAULT 'mock' COMMENT 'mock | baum',
+                    `env`              VARCHAR(10)  NOT NULL DEFAULT 'dev'  COMMENT 'dev | prod',
+                    `client_id`        VARCHAR(190) NOT NULL DEFAULT ''     COMMENT '식별자라 평문',
+                    `secret_key`       VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '🔒 암호화 저장',
+                    `enc_key`          VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '🔒 바움 발급 AES KEY(Base64)',
+                    `enc_iv`           VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '🔒 바움 발급 AES IV(Base64)',
+                    `pocket_code`      VARCHAR(40)  NOT NULL DEFAULT ''     COMMENT '출금 포켓(비우면 기본 포켓)',
+                    `noti_allow_ips`   VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '처리결과 통보 허용 IP',
+                    `access_token`     TEXT         NULL                    COMMENT '🔒 암호화 저장',
+                    `token_expires_at` DATETIME     NULL,
+                    `updated_by`       INT UNSIGNED NULL,
+                    `updated_at`       DATETIME     NULL,
+                    PRIMARY KEY (`id`)
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            db_execute('INSERT INTO `firm_config` (`id`) VALUES (1)');
+            echo "  + firm_config 생성(기본 mock/dev)\n";
+        } else {
+            echo "SKIP  firm_config (이미 있음)\n";
+        }
+
+        if (!db_table_exists('firm_api_logs')) {
+            db_execute(
+                "CREATE TABLE `firm_api_logs` (
+                    `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `endpoint`      VARCHAR(120) NOT NULL DEFAULT '',
+                    `method`        VARCHAR(10)  NOT NULL DEFAULT '',
+                    `ref`           VARCHAR(60)  NOT NULL DEFAULT '' COMMENT 'transactionId 등 추적 키',
+                    `http_code`     SMALLINT     NOT NULL DEFAULT 0,
+                    `result_code`   VARCHAR(40)  NOT NULL DEFAULT '',
+                    `result_msg`    VARCHAR(300) NOT NULL DEFAULT '',
+                    `ok`            TINYINT(1)   NOT NULL DEFAULT 0,
+                    `duration_ms`   INT          NOT NULL DEFAULT 0,
+                    `request_body`  TEXT         NULL COMMENT '복호화된 평문(민감값 마스킹 후)',
+                    `response_body` TEXT         NULL,
+                    `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    KEY `idx_firmlog_created` (`created_at`),
+                    KEY `idx_firmlog_ref` (`ref`)
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            echo "  + firm_api_logs 생성\n";
+        } else {
+            echo "SKIP  firm_api_logs (이미 있음)\n";
         }
     }
 

@@ -43,5 +43,6 @@ return [
     'system/pg-fee' => ['title' => '수수료 현황', 'view' => 'pg_fee_config'],
     'system/pg-integration' => ['title' => 'PG 연동·결제통지', 'view' => 'pg_integration'],
     'system/pg-logs' => ['title' => 'PG 결제 이력', 'view' => 'pg_logs'],
+    'system/firm-integration' => ['title' => '펌뱅킹 연동', 'view' => 'firm_integration'],
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
 ];
