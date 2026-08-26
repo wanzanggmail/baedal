@@ -108,6 +108,25 @@ try {
         exit;
     }
 
+    if ($action === 'reconcile') {
+        // 웹훅이 못 온 건을 우리가 물어본다. 접수 직후 건은 건드리지 않는다(웹훅이 올 시간을 준다).
+        require_once INC_PATH . '/FirmReconciler.php';
+        $minAge = max(0, min(1440, (int) ($body['min_age'] ?? 5)));
+        $r      = FirmReconciler::run($minAge);
+
+        AuditLog::record('firm.reconcile', '1', sprintf('펌뱅킹 보정 조회 — 확인 %d건 / 확정 %d건', $r['checked'], $r['finalized']));
+
+        echo json_encode([
+            'ok'      => true,
+            'message' => sprintf(
+                '조회 %d건 · 확정 %d건 · 진행중 %d건 · 오류 %d건',
+                $r['checked'], $r['finalized'], $r['still_pending'], $r['errors']
+            ),
+            'result'  => $r,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $err('알 수 없는 action 입니다.');
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);

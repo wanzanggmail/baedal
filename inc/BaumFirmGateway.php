@@ -18,7 +18,8 @@ require_once __DIR__ . '/FirmApiLog.php';
  *    그래서 `transfer()` 가 `TransferResult::ok()` 를 돌려줘도 **돈이 나간 게 아니다.**
  *    호출부가 이를 "완료"로 처리하면 접수만 된 건에 지갑이 깎인다. 접수 성공은
  *    `TransferResult::$txId` 에 `receptionId` 를 담아 돌려주고, **최종 확정은 웹훅**이 한다.
- *    (호출부 대응은 다음 단계 작업 — 그 전에는 `driver=mock` 을 유지할 것.)
+ *    호출부는 이에 맞춰 「접수중」(`transferring`)으로 두고 통보를 기다린다
+ *    (`Withdrawal::executeTransfers()` → `FirmWebhook` / `FirmReconciler`).
  *
  * 🔐 `/auth/access_token` 을 제외한 **모든 요청/응답 Body 는 AES-256-CBC 로 암호화**된다
  *    (`BaumCrypto`). 우리 DB 저장 암호화(`Crypto`)와는 별개다.
@@ -46,6 +47,15 @@ final class BaumFirmGateway implements FirmBankingGateway
     public function providerLabel(): string
     {
         return '바움P&S';
+    }
+
+    /**
+     * 바움은 **접수만 즉시 응답**한다 — 성공/실패는 「계좌이체 처리결과 통보」로 온다.
+     * 호출부가 이 값을 보고 "완료" 대신 "접수중" 으로 처리해야 한다.
+     */
+    public function isAsync(): bool
+    {
+        return true;
     }
 
     // ─────────────────────────────── 은행코드 ───────────────────────────────

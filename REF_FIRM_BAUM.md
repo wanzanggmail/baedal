@@ -69,12 +69,12 @@ RECEPTION → PROGRESS → NEED_CHECK → SUCCESS / FAILED / CANCELLED
 `transfer-submission` 은 **접수(RECEPTION)만 즉시 응답**한다. 실제 성공/실패는 나중에
 「계좌이체 처리결과 통보」(웹훅)로 온다.
 
-**우리 코드의 기존 전제와 어긋나는 지점이다.** `Withdrawal::executeTransfers()` 는
-`transfer()` 성공을 곧 "이체 완료"로 보고 지갑을 깎는다. 그대로 실 연동을 켜면
-**접수만 된 건이 출금 완료로 찍히고 라이더 지갑이 먼저 줄어든다.**
+**우리 코드의 기존 전제와 어긋나던 지점이다.** `Withdrawal::executeTransfers()` 가
+`transfer()` 성공을 곧 "이체 완료"로 보고 지갑을 깎고 있었다 — 그대로 켰다면
+접수만 된 건이 출금 완료로 찍히고 라이더 지갑이 먼저 줄었을 것이다.
 
-→ `withdrawal_requests` 에 「접수중(결과 대기)」 상태를 넣고, 지갑 차감은 웹훅에서
-`SUCCESS` 를 받은 뒤로 미뤄야 한다. **그 작업 전에는 `firm_config.driver` 를 `mock` 으로 유지할 것.**
+**→ 2026-08-26 해결.** `withdrawal_requests.status` 에 `transferring` 을 넣고 지갑 차감을
+통보 수신 뒤로 옮겼다. 구현과 검증 결과는 **§11** 참고.
 
 - 취소는 **RECEPTION 상태만** 가능하다. 진행 중이면 못 막는다.
 - 웹훅은 **1분 간격 최대 10회** 재시도 후 포기한다(Read Timeout 60초).
@@ -135,8 +135,48 @@ RECEPTION → PROGRESS → NEED_CHECK → SUCCESS / FAILED / CANCELLED
 - [x] 게이트웨이 (`BaumFirmGateway`) — 토큰 · 예금주 조회 · 잔액 · 접수 · 조회 · 취소
 - [x] API 호출 로그 (`FirmApiLog`, 계좌번호 뒤 4자리만)
 - [x] 팩토리 분기 — 자격증명이 없으면 자동으로 모의
-- [ ] **처리결과 통보 수신** (`/firm/noti.php`) — 응답도 암호화해야 함
-- [ ] **「접수중」 상태** — `withdrawal_requests` 상태 추가 + 지갑 차감 시점 이동
-- [ ] 미확정 건 보정 조회 (`transfer-info` 폴링)
+- [x] **처리결과 통보 수신** (`/firm/noti.php` · `FirmWebhook`) — 응답도 암호화해 반환. 실 HTTP 로 왕복 확인
+- [x] **「접수중」 상태** — `withdrawal_requests.status` 에 `transferring` 추가, 지갑 차감을 통보 수신 뒤로 이동
+- [x] **이체 장부** (`FirmTransfer`) — 접수와 결과 확정을 잇는다. `transaction_id` UNIQUE 로 멱등
+- [x] 미확정 건 보정 조회 (`FirmReconciler`) — 설정 화면 「보정 조회」 버튼
 - [ ] 예금주 조회를 계좌 등록 화면에 연결
 - [ ] 배치 접수(100건) 를 출금 대행에 적용
+
+## 11. 비동기 처리 구현 (2026-08-26 완료)
+
+```
+출금 확정 → transfer-submission (접수)
+              ↓  withdrawal_requests.status = 'transferring'   ← 지갑은 아직 그대로
+              ↓  firm_transfers 에 접수 기록
+        ┌─────┴─────┐
+   웹훅 수신      보정 조회        ← 둘 중 먼저 오는 쪽이 확정
+        └─────┬─────┘
+              ↓  FirmTransfer::updateStatus()  ← 확정된 건은 다시 안 바꾼다(멱등)
+              ↓  true 일 때만
+   SUCCESS → Withdrawal::finalizeSuccess()  → completed + 지갑 차감 + 수수료 배분
+   FAILED  → Withdrawal::markTransferFailed() → failed (지갑 손 안 댐)
+```
+
+**멱등이 핵심이다.** 웹훅은 최대 10회 재전송되고 보정 조회까지 겹칠 수 있다.
+`updateStatus()` 가 `finalized_at IS NULL` 조건으로 한 번만 true 를 돌려주고,
+지갑 차감은 그 true 에만 따라붙는다. `finalizeSuccess()` 자체도 `status IN (…)` 으로
+한 번 더 막는다(이중 안전장치).
+
+**일부러 뺀 것** — 반려(`markRejected`)는 `transferring` 을 대상에서 제외한다.
+이미 이체가 진행 중인데 반려하면 돈은 나가는데 사이클 점유만 풀린다.
+
+**검증 완료** (실 HTTP + 웹훅 재현):
+
+| 시나리오 | 결과 |
+|---|---|
+| 허용 안 된 IP | 403 거절 |
+| 평문 본문 | 400 거절 |
+| 다른 키로 암호화(위조) | 400 거절 |
+| 금액 불일치 | 확정 안 함, 기록만 |
+| 정상 SUCCESS | 출금 완료 + 지갑 10,500원 차감 |
+| 같은 통보 재전송 | 지갑 변화 없음 (멱등) |
+| 장부에 없는 거래 | 200 + 기록 (재전송 멈춤) |
+| 입금 통보(`+`) | 기록만 |
+| GET 요청 | 405 |
+| 설정 미완료 | 503 (평문 — 암호화할 키가 없으므로) |
+| 정상 응답 | 200 + **암호화된** `{"success":true}` |

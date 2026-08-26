@@ -66,6 +66,7 @@ final class MigrateRunner
         self::migrateOrderDetailScaleIndexes();
         self::migrateSecretEncryption();
         self::migrateFirmBanking();
+        self::migrateFirmTransfers();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -2128,6 +2129,92 @@ final class MigrateRunner
             echo "  + firm_api_logs 생성\n";
         } else {
             echo "SKIP  firm_api_logs (이미 있음)\n";
+        }
+    }
+
+
+    /**
+     * 펌뱅킹 비동기 이체 추적 — 접수와 결과 확정을 잇는 장부.
+     *
+     * 바움 API 는 접수(RECEPTION)만 즉시 응답하고 성공/실패는 웹훅으로 온다.
+     * 그 사이를 이어 주는 게 이 표다. 웹훅이 오면 `transaction_id` 로 우리 건을 찾고,
+     * 웹훅이 유실되면 여기 남은 미확정 행을 `transfer-info` 로 재조회한다.
+     *
+     * 출금(withdrawal)뿐 아니라 일일지급·대리점 인출도 같은 게이트웨이를 쓰므로
+     * `kind` + `ref_id` 로 어느 건인지 가리키는 공용 표로 만든다.
+     */
+    private static function migrateFirmTransfers(): void
+    {
+        echo "== 펌뱅킹 이체 추적 ==\n";
+
+        if (!db_table_exists('firm_transfers')) {
+            db_execute(
+                "CREATE TABLE `firm_transfers` (
+                    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `transaction_id`  VARCHAR(60)  NOT NULL COMMENT '우리가 만든 고유 ID(바움 조회·취소 키)',
+                    `reception_id`    VARCHAR(60)  NOT NULL DEFAULT '' COMMENT '바움 접수 ID',
+                    `kind`            VARCHAR(20)  NOT NULL COMMENT 'withdrawal | daily_payout | agency_payout',
+                    `ref_id`          BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '해당 표의 id',
+                    `agency_id`       INT UNSIGNED NULL,
+                    `rider_id`        INT UNSIGNED NULL,
+                    `amount`          INT          NOT NULL DEFAULT 0,
+                    `bank_code`       VARCHAR(10)  NOT NULL DEFAULT '',
+                    `account_masked`  VARCHAR(40)  NOT NULL DEFAULT '' COMMENT '뒤 4자리만 — 대사 확인용',
+                    `status`          VARCHAR(20)  NOT NULL DEFAULT 'RECEPTION',
+                    `fail_reason`     VARCHAR(300) NOT NULL DEFAULT '',
+                    `submitted_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `finalized_at`    DATETIME     NULL COMMENT '결과가 확정된 시각',
+                    `last_checked_at` DATETIME     NULL COMMENT '보정 조회를 마지막으로 돌린 시각',
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `uk_firm_tx` (`transaction_id`),
+                    KEY `idx_firm_tx_ref` (`kind`, `ref_id`),
+                    KEY `idx_firm_tx_status` (`status`, `submitted_at`)
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            echo "  + firm_transfers 생성\n";
+        } else {
+            echo "SKIP  firm_transfers (이미 있음)\n";
+        }
+
+        if (!db_table_exists('firm_webhook_events')) {
+            db_execute(
+                "CREATE TABLE `firm_webhook_events` (
+                    `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `transaction_id` VARCHAR(60)  NOT NULL DEFAULT '',
+                    `reception_id`   VARCHAR(60)  NOT NULL DEFAULT '',
+                    `transfer_status` VARCHAR(20) NOT NULL DEFAULT '',
+                    `amount`         INT          NOT NULL DEFAULT 0,
+                    `amount_sign`    VARCHAR(2)   NOT NULL DEFAULT '' COMMENT '- 출금 / + 입금',
+                    `matched`        TINYINT(1)   NOT NULL DEFAULT 0,
+                    `note`           VARCHAR(300) NOT NULL DEFAULT '',
+                    `source_ip`      VARCHAR(45)  NOT NULL DEFAULT '',
+                    `raw_body`       TEXT         NULL COMMENT '복호화된 평문(계좌번호 마스킹)',
+                    `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    KEY `idx_firm_wh_tx` (`transaction_id`),
+                    KEY `idx_firm_wh_created` (`created_at`)
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            echo "  + firm_webhook_events 생성\n";
+        } else {
+            echo "SKIP  firm_webhook_events (이미 있음)\n";
+        }
+
+        // 출금 상태에 '이체 접수됨(결과 대기)' 를 추가한다.
+        // ⚠️ 이 상태가 없으면 접수만 된 건을 'completed' 로 찍게 되고, 지갑이 먼저 깎인다.
+        $col = db_row(
+            "SELECT COLUMN_TYPE t FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'withdrawal_requests' AND COLUMN_NAME = 'status'"
+        );
+        if ($col !== null && !str_contains((string) $col['t'], "'transferring'")) {
+            db_execute(
+                "ALTER TABLE `withdrawal_requests`
+                 MODIFY `status` ENUM('pending','downloaded','transferring','completed','rejected','failed')
+                 NOT NULL DEFAULT 'pending'"
+            );
+            echo "  + withdrawal_requests.status 에 transferring 추가\n";
+        } else {
+            echo "SKIP  withdrawal_requests.status (이미 transferring 있음)\n";
         }
     }
 

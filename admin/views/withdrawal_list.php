@@ -126,6 +126,7 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 						<option value=""<?= $filterStatus === '' ? ' selected' : '' ?>>전체</option>
 						<option value="pending"<?= $filterStatus === 'pending' ? ' selected' : '' ?>>대기</option>
 						<option value="downloaded"<?= $filterStatus === 'downloaded' ? ' selected' : '' ?>>다운로드 완료</option>
+						<option value="transferring"<?= $filterStatus === 'transferring' ? ' selected' : '' ?>>이체 접수중</option>
 						<option value="completed"<?= $filterStatus === 'completed' ? ' selected' : '' ?>>처리 완료</option>
 						<option value="failed"<?= $filterStatus === 'failed' ? ' selected' : '' ?>>이체 실패</option>
 						<option value="rejected"<?= $filterStatus === 'rejected' ? ' selected' : '' ?>>반려</option>
@@ -168,7 +169,8 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 			<div class="card-title">
 				<h3 class="fw-bold m-0">신청 내역</h3>
 				<span class="text-gray-500 fs-7 fw-semibold d-block mt-1">
-					대기 → <strong>출금 확정</strong>(펌뱅킹 즉시 이체) → 처리 완료
+					대기 → <strong>출금 확정</strong>(펌뱅킹 이체) → <strong>이체 접수중</strong> → 처리 완료
+					<span class="d-block text-gray-400">실 연동에서는 접수 직후가 아니라 <strong>은행 처리 결과가 통보된 뒤</strong>에 완료로 바뀌고 지갑이 차감됩니다.</span>
 					<span class="d-block text-gray-400">자동이체가 안 될 때는 <strong>은행 파일 다운로드</strong> → 은행에서 직접 이체 → <strong>입금 완료 기록</strong>. 마지막 단계는 송금을 새로 보내지 않고, 이미 보낸 것으로 보아 지갑을 차감합니다.</span>
 				</span>
 			</div>

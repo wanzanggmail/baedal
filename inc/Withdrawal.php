@@ -16,6 +16,8 @@ final class Withdrawal
     private const STATUS_LABELS = [
         'pending'    => ['대기', 'warning'],
         'downloaded' => ['다운로드 완료', 'primary'],
+        // 펌뱅킹에 접수는 됐지만 결과가 아직 안 온 상태 — **돈이 나갔는지 미확정**이다.
+        'transferring' => ['이체 접수중', 'info'],
         'completed'  => ['처리 완료', 'success'],
         'rejected'   => ['반려', 'danger'],
         'failed'     => ['이체 실패', 'danger'],
@@ -463,9 +465,13 @@ final class Withdrawal
     public static function executeTransfers(array $ids): array
     {
         require_once INC_PATH . '/FirmBankingGateway.php';
+        require_once INC_PATH . '/BaumFirmGateway.php';
+        require_once INC_PATH . '/FirmTransfer.php';
 
         $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
-        $out = ['completed' => 0, 'failed' => 0, 'skipped' => 0, 'results' => []];
+        // accepted = 접수만 된 건(비동기 게이트웨이). completed 와 구분해야 화면에서
+        //            "완료" 로 오해하지 않는다.
+        $out = ['completed' => 0, 'accepted' => 0, 'failed' => 0, 'skipped' => 0, 'results' => []];
         if ($ids === []) {
             return $out;
         }
@@ -517,6 +523,10 @@ final class Withdrawal
                 }
             }
 
+            // 거래 ID 를 **여기서** 만든다 — 게이트웨이에 넘기는 값과 우리 장부에 남기는 값이
+            // 같아야 웹훅이 왔을 때 어느 건인지 찾을 수 있다.
+            $txId = BaumFirmGateway::makeTransactionId('WD', $id);
+
             try {
                 $res = $gateway->transfer(
                     $agencyId,
@@ -524,7 +534,13 @@ final class Withdrawal
                     Crypto::decrypt((string) ($row['bank_account'] ?? '')),
                     (string) ($row['account_holder'] ?? ''),
                     $amount,
-                    ['request_id' => $id, 'rider_code' => (string) ($row['rider_code'] ?? '')]
+                    [
+                        'transaction_id' => $txId,
+                        'request_id'     => $id,
+                        'rider_code'     => (string) ($row['rider_code'] ?? ''),
+                        'kind'           => 'WD',
+                        'receiver_memo'  => (string) ($row['account_holder'] ?? ''),
+                    ]
                 );
             } catch (Throwable $e) {
                 // 게이트웨이 자체가 터진 경우도 "이 건 실패"로만 처리하고 다음 건을 계속한다.
@@ -535,7 +551,7 @@ final class Withdrawal
                 db_execute(
                     "UPDATE withdrawal_requests
                         SET status = 'failed', fail_reason = ?
-                      WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+                      WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
                     [mb_substr($res->failReason, 0, 300), $id]
                 );
                 $out['failed']++;
@@ -543,53 +559,146 @@ final class Withdrawal
                 continue;
             }
 
-            // 성공 — 이 건만 단독으로 커밋한다(위 ⚠️ 참고).
-            $note = '펌뱅킹 이체 완료 · ' . $gateway->providerLabel() . ' · 거래번호 ' . $res->txId;
-            db_transaction(static function () use ($id, $row, $note, $agencyId): void {
-                $n = db_execute(
-                    // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
+            // ── 비동기 게이트웨이(바움) ──
+            // 여기서 성공한 건 **접수**일 뿐 돈이 나간 게 아니다. 완료로 찍고 지갑을 깎으면
+            // 이후 이체가 실패했을 때 "돈은 안 갔는데 잔액만 사라진" 상태가 된다.
+            // 접수 사실만 남기고, 확정은 웹훅(`FirmWebhook`)이나 보정 조회가 한다.
+            if ($gateway->isAsync()) {
+                db_execute(
                     "UPDATE withdrawal_requests
-                        SET status = 'completed', completed_at = NOW(), fail_reason = '',
+                        SET status = 'transferring', fail_reason = '',
                             note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
                       WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
-                    [$note, $id]
+                    ['펌뱅킹 이체 접수 · ' . $gateway->providerLabel() . ' · 접수번호 ' . $res->txId, $id]
                 );
-                if ($n < 1) {
-                    return; // 동시 처리로 이미 상태가 바뀌었으면 지갑을 건드리지 않는다.
+                try {
+                    FirmTransfer::record([
+                        'transaction_id' => $txId,
+                        'reception_id'   => $res->txId,
+                        'kind'           => FirmTransfer::KIND_WITHDRAWAL,
+                        'ref_id'         => $id,
+                        'agency_id'      => $agencyId,
+                        'rider_id'       => (int) $row['rider_id'],
+                        'amount'         => $amount,
+                        'bank_code'      => (string) ($row['bank_code'] ?? ''),
+                        'account'        => Crypto::decryptSafe((string) ($row['bank_account'] ?? '')),
+                    ]);
+                } catch (Throwable $e) {
+                    // 장부에 못 남기면 결과를 이어붙일 방법이 사라진다 — 반드시 눈에 띄게 남긴다.
+                    error_log('[FirmTransfer] 접수 기록 실패 wd#' . $id . ' tx=' . $txId . ' — ' . $e->getMessage());
                 }
-                if ((string) ($row['kind'] ?? '') === 'rider_manual') {
-                    // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료. 보증금은 남는 몫이라 제외.
-                    RiderWallet::deductAfterWithdrawal(
-                        (int) $row['rider_id'],
-                        (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
-                    );
-                    // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
-                    // (정산수수료는 대리점에 남았다가 아래 배분에서 본사·총판 몫만 빠져나간다.)
-                    if ($agencyId > 0) {
-                        AgencyWallet::debit(
-                            $agencyId,
-                            (int) ($row['amount'] ?? 0),
-                            'rider_payout',
-                            $id,
-                            trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급',
-                            null
-                        );
-                    }
-                    // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
-                    WithdrawalFeeShare::distribute(
-                        $id,
-                        (int) $row['rider_id'],
-                        (int) ($row['withhold_other'] ?? 0)
-                    );
-                }
-            });
-            $out['completed']++;
-            $out['results'][] = ['id' => $id, 'ok' => true, 'message' => $res->txId];
+                $out['accepted']++;
+                $out['results'][] = ['id' => $id, 'ok' => true, 'message' => '이체 접수됨 (결과 대기) · ' . $res->txId];
+                continue;
+            }
+
+            // ── 동기 게이트웨이(모의) ── 응답이 곧 결과이므로 그 자리에서 확정한다.
+            $note = '펌뱅킹 이체 완료 · ' . $gateway->providerLabel() . ' · 거래번호 ' . $res->txId;
+            if (self::finalizeSuccess($id, $note)) {
+                $out['completed']++;
+                $out['results'][] = ['id' => $id, 'ok' => true, 'message' => $res->txId];
+            } else {
+                $out['skipped']++;
+                $out['results'][] = ['id' => $id, 'ok' => false, 'message' => '이미 처리된 건입니다.'];
+            }
         }
 
         $out['skipped'] = max(0, count($ids) - count($rows));
 
         return $out;
+    }
+
+    /**
+     * 출금 1건을 **완료 확정**한다 — 상태 변경 + 지갑 차감 + 수수료 배분.
+     *
+     * 원래 `executeTransfers()` 안에 있던 블록을 꺼냈다. 비동기 게이트웨이(바움)에서는
+     * 접수와 확정 시점이 갈리므로 **웹훅과 보정 조회도 같은 처리를 해야 하기 때문**이다.
+     * 한 곳에만 두어야 "웹훅으로 확정한 건은 수수료 배분이 빠졌다" 같은 사고가 안 난다.
+     *
+     * 🔒 **멱등하다.** 웹훅은 최대 10회 재전송되고 보정 조회까지 겹칠 수 있는데, 그때마다
+     *    지갑을 깎으면 안 된다. UPDATE 의 `status IN (…)` 조건이 걸러 주고, 이미 확정된
+     *    건이면 아무것도 하지 않고 false 를 돌려준다.
+     *
+     * @return bool 이번 호출로 실제 확정됐으면 true(이미 확정된 건이면 false)
+     */
+    public static function finalizeSuccess(int $id, string $note): bool
+    {
+        $row = db_row(
+            'SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.withhold_other, r.rider_code
+               FROM withdrawal_requests wr
+               LEFT JOIN riders r ON r.id = wr.rider_id
+              WHERE wr.id = ? LIMIT 1',
+            [$id]
+        );
+        if ($row === null) {
+            return false;
+        }
+        $agencyId = (int) ($row['agency_id'] ?? 0);
+        $done     = false;
+
+        db_transaction(static function () use ($id, $row, $note, $agencyId, &$done): void {
+            $n = db_execute(
+                // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
+                "UPDATE withdrawal_requests
+                    SET status = 'completed', completed_at = NOW(), fail_reason = '',
+                        note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
+                  WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
+                [$note, $id]
+            );
+            if ($n < 1) {
+                return; // 이미 확정됐거나 반려된 건 — 지갑을 건드리지 않는다.
+            }
+            $done = true;
+
+            if ((string) ($row['kind'] ?? '') === 'rider_manual') {
+                // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료. 보증금은 남는 몫이라 제외.
+                RiderWallet::deductAfterWithdrawal(
+                    (int) $row['rider_id'],
+                    (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
+                );
+                // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
+                // (정산수수료는 대리점에 남았다가 아래 배분에서 본사·총판 몫만 빠져나간다.)
+                if ($agencyId > 0) {
+                    AgencyWallet::debit(
+                        $agencyId,
+                        (int) ($row['amount'] ?? 0),
+                        'rider_payout',
+                        $id,
+                        trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급',
+                        null
+                    );
+                }
+                // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
+                WithdrawalFeeShare::distribute(
+                    $id,
+                    (int) $row['rider_id'],
+                    (int) ($row['withhold_other'] ?? 0)
+                );
+            }
+        });
+
+        return $done;
+    }
+
+    /**
+     * 이체가 **실패로 확정**됐을 때 — 접수중 상태를 되돌린다.
+     *
+     * 지갑은 애초에 건드리지 않았으므로 되돌릴 것이 없다(그게 접수/확정을 나눈 이유다).
+     * 라이더는 관리자가 계좌를 고쳐 재시도하거나 반려해야 다시 신청할 수 있다
+     * (`hasOpenRiderRequest()` 가 'failed' 도 진행중으로 취급).
+     *
+     * @return bool 이번 호출로 실제 바뀌었으면 true
+     */
+    public static function markTransferFailed(int $id, string $reason): bool
+    {
+        $n = db_execute(
+            "UPDATE withdrawal_requests
+                SET status = 'failed', fail_reason = ?
+              WHERE id = ? AND status IN ('transferring', 'pending', 'downloaded')",
+            [mb_substr($reason, 0, 300), $id]
+        );
+
+        return $n > 0;
     }
 
     /**
@@ -609,6 +718,8 @@ final class Withdrawal
 
         return db_transaction(static function () use ($placeholders, $reason, $ids): int {
             // 실제로 반려된 건만 대상으로 사이클 점유를 해제한다.
+            // ⚠️ 'transferring'(펌뱅킹 접수됨)은 **일부러 뺐다** — 이미 이체가 진행 중이라
+            //    반려하면 돈은 나가는데 사이클 점유만 풀린다. 결과가 확정된 뒤에 처리해야 한다.
             $rejected = db_rows(
                 "SELECT id FROM withdrawal_requests
                   WHERE id IN ({$placeholders}) AND status IN ('pending', 'downloaded', 'failed')",
@@ -760,13 +871,14 @@ final class Withdrawal
             return true;
         }
 
+        // 'transferring'(펌뱅킹 접수됨)은 **결과를 기다리는 중**이라 당연히 진행 중이다.
         // 'failed'(이체 실패)도 **진행 중으로 본다** — 실패해도 그 요청이 점유한 정산 사이클은
         // 그대로 남아 있으므로(재시도 대상), 라이더가 새로 신청해 봐야 고를 사이클이 없다.
         // 관리자가 재시도하거나 반려(→ 점유 해제)해야 다음 신청이 가능해진다.
         $row = db_row(
             "SELECT id FROM withdrawal_requests
               WHERE rider_id = ? AND kind = 'rider_manual'
-                AND status IN ('pending', 'downloaded', 'failed')
+                AND status IN ('pending', 'downloaded', 'transferring', 'failed')
               LIMIT 1",
             [$riderId]
         );
