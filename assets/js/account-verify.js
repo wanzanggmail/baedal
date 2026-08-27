@@ -44,6 +44,9 @@
 		var box = el(opt.result);
 		if (!btn) { return; }
 
+		// 기능이 실제로 붙었다는 표시 — `confirmUnverified()` 가 이걸 보고 판단한다.
+		if (box) { box.dataset.enabled = '1'; }
+
 		// 계좌·은행이 바뀌면 이전 확인 결과는 더 이상 유효하지 않다 → 지운다.
 		['bank', 'account', 'holder'].forEach(function (k) {
 			var e = el(opt[k]);
@@ -98,10 +101,19 @@
 		});
 	}
 
-	/** 저장 직전에 부르면, 확인이 안 된 계좌에 대해 한 번 되묻는다. */
+	/**
+	 * 저장 직전에 부르면, 확인이 안 된 계좌에 대해 한 번 되묻는다.
+	 *
+	 * 조회 기능이 화면에 붙지 않았으면 **묻지 않고 통과**시킨다(펌뱅킹 실연동이 꺼져 있으면
+	 * 서버가 버튼을 렌더하지 않는다). 그때 경고를 띄우면 사용자가 없앨 방법이 없는 팝업이
+	 * 매번 뜬다.
+	 */
 	function confirmUnverified(resultId) {
 		var box = el(resultId);
-		var st = box ? (box.dataset.state || '') : '';
+		// 칸이 없거나(기능 미노출), 있어도 attach 가 안 걸렸으면 묻지 않는다.
+		// 라이더 상세는 「확인됨」 배지 때문에 칸을 남겨 두므로 **존재만으로 판단하면 안 된다**.
+		if (!box || box.dataset.enabled !== '1') { return true; }
+		var st = box.dataset.state || '';
 		if (st === 'ok') { return true; }
 		if (st === 'mismatch') {
 			return confirm('예금주가 입력한 이름과 다릅니다.\n그래도 저장할까요?');

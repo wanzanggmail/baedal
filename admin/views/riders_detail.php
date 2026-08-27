@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
+// 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
+// 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
+require_once INC_PATH . '/AccountVerifier.php';
+$acctVerifyOn = AccountVerifier::available();
+
 $riderId = (int) ($_GET['id'] ?? 0);
 $listUrl = admin_url('riders/list');
 $actionApi = ADMIN_BASE . '/api/rider_action.php?id=' . $riderId;
@@ -555,9 +561,12 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 								<label class="form-label fs-7 fw-semibold">예금주</label>
 								<div class="d-flex gap-2">
 									<input type="text" class="form-control form-control-sm form-control-solid" id="ed_holder" value="<?= htmlspecialchars((string) ($rider['account_holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="80" />
+									<?php if ($acctVerifyOn) : ?>
 									<button type="button" class="btn btn-sm btn-light-primary text-nowrap px-3" id="ed_verify">계좌 확인</button>
+									<?php endif; ?>
 								</div>
-								<?php // 계좌번호가 한 자리만 틀려도 모르는 사람에게 송금된다 — 저장 전에 확인한다. ?>
+								<?php // 계좌번호가 한 자리만 틀려도 모르는 사람에게 송금된다 — 저장 전에 확인한다.
+								     //    이 칸은 기능이 꺼져 있어도 남긴다 — 과거에 확인한 기록(배지)을 보여줘야 한다. ?>
 								<div class="fs-8 mt-2" id="ed_verify_msg">
 									<?php if (!empty($rider['bank_verified_at'])) : ?>
 									<span class="badge badge-light-success me-1">확인됨</span>

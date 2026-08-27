@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
+// 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
+// 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
+require_once INC_PATH . '/AccountVerifier.php';
+$acctVerifyOn = AccountVerifier::available();
+
 // 멀티테넌시: 업로드 소유 대리점 스코프 / 본사·총판은 대리점 선택
 require_once INC_PATH . '/Organization.php';
 $isAgencyUploader = admin_org_level() === Org::LEVEL_AGENCY;
@@ -459,10 +465,14 @@ $platformLabels = [
 								<label class="form-label required">계좌번호</label>
 								<div class="d-flex gap-2">
 									<input type="text" class="form-control form-control-solid font-monospace" id="qrAccount" maxlength="40" placeholder="숫자·하이픈" />
+									<?php if ($acctVerifyOn) : ?>
 									<button type="button" class="btn btn-light-primary text-nowrap px-3" id="qrVerify">확인</button>
+									<?php endif; ?>
 								</div>
 								<?php // 일정산 라이더는 대리점이 매일 출금 대행한다 — 계좌가 틀리면 매일 잘못 나간다. ?>
+								<?php if ($acctVerifyOn) : ?>
 								<div class="fs-8 mt-2" id="qrVerifyMsg"></div>
+								<?php endif; ?>
 							</div>
 						</div>
 						<div class="form-text">최소 정보로 등록하고 정산서 ID <code id="qrLicenseLabel">-</code> 를 연동합니다.</div>

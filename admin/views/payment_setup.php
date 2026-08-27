@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
+// 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
+// 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
+require_once INC_PATH . '/AccountVerifier.php';
+$acctVerifyOn = AccountVerifier::available();
+
 require_once INC_PATH . '/AgencyCard.php';
 require_once INC_PATH . '/BankAccount.php';
 require_once INC_PATH . '/AgencyWallet.php';
@@ -274,10 +280,14 @@ if ($agencyId > 0) {
 						<label class="form-label">예금주</label>
 						<div class="d-flex gap-2">
 							<input type="text" class="form-control form-control-solid" id="ps_holder" value="<?= htmlspecialchars((string) ($account['holder'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" />
+							<?php if ($acctVerifyOn) : ?>
 							<button type="button" class="btn btn-light-primary text-nowrap px-3" id="ps_verify">계좌 확인</button>
+							<?php endif; ?>
 						</div>
 						<?php // 정산금이 실제로 나가는 계좌다 — 틀리면 되돌리기 어렵다. ?>
+						<?php if ($acctVerifyOn) : ?>
 						<div class="fs-8 mt-2" id="ps_verify_msg"></div>
+						<?php endif; ?>
 					</div>
 					<?php // 핀테크이용번호는 **출금 원천 계좌**(본사)에만 필요하다. 수령 계좌엔 쓰이지 않아 표시하지 않는다. ?>
 					<button type="button" class="btn btn-primary" id="ps_account_save">계좌 저장</button>

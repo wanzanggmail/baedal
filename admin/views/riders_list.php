@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+// 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
+// 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
+// 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
+require_once INC_PATH . '/AccountVerifier.php';
+$acctVerifyOn = AccountVerifier::available();
+
 // ── 서버사이드 데이터 조회 ──────────────────────────────────
 $filterQ      = trim((string) ($_GET['q']       ?? ''));
 $filterAgency = (int) ($_GET['agency'] ?? 0);
@@ -404,10 +410,14 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 								<label class="form-label">계좌번호</label>
 								<div class="d-flex gap-2">
 									<input type="text" class="form-control form-control-solid" id="reg_bank_account" maxlength="40" />
+									<?php if ($acctVerifyOn) : ?>
 									<button type="button" class="btn btn-light-primary text-nowrap px-3" id="reg_verify">확인</button>
+									<?php endif; ?>
 								</div>
 								<?php // 계좌번호가 한 자리만 틀려도 모르는 사람에게 송금된다. ?>
+								<?php if ($acctVerifyOn) : ?>
 								<div class="fs-8 mt-2" id="reg_verify_msg"></div>
+								<?php endif; ?>
 							</div>
 						</div>
 						<div class="d-flex justify-content-end gap-3">
