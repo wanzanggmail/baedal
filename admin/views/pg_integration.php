@@ -80,11 +80,32 @@ $currentUrl = admin_url('system/pg-integration');
 	</div>
 </div>
 <!--end::Toolbar-->
-<?php require_once INC_PATH . '/app_content_open.php'; ?>
+<?php
+require_once INC_PATH . '/PgGateway.php';
+// 펌뱅킹 화면과 같은 배너를 띄운다 — 같은 성격의 화면인데 한쪽만 없으면
+// "지금 실연동인가" 를 화면마다 다른 방식으로 확인하게 된다.
+$pgIsMock = !$needsMigrate && PgGatewayFactory::isMock();
+require_once INC_PATH . '/app_content_open.php';
+?>
 
 <?php if ($needsMigrate) : ?>
 <div class="alert alert-warning p-5">PG 연동 테이블이 아직 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 <?php else : ?>
+
+<div class="alert <?= $pgIsMock ? 'alert-secondary' : 'alert-danger' ?> p-5 mb-6">
+	<div class="d-flex flex-stack flex-wrap gap-3">
+		<div>
+			<?php if ($pgIsMock) : ?>
+			<div class="fw-bold text-gray-800">모의 모드로 동작 중입니다 — 실제로 결제되지 않습니다.</div>
+			<div class="fs-7 text-gray-600 mt-1">아래 값을 채우고 드라이버를 <code>weroute</code> 로 바꾸면 실 결제가 시작됩니다.</div>
+			<?php else : ?>
+			<div class="fw-bold">⚠️ 실연동이 켜져 있습니다 — 등록된 카드로 <strong>실제 결제가 발생합니다.</strong></div>
+			<div class="fs-7 mt-1">시험 중이라면 드라이버를 <code>mock</code> 으로 되돌리세요.</div>
+			<?php endif; ?>
+		</div>
+		<a href="<?= $esc(admin_url('system/integration-mode')) ?>" class="btn btn-sm btn-light fw-bold text-nowrap">연동 모드에서 전환</a>
+	</div>
+</div>
 
 <div id="pg_toast" class="alert alert-dismissible d-none mb-6" role="alert"><span id="pg_toast_msg"></span></div>
 

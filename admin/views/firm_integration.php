@@ -64,8 +64,9 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 	<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="닫기"></button>
 </div>
 
-<div class="alert <?= $isMock ? 'alert-secondary' : 'alert-danger' ?> d-flex align-items-center p-5 mb-6">
-	<div>
+<div class="alert <?= $isMock ? 'alert-secondary' : 'alert-danger' ?> p-5 mb-6">
+	<div class="d-flex flex-stack flex-wrap gap-3">
+		<div>
 		<?php if ($isMock) : ?>
 		<div class="fw-bold text-gray-800">모의 모드로 동작 중입니다 — 실제로 송금되지 않습니다.</div>
 		<div class="fs-7 text-gray-600 mt-1">
@@ -75,6 +76,8 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 		<div class="fw-bold">⚠️ 실 연동이 켜져 있습니다 — 출금 확정 시 <strong>실제로 돈이 나갑니다.</strong></div>
 		<div class="fs-7 mt-1">시험 중이라면 드라이버를 <code>모의</code> 로 되돌리세요.</div>
 		<?php endif; ?>
+		</div>
+		<a href="<?= $esc(admin_url('system/integration-mode')) ?>" class="btn btn-sm btn-light fw-bold text-nowrap">연동 모드에서 전환</a>
 	</div>
 </div>
 
