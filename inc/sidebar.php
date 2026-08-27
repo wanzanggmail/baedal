@@ -345,7 +345,7 @@ $route = $route ?? '';
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'system/orgs', 'system/admins', 'system/permissions', 'system/codes',
 										    'system/audit', 'system/pg-fee', 'system/pg-integration', 'system/pg-logs',
-										    'system/firm-integration', 'system/manual-adjust',
+										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -395,6 +395,12 @@ $route = $route ?? '';
 													<a class="menu-link<?= nav_active('system/firm-integration') ?>" href="<?= htmlspecialchars(admin_url('system/firm-integration'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">펌뱅킹 연동</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/integration-mode') ?>" href="<?= htmlspecialchars(admin_url('system/integration-mode'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">연동 모드</span>
 													</a>
 												</div>
 												<div class="menu-item">

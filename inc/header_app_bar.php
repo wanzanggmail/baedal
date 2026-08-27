@@ -3,6 +3,18 @@
 declare(strict_types=1);
 
 $_adminUser         = admin_user();
+
+// 실연동이 켜져 있으면 **어느 화면에서든** 보이게 한다.
+// 모르고 켜 둔 채로 쓰는 것이 이 시스템에서 가장 위험한 상태다.
+$headerLiveIntegration = false;
+if (admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN) {
+    try {
+        require_once INC_PATH . '/IntegrationMode.php';
+        $headerLiveIntegration = IntegrationMode::anyLive();
+    } catch (Throwable) {
+        $headerLiveIntegration = false; // 헤더가 연동 상태 때문에 죽으면 안 된다
+    }
+}
 $headerAdminLabel   = $_adminUser['name']    ?? '관리자';
 $headerAdminRole    = $_adminUser['role']    ?? '';
 $headerAdminLoginId = $_adminUser['login_id'] ?? '';
@@ -116,6 +128,13 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 							<!--end::Menu wrapper-->
 							<!--begin::Navbar-->
 							<div class="app-navbar flex-shrink-0">
+								<?php if ($headerLiveIntegration) : ?>
+								<div class="app-navbar-item ms-1 ms-md-3">
+									<a href="<?= htmlspecialchars(admin_url('system/integration-mode'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-flex btn-danger align-items-center px-3" data-bs-toggle="tooltip" title="실제 결제·송금이 발생하는 상태입니다. 눌러서 연동 모드를 확인하세요.">
+										<span class="fw-bold">실연동</span>
+									</a>
+								</div>
+								<?php endif; ?>
 								<div class="app-navbar-item ms-1 ms-md-3 d-none d-lg-flex">
 									<a href="<?= htmlspecialchars(admin_url('withdrawal/list'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-flex btn-light-danger align-items-center px-3" data-bs-toggle="tooltip" title="<?= htmlspecialchars($headerWithdrawTooltip, ENT_QUOTES, 'UTF-8') ?>">
 										<i class="ki-duotone ki-wallet fs-4 text-danger me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
