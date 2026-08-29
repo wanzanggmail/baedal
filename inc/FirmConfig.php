@@ -52,7 +52,14 @@ final class FirmConfig
     public const MAX_BATCH = 100;
 
     /** 암호화해서 저장하는 필드 */
-    private const SECRET_FIELDS = ['secret_key', 'enc_key', 'enc_iv', 'access_token'];
+    private const SECRET_FIELDS = [
+        'secret_key', 'enc_key', 'enc_iv', 'access_token',
+        'dev_secret_key', 'dev_enc_key', 'dev_enc_iv',
+        'prod_secret_key', 'prod_enc_key', 'prod_enc_iv',
+    ];
+
+    /** 환경별로 따로 보관하는 자격증명 — 개발/운영은 값이 전부 다르다. */
+    private const ENV_FIELDS = ['client_id', 'secret_key', 'enc_key', 'enc_iv', 'pocket_code'];
 
     public static function tableExists(): bool
     {
@@ -85,7 +92,18 @@ final class FirmConfig
             }
         }
 
-        return array_merge($defaults, $row);
+        $out = array_merge($defaults, $row);
+
+        // 개발/운영은 Client ID·Secret·암호화 KEY/IV·포켓코드가 **전부 다르다**.
+        // 현재 `env` 의 값을 최상위 키로 올려 준다 — 호출부는 예전처럼
+        // `$cfg['client_id']` 만 보면 되고, 서버를 바꾸면 자격증명도 함께 바뀐다.
+        $env = ((string) $out['env']) === self::ENV_PROD ? self::ENV_PROD : self::ENV_DEV;
+        foreach (self::ENV_FIELDS as $fld) {
+            $out[$fld] = (string) ($out[$env . '_' . $fld] ?? '');
+        }
+        $out['env'] = $env;
+
+        return $out;
     }
 
     public static function host(?string $env = null): string
@@ -145,7 +163,31 @@ final class FirmConfig
             'has_enc'           => BaumCrypto::usable((string) $c['enc_key'], (string) $c['enc_iv']),
             'is_ready'          => self::isReady(),
             'token_expires_at'  => $c['token_expires_at'],
+            // 양쪽 환경의 준비 상태 — 화면이 "지금 어느 쪽 값을 고치는 중인가" 를 알려야 한다.
+            'envs'              => self::envReadiness($c),
         ];
+    }
+
+    /**
+     * 환경별 자격증명이 채워졌는지.
+     *
+     * @param array<string,mixed> $c
+     * @return array<string, array{filled:bool, client_id:string}>
+     */
+    private static function envReadiness(array $c): array
+    {
+        $out = [];
+        foreach ([self::ENV_DEV, self::ENV_PROD] as $e) {
+            $cid = trim((string) ($c[$e . '_client_id'] ?? ''));
+            $sec = trim((string) ($c[$e . '_secret_key'] ?? ''));
+            $out[$e] = [
+                'filled'    => $cid !== '' && $sec !== ''
+                    && BaumCrypto::usable((string) ($c[$e . '_enc_key'] ?? ''), (string) ($c[$e . '_enc_iv'] ?? '')),
+                'client_id' => $cid,
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -170,13 +212,23 @@ final class FirmConfig
             throw new InvalidArgumentException('서버 구분(env) 값이 올바르지 않습니다.');
         }
 
-        $keep = static function (string $key) use ($data, $cur): string {
+        // ⚠️ 기준은 **저장하려는 env** 다. 서버를 dev→prod 로 바꾸는 저장이라면
+        //    비교·유지 대상도 prod 자격증명이어야 한다. `$cur` 은 지금 env 의 값이라
+        //    그대로 쓰면 개발 자격증명이 운영 칸으로 넘어간다.
+        $prev = $cur;
+        if ($env !== (string) $cur['env']) {
+            foreach (self::ENV_FIELDS as $fld) {
+                $prev[$fld] = (string) ($cur[$env . '_' . $fld] ?? '');
+            }
+        }
+
+        $keep = static function (string $key) use ($data, $prev): string {
             $v = trim((string) ($data[$key] ?? ''));
 
-            return $v !== '' ? $v : (string) $cur[$key];
+            return $v !== '' ? $v : (string) $prev[$key];
         };
 
-        $clientId = trim((string) ($data['client_id'] ?? $cur['client_id']));
+        $clientId = trim((string) ($data['client_id'] ?? $prev['client_id']));
         $secret   = $keep('secret_key');
         $encKey   = $keep('enc_key');
         $encIv    = $keep('enc_iv');
@@ -196,12 +248,14 @@ final class FirmConfig
             }
         }
 
+        // 자격증명은 **그 환경의 칸에만** 쓴다 — 다른 환경 값은 건드리지 않는다.
         db_execute(
-            'UPDATE firm_config
-                SET driver = ?, env = ?, client_id = ?, secret_key = ?,
-                    enc_key = ?, enc_iv = ?, pocket_code = ?, noti_allow_ips = ?,
-                    updated_by = ?, updated_at = NOW()
-              WHERE id = 1',
+            "UPDATE firm_config
+                SET driver = ?, env = ?,
+                    `{$env}_client_id` = ?, `{$env}_secret_key` = ?,
+                    `{$env}_enc_key` = ?, `{$env}_enc_iv` = ?, `{$env}_pocket_code` = ?,
+                    noti_allow_ips = ?, updated_by = ?, updated_at = NOW()
+              WHERE id = 1",
             [
                 $driver,
                 $env,
@@ -209,11 +263,11 @@ final class FirmConfig
                 Crypto::encrypt($secret),
                 Crypto::encrypt($encKey),
                 Crypto::encrypt($encIv),
-                trim((string) ($data['pocket_code'] ?? $cur['pocket_code'])),
+                trim((string) ($data['pocket_code'] ?? $prev['pocket_code'])),
                 // 허용 IP는 비밀값이 아니라 **빈 값도 의미가 있다**(검사 끄기) → keep 하지 않는다.
                 array_key_exists('noti_allow_ips', $data)
                     ? trim((string) $data['noti_allow_ips'])
-                    : (string) $cur['noti_allow_ips'],
+                    : (string) $prev['noti_allow_ips'],
                 ($adminId !== null && $adminId > 0) ? $adminId : null,
             ]
         );

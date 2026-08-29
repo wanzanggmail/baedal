@@ -68,6 +68,7 @@ final class MigrateRunner
         self::migrateFirmBanking();
         self::migrateFirmTransfers();
         self::migrateAccountVerified();
+        self::migrateFirmEnvCredentials();
         self::migrateCardIssuerCodes();
         self::migratePgIntegrationSchema();
         self::migrateNoticeEndsAt();
@@ -2245,6 +2246,66 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE `riders` ' . implode(', ', $adds));
         echo '  + riders 계좌 확인 컬럼 ' . count($adds) . "개\n";
+    }
+
+
+    /**
+     * 펌뱅킹 자격증명을 **환경별로** 나눠 저장.
+     *
+     * 바움은 개발/운영 서버의 Client ID·Secret·암호화 KEY/IV·포켓코드가 **전부 다르다**.
+     * 한 벌만 저장하면 「서버」를 운영으로 바꾸는 순간 개발 자격증명이 따라가 버린다.
+     * 인증이 실패하니 사고는 안 나지만, 왜 안 되는지 알기 어렵다.
+     */
+    private static function migrateFirmEnvCredentials(): void
+    {
+        echo "== 펌뱅킹 환경별 자격증명 ==\n";
+
+        if (!db_table_exists('firm_config')) {
+            echo "SKIP  firm_config 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM firm_config'), 'Field');
+        $adds = [];
+        foreach (['dev', 'prod'] as $env) {
+            foreach ([
+                'client_id'   => "VARCHAR(190) NOT NULL DEFAULT ''",
+                'secret_key'  => "VARCHAR(255) NOT NULL DEFAULT ''",
+                'enc_key'     => "VARCHAR(255) NOT NULL DEFAULT ''",
+                'enc_iv'      => "VARCHAR(255) NOT NULL DEFAULT ''",
+                'pocket_code' => "VARCHAR(40) NOT NULL DEFAULT ''",
+            ] as $c => $type) {
+                $name = $env . '_' . $c;
+                if (!in_array($name, $cols, true)) {
+                    $adds[] = "ADD COLUMN `{$name}` {$type}";
+                }
+            }
+        }
+        if ($adds === []) {
+            echo "SKIP  환경별 자격증명 컬럼 (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE `firm_config` ' . implode(', ', $adds));
+        echo '  + 환경별 자격증명 컬럼 ' . count($adds) . "개\n";
+
+        // 기존 단일 자격증명을 **현재 env 쪽으로** 옮긴다. 지금까지 쓰던 값이 어느
+        // 서버의 것인지는 `env` 가 말해 준다.
+        $row = db_row('SELECT env, client_id, secret_key, enc_key, enc_iv, pocket_code FROM firm_config WHERE id = 1');
+        if ($row !== null) {
+            $env = ((string) $row['env']) === 'prod' ? 'prod' : 'dev';
+            db_execute(
+                "UPDATE firm_config
+                    SET `{$env}_client_id` = ?, `{$env}_secret_key` = ?, `{$env}_enc_key` = ?,
+                        `{$env}_enc_iv` = ?, `{$env}_pocket_code` = ?
+                  WHERE id = 1",
+                [
+                    (string) $row['client_id'], (string) $row['secret_key'], (string) $row['enc_key'],
+                    (string) $row['enc_iv'], (string) $row['pocket_code'],
+                ]
+            );
+            echo "  + 기존 자격증명을 {$env} 쪽으로 이관\n";
+        }
     }
 
 }

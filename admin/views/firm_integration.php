@@ -103,7 +103,9 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 		<div class="card-title">
 			<h3 class="fw-bold m-0">연동 정보</h3>
 			<span class="text-gray-500 fs-8 d-block mt-1">
-				🔒 Secret Key·암호화 KEY/IV 는 DB 에 암호화 저장됩니다. 화면에는 앞 4자리만 보입니다.
+				지금 <strong class="text-gray-800"><?= ($cfg['env'] ?? 'dev') === 'prod' ? '운영' : '개발' ?></strong> 서버의 자격증명을 보고 있습니다 —
+				<strong>개발과 운영은 값이 전부 다르고 따로 저장됩니다.</strong>
+				<span class="d-block mt-1">🔒 Secret Key·암호화 KEY/IV 는 DB 에 암호화 저장됩니다. 화면에는 앞 4자리만 보입니다.</span>
 			</span>
 		</div>
 		<div class="card-toolbar">
@@ -155,7 +157,15 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 					<option value="dev"<?= ($cfg['env'] ?? 'dev') === 'dev' ? ' selected' : '' ?>>개발 (dev-firm-api)</option>
 					<option value="prod"<?= ($cfg['env'] ?? '') === 'prod' ? ' selected' : '' ?>>운영 (firm-api)</option>
 				</select>
-				<div class="form-text">현재: <code><?= $esc((string) ($cfg['host'] ?? '')) ?></code></div>
+				<div class="form-text">
+					현재: <code><?= $esc((string) ($cfg['host'] ?? '')) ?></code>
+					<span class="d-block mt-1">
+						<?php foreach ((array) ($cfg['envs'] ?? []) as $e => $x) : ?>
+						<span class="badge badge-light-<?= $x['filled'] ? 'success' : 'secondary' ?> me-1"><?= $e === 'prod' ? '운영' : '개발' ?> <?= $x['filled'] ? '설정됨' : '미설정' ?></span>
+						<?php endforeach; ?>
+					</span>
+					<span class="d-block mt-1 text-gray-600">서버를 바꾸면 <strong>그 서버의 자격증명</strong>으로 함께 바뀝니다.</span>
+				</div>
 			</div>
 			<div class="col-md-4">
 				<label class="form-label fw-bold" for="firm_driver">드라이버</label>
