@@ -56,9 +56,9 @@ Java `AES/CBC/PKCS5Padding` 과 PHP `aes-256-cbc` 는 블록 16바이트에서 �
 | 계좌이체 취소 | POST | `/api/firm/transfer-cancel` |
 | 통보 URL 관리 | POST/GET/PUT/DELETE | `/api/firm/webhook` |
 
-> ⚠️ **확인 대기** — 예금주 조회 경로가 문서 안에서 어긋난다.
-> API 목록 표에는 `/api/firm/depositor-name`, 상세 페이지와 curl 예시에는 `/api/firm/account-holder`.
-> **상세 페이지 기준(`account-holder`)으로 구현**했다.
+> ✅ **해결(2026-08-29)** — 예금주 조회 경로는 `/api/firm/account-holder` 가 맞다.
+> 매뉴얼 API 목록 표에는 `/api/firm/depositor-name` 으로 적혀 있었으나,
+> **바움이 준 Postman 컬렉션이 `account-holder` 를 쓴다.** 우리 구현과 같다.
 
 ## 5. 이체는 비동기다 — 이 연동의 핵심
 
@@ -152,12 +152,21 @@ Content-Type: text/html
 
 ### 남은 문의
 
+**Postman 컬렉션에 없는 엔드포인트** — 아래 넷은 여전히 **매뉴얼만이 근거**다.
+실제 호출로 확인한 적이 없으니, IP 가 열리면 가장 먼저 시험해 볼 대상이다.
+
+| 기능 | 경로 |
+|---|---|
+| 계좌이체 접수 | `/api/firm/transfer-submission` |
+| 이체 정보 조회 | `/api/firm/transfer-info/{transactionId}` |
+| 계좌이체 취소 | `/api/firm/transfer-cancel` |
+| 통보 URL 관리 | `/api/firm/webhook` |
+
 - [ ] **처리결과 통보 발신 IP** — ⚠️ **매뉴얼에 없다.** 없으면 통보를 위조당할 수 있다.
       암호화 키를 아는 쪽만 유효한 본문을 만들 수 있어 사실상 인증 역할을 하지만,
       IP 제한이 있으면 훨씬 안전하다. 서명 검증 수단도 문서에 보이지 않는다.
       (위 `3.36.94.34` 는 **우리가 바움을 부를 때** 쓰는 아웃바운드 허용 IP 라 별개다.)
 - [ ] `expires_in` 단위 (§2)
-- [ ] 예금주 조회 경로 (§4)
 - [ ] 포켓코드가 개발·운영 공통인지 (한 개만 받았다)
 
 ## 10. 진행 상태
@@ -288,3 +297,43 @@ Content-Type: text/html
 
 검증 완료: Basic 인증 헤더가 바움이 준 값과 **바이트 단위로 일치**,
 암호화 KEY/IV 규격(32/16바이트) 통과, 환경 전환 시 자격증명이 정확히 갈림.
+
+## 15. 바움 Postman 컬렉션 대조 (2026-08-29)
+
+바움이 준 `바움피앤에스 지급대행.postman_collection.json` + `[개발] …environment.json` 과
+우리 구현을 하나씩 맞춰 봤다.
+
+| 항목 | Postman | 우리 | |
+|---|---|---|---|
+| 토큰 | `POST /auth/access_token`, Basic(id:secret) | 같음 | ✅ |
+| 예금주 조회 | `POST /api/firm/account-holder` | 같음 | ✅ |
+| 잔액(전체) | `GET /api/firm/account-pocket` | 같음 | ✅ |
+| 잔액(특정) | `GET /api/firm/pocket/{code}` | 같음 | ✅ |
+| 인증 | `Authorization: Bearer {token}` | 같음 | ✅ |
+| 암호화 | CryptoJS AES / CBC / **Pkcs7** / Base64 key·iv | `openssl aes-256-cbc` | ✅ |
+| 본문 | `JSON.stringify(JSON.parse(...))` = minify | `json_encode` | ✅ |
+
+**암호문 일치 확인** — 바움이 준 개발 KEY/IV 로 Postman 과 같은 본문을 암호화했을 때
+`openssl` 결과와 **바이트 단위로 같다**. CryptoJS Pkcs7 == PHP PKCS#7(16바이트 블록).
+
+```
+{"bankCode":"C089","accountNumber":"100280001225"}
+→ N3myGTdeFdn6rlRDI+0wVxUNlZ3nrV+O3K/EHuelIqrlTKsdRwGS2Zkxt8bLxrH/Kid8Ua6T/NTy1C6PeC5MJA==
+```
+
+### 고친 것 — 예금주 조회의 `transactionAmount`
+
+우리는 `transactionAmount: 0` 을 **항상** 보내고 있었다. Postman 은 `bankCode` 와
+`accountNumber` 둘만 보낸다. 매뉴얼상 이 값은 *"조회 대상 계좌가 가상 계좌인 경우 입금
+금액이 동일해야 함"* 이라, **가상계좌에 0 을 보내면 금액 불일치로 조회가 실패**한다.
+→ 값이 있을 때만 싣도록 바꿨다.
+
+### 알아낸 것 — 개발 서버는 응답이 평문일 수 있다
+
+컬렉션의 응답 복호화 스크립트는 `USE_CRYPT !== 'true'` 면 그냥 빠져나가는데,
+**개발 환경 파일에 `USE_CRYPT` 가 아예 없다.** 즉 개발에서는 복호화를 하지 않는다.
+
+`BaumFirmGateway::call()` 은 복호화를 먼저 시도하고 실패하면 평문 JSON 으로 파싱하므로
+두 경우 모두 처리된다. 방어적으로 짜 둔 것이 실제 시나리오였던 셈이다.
+
+**요청 본문은 조건 없이 암호화**한다(prerequest 스크립트에 게이트가 없다) — 우리도 같다.

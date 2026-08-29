@@ -184,7 +184,10 @@ final class BaumFirmGateway implements FirmBankingGateway
                 $data    = $crypto->decryptJson(trim($raw));
                 $decoded = 'ok';
             } catch (Throwable $e) {
-                // 암호문이 아닐 수도 있다(게이트웨이 오류 페이지·평문 에러 등) → 평문 JSON 도 시도.
+                // 암호문이 아닐 수도 있다 → 평문 JSON 도 시도한다.
+                // ⚠️ 추측이 아니다 — 바움이 준 Postman 컬렉션은 응답 복호화를 `USE_CRYPT` 로 가두는데,
+                //    **개발 환경 파일에는 그 변수가 아예 없다**(= 개발에서는 복호화하지 않는다).
+                //    즉 개발 서버는 평문으로 응답할 수 있다. 게이트웨이 오류 페이지도 마찬가지다.
                 $plain = json_decode(trim($raw), true);
                 if (is_array($plain)) {
                     $data    = $plain;
@@ -230,11 +233,19 @@ final class BaumFirmGateway implements FirmBankingGateway
      */
     public function accountHolder(string $ourBankCode, string $accountNo, int $amount = 0): array
     {
-        $res = $this->call('POST', FirmConfig::EP_ACCOUNT_HOLDER, [
-            'bankCode'          => self::bankCode($ourBankCode),
-            'accountNumber'     => preg_replace('/\D/', '', $accountNo) ?? '',
-            'transactionAmount' => $amount,
-        ]);
+        $body = [
+            'bankCode'      => self::bankCode($ourBankCode),
+            'accountNumber' => preg_replace('/\D/', '', $accountNo) ?? '',
+        ];
+        // ⚠️ `transactionAmount` 는 **값이 있을 때만** 보낸다.
+        //    매뉴얼: "조회 대상 계좌가 가상 계좌인 경우 입금 금액이 동일해야 함" —
+        //    일반 계좌엔 필요 없고, 가상계좌에 0 을 보내면 금액 불일치로 조회가 실패한다.
+        //    바움 Postman 컬렉션도 bankCode·accountNumber 둘만 보낸다.
+        if ($amount > 0) {
+            $body['transactionAmount'] = $amount;
+        }
+
+        $res = $this->call('POST', FirmConfig::EP_ACCOUNT_HOLDER, $body);
 
         $d = is_array($res['data']['data'] ?? null) ? $res['data']['data'] : [];
 
