@@ -58,7 +58,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-muted">설정</li>
+				<li class="breadcrumb-item text-muted">시스템 관리</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">수수료 설정(관리)</li>
 			</ul>
