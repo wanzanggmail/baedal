@@ -247,6 +247,27 @@ final class Org
         return $row !== null ? (int) $row['id'] : 0;
     }
 
+    /**
+     * 대행수수료 부담 주체 — 대리점별 설정(2026-09-01 갑). 'rider'(기본) | 'agency'.
+     * 컬럼이 아직 없거나 값이 이상하면 안전하게 'rider'(기존 동작).
+     */
+    public static function agencyFeePayer(int $orgId): string
+    {
+        if ($orgId < 1 || !db_table_exists('organizations')) {
+            return 'rider';
+        }
+        static $hasCol = null;
+        if ($hasCol === null) {
+            $hasCol = in_array('agency_fee_payer', array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field'), true);
+        }
+        if (!$hasCol) {
+            return 'rider';
+        }
+        $v = (string) (db_row('SELECT agency_fee_payer FROM organizations WHERE id = ? LIMIT 1', [$orgId])['agency_fee_payer'] ?? 'rider');
+
+        return $v === 'agency' ? 'agency' : 'rider';
+    }
+
     public static function chainForAgency(int $agencyId): array
     {
         $out = ['agency' => 0, 'distributor' => 0, 'hq' => 0];

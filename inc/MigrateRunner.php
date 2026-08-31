@@ -75,6 +75,7 @@ final class MigrateRunner
         self::migrateSettlementExcelKind();
         self::migrateWeeklyRiders();
         self::migrateTransferFee();
+        self::migrateAgencyFeePayer();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1390,6 +1391,35 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * 대행수수료 부담 주체 — 대리점별로 라이더/대리점 중 누가 낼지 (2026-09-01 갑 지시).
+     *
+     * 'rider'(기본): 선정산 정산 반영 시 라이더 net 에서 공제(기존 동작).
+     * 'agency'    : 라이더는 전액 정산받고, 대행수수료만큼 대리점 지갑에서 본사로 이체(대리점 부담).
+     * 두 경우 모두 대행수수료는 **본사 귀속**이다(반영 시 대리점→본사 이체).
+     */
+    private static function migrateAgencyFeePayer(): void
+    {
+        echo "== organizations 대행수수료 부담 주체 ==\n";
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+        if (in_array('agency_fee_payer', $cols, true)) {
+            echo "SKIP  agency_fee_payer (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE organizations
+             ADD COLUMN agency_fee_payer ENUM('rider','agency') NOT NULL DEFAULT 'rider'
+                 COMMENT '대행수수료 부담 주체 — rider=라이더 공제 / agency=대리점 지갑 부담(본사 귀속은 동일)'"
+        );
+        echo "OK    organizations.agency_fee_payer 추가(기본 rider)\n";
     }
 
     /**

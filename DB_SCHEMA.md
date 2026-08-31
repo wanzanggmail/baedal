@@ -95,6 +95,8 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 | `level` | enum(`admin`,`distributor`,`agency`) | 본사/총판/대리점 |
 | `code` | varchar(40) UNIQUE | 조직 식별 코드 |
 | `name`, `contact_name`, `contact_phone`, `memo` | | |
+| `ceo_*`, `biz_*` | | 대표자·사업자 정보 |
+| `agency_fee_payer` | enum(`rider`,`agency`) 기본 `rider` | 🆕(2026-09-01) 대행수수료 부담 주체(대리점만 의미). `rider`=선정산 반영 시 라이더 net 공제 / `agency`=라이더 전액 정산, 대행수수료를 대리점 지갑에서 부담. **두 경우 모두 대행수수료는 본사 귀속**(반영 시 대리점→본사 이체). 본사가 「조직 관리」에서 설정 |
 | `is_active` | tinyint(1) | 비활성화 시 소속 계정도 함께 잠금(`Organization::setActive`) |
 
 - 코드: `inc/Organization.php`, `inc/Org.php`(스코핑 엔진)

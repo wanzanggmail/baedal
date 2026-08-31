@@ -346,6 +346,16 @@ foreach ($agencyByParent as $orphans) {
 							<label class="form-label" for="org_memo">메모</label>
 							<textarea class="form-control form-control-solid" id="org_memo" rows="2" maxlength="500" placeholder="내부 관리용 메모 (계약 정보, 특이사항 등)"></textarea>
 						</div>
+						<?php // 대행수수료 부담 주체 — 대리점에만 해당. 체크 시 라이더 대신 대리점 지갑에서 부담. ?>
+						<div class="mb-5 d-none" id="org_agency_fee_wrap">
+							<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+								<input class="form-check-input me-3 mt-1" type="checkbox" id="org_agency_pays_fee" />
+								<span class="d-flex flex-column">
+									<span class="fw-semibold text-gray-800">대행수수료를 <strong>대리점이 부담</strong></span>
+									<span class="text-muted fs-8">체크하면 <strong>선정산수수료(대행)</strong>를 라이더 정산에서 빼지 않고 <strong>대리점 지갑에서 차감</strong>합니다(라이더는 전액 정산, 수수료는 본사 귀속). 미체크 시 기존대로 라이더가 부담합니다.</span>
+								</span>
+							</label>
+						</div>
 
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-4">대표자 정보</h4>
@@ -699,6 +709,9 @@ foreach ($agencyByParent as $orphans) {
 		function syncParent() {
 			var lvl = $('org_level').value;
 			$('org_parent_wrap').classList.toggle('d-none', lvl !== 'agency');
+			// 대행수수료 부담 주체 스위치는 대리점에만 노출
+			var afw = $('org_agency_fee_wrap');
+			if (afw) { afw.classList.toggle('d-none', lvl !== 'agency'); }
 		}
 		function fetchCode() {
 			var lvl = $('org_level').value;
@@ -748,6 +761,12 @@ foreach ($agencyByParent as $orphans) {
 				$('org_biz_type').value = row.biz_type || '';
 				$('org_biz_category').value = row.biz_category || '';
 				$('org_biz_address').value = row.biz_address || '';
+					var afw = $('org_agency_fee_wrap');
+					if (afw) {
+						var isAgency = row.level === 'agency';
+						afw.classList.toggle('d-none', !isAgency);
+						$('org_agency_pays_fee').checked = isAgency && row.agency_fee_payer === 'agency';
+					}
 				bootstrap.Modal.getOrCreateInstance($('kt_org_modal')).show();
 				return;
 			}
@@ -776,7 +795,8 @@ foreach ($agencyByParent as $orphans) {
 				biz_reg_no: $('org_biz_reg_no').value.trim(),
 				biz_type: $('org_biz_type').value.trim(),
 				biz_category: $('org_biz_category').value.trim(),
-				biz_address: $('org_biz_address').value.trim()
+				biz_address: $('org_biz_address').value.trim(),
+				agency_fee_payer: ($('org_agency_pays_fee') && $('org_agency_pays_fee').checked) ? 'agency' : 'rider'
 			};
 			if (!payload.name) { showToast('조직 이름을 입력하세요.', false); return; }
 			if (!editId) {
