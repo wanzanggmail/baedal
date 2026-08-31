@@ -145,8 +145,10 @@ final class DailyPayout
         require_once __DIR__ . '/WithdrawalCycles.php';
         require_once __DIR__ . '/WithdrawalFeeShare.php';
         $cycles     = WithdrawalCycles::unwithdrawn($riderId);
-        $feeCalc    = WithdrawalConfig::feeForCycles($cycles, $agencyId);
-        $orderCount = (int) $feeCalc['short_orders'] + (int) $feeCalc['long_orders'];
+        $feeCalc     = WithdrawalConfig::feeForCycles($cycles, $agencyId);
+        $shortOrders = (int) $feeCalc['short_orders'];
+        $longOrders  = (int) $feeCalc['long_orders'];
+        $orderCount  = $shortOrders + $longOrders;
         // 잔액보다 수수료가 클 수는 없다(그러면 지급액이 음수) — 잔액까지만 뗀다.
         $fee    = min($balance, max(0, (int) $feeCalc['total']));
         $amount = $balance - $fee;
@@ -193,7 +195,7 @@ final class DailyPayout
             throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
         }
 
-        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $orderCount, $rider, $adminId, $res): void {
+        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $orderCount, $shortOrders, $longOrders, $rider, $adminId, $res): void {
             $reqId = db_insert(
                 "INSERT INTO withdrawal_requests
                     (rider_id, agency_id, kind, amount, gross_amount, withhold_other,
@@ -216,8 +218,8 @@ final class DailyPayout
             AgencyWallet::debit($agencyId, $amount, 'rider_payout', $reqId, (string) $rider['name'] . ' 일일정산 지급', $adminId);
 
             // 수수료를 본사·총판·대리점 몫으로 배분(대리점 몫은 이미 지갑에 있어 이동 없음).
-            // 사이클 점유 기록을 만들지 않는 경로라 배달 건수를 직접 넘긴다.
-            WithdrawalFeeShare::distribute($reqId, $riderId, $fee, $adminId, $orderCount);
+            // 사이클 점유 기록을 만들지 않는 경로라 구간별 배달 건수를 직접 넘긴다.
+            WithdrawalFeeShare::distribute($reqId, $riderId, $fee, $adminId, $shortOrders, $longOrders);
 
             db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
         });

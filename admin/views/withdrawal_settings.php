@@ -164,23 +164,50 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
 						<div class="text-muted fs-8 mb-4">
-							위에서 라이더에게 받은 정산수수료를 본사·총판·대리점이 나눠 갖습니다.
-							<strong>본사 몫은 배달 건당 정액</strong>이고, 남은 금액을 총판 비율만큼 떼고 <strong>나머지 전부가 대리점 몫</strong>입니다.
+							위에서 라이더에게 받은 대행수수료(정산수수료)를 본사·총판·대리점이 나눠 갖습니다.
+							<strong>본사·총판 몫 모두 배달 건당 정액(원)</strong>이며, <strong>기준 미만/기준 이상</strong> 두 구간에 각각 다르게 매길 수 있습니다.
+							<strong>대리점 몫 = 대행수수료 − 본사 − 총판</strong>(나머지 전부)입니다.
 						</div>
-						<div class="row g-4 mb-6">
-							<div class="col-md-6">
-								<label class="form-label" for="cfg_hq_per_order">본사 몫 — 배달 건당 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_hq_per_order" min="0"
-									value="<?= (int) $config['hq_fee_per_order'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
-								<div class="form-text fs-9">배달 <strong>1건당</strong> 본사가 가져갈 금액입니다(출금 건당 수수료와 단위가 다릅니다). 본사 몫이 걷은 정산수수료 총액을 넘으면 총액까지만 가져가고, 그만큼 대리점 몫은 0원이 될 수 있습니다. 0이면 배분 없이 전액 대리점.</div>
-							</div>
-							<div class="col-md-6">
-								<label class="form-label" for="cfg_dist_pct">총판 몫 — 본사 몫 제외 후 (%)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_dist_pct" min="0" max="100" step="0.01"
-									value="<?= htmlspecialchars((string) $config['fee_share_distributor_pct'], ENT_QUOTES, 'UTF-8') ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
-								<div class="form-text fs-9">나머지는 대리점 몫입니다.</div>
-							</div>
+						<div class="mb-4" style="max-width:280px">
+							<label class="form-label" for="cfg_min_agency_fee">대행수수료 최저 금액 (원)</label>
+							<input type="number" class="form-control form-control-solid" id="cfg_min_agency_fee" min="0"
+								value="<?= (int) $config['min_agency_fee'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							<div class="form-text fs-9"><strong>본사 몫(건당)의 하한</strong>입니다. 본사 몫을 이 금액보다 낮게 저장할 수 없습니다.</div>
 						</div>
+						<div class="table-responsive mb-2">
+							<table class="table table-row-bordered align-middle gy-2 mb-0">
+								<thead>
+									<tr class="fw-semibold fs-8 text-muted">
+										<th class="min-w-90px">구간</th>
+										<th class="min-w-90px text-end">대행수수료<br>(건당)</th>
+										<th class="min-w-110px">본사 몫 (원/건)</th>
+										<th class="min-w-110px">총판 몫 (원/건)</th>
+										<th class="min-w-90px text-end">대리점 몫<br>(자동)</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr>
+										<td class="fw-semibold">기준 미만</td>
+										<td class="text-end" id="cfg_fee_short_ref"><?= number_format((int) $config['fee_per_tx_short']) ?>원</td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="0"
+											value="<?= (int) $config['hq_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_short" min="0"
+											value="<?= (int) $config['dist_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td class="text-end fw-semibold" id="cfg_agency_short">–</td>
+									</tr>
+									<tr>
+										<td class="fw-semibold">기준 이상</td>
+										<td class="text-end" id="cfg_fee_long_ref"><?= number_format((int) $config['fee_per_tx_long']) ?>원</td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="0"
+											value="<?= (int) $config['hq_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_long" min="0"
+											value="<?= (int) $config['dist_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td class="text-end fw-semibold" id="cfg_agency_long">–</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<div class="form-text fs-9 mb-6" id="cfg_share_hint">대리점 몫이 0보다 작아지면 대리점은 0원이 되고, 본사→총판 순으로 대행수수료까지만 가져갑니다.</div>
 						<?php if ($isAgencySelf) : ?>
 						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
 						<?php endif; ?>
@@ -265,6 +292,37 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			});
 		}
 
+		// 정산수수료 배분 — 대리점 몫(자동)을 실시간으로 보여준다. 대리점 몫 = 대행수수료 − 본사 − 총판.
+		(function () {
+			var feeShortEl = document.getElementById('cfg_fee_short');
+			var feeLongEl  = document.getElementById('cfg_fee_long');
+			var outShort = document.getElementById('cfg_agency_short');
+			var outLong  = document.getElementById('cfg_agency_long');
+			if (!outShort || !outLong) { return; }
+			function intv(id) { var e = document.getElementById(id); return e ? (parseInt(e.value, 10) || 0) : 0; }
+			function refShow(id, val) { var e = document.getElementById(id); if (e) { e.textContent = val.toLocaleString() + '원'; } }
+			function render(out, fee, hq, dist) {
+				var agency = fee - hq - dist;
+				if (agency < 0) {
+					out.innerHTML = '<span class="text-danger">0</span>';
+					out.title = '본사+총판이 대행수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
+				} else {
+					out.textContent = agency.toLocaleString();
+					out.title = '';
+				}
+			}
+			function recompute() {
+				var fs = intv('cfg_fee_short'), fl = intv('cfg_fee_long');
+				refShow('cfg_fee_short_ref', fs);
+				refShow('cfg_fee_long_ref', fl);
+				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'));
+				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'));
+			}
+			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long','cfg_min_agency_fee']
+				.forEach(function (id) { var e = document.getElementById(id); if (e) { e.addEventListener('input', recompute); } });
+			recompute();
+		})();
+
 		// 플랫폼 수수료는 저장 엔드포인트가 다르다(org_fee_config). 출금 정책과 한 버튼으로
 		// 묶되, 편집 가능한 상태가 아니면 아무것도 보내지 않고 즉시 성공 처리한다.
 		function savePlatformFee() {
@@ -299,10 +357,21 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			};
 			if (TARGET_AGENCY_ID > 0) { payload.agency_id = TARGET_AGENCY_ID; }
 			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.
-			var hqEl = document.getElementById('cfg_hq_per_order');
-			if (hqEl && !hqEl.disabled) {
-				payload.hq_fee_per_order = parseInt(hqEl.value, 10) || 0;
-				payload.fee_share_distributor_pct = parseFloat(document.getElementById('cfg_dist_pct').value) || 0;
+			var hqShortEl = document.getElementById('cfg_hq_short');
+			if (hqShortEl && !hqShortEl.disabled) {
+				var minFee  = parseInt(document.getElementById('cfg_min_agency_fee').value, 10) || 0;
+				var hqShort = parseInt(hqShortEl.value, 10) || 0;
+				var hqLong  = parseInt(document.getElementById('cfg_hq_long').value, 10) || 0;
+				// 서버도 막지만, 저장 전에 바로 알려준다(본사 몫 하한).
+				if (hqShort < minFee || hqLong < minFee) {
+					showToast('본사 몫(건당)은 대행수수료 최저 금액(' + minFee.toLocaleString() + '원)보다 낮을 수 없습니다.', false);
+					return;
+				}
+				payload.min_agency_fee = minFee;
+				payload.hq_fee_short   = hqShort;
+				payload.hq_fee_long    = hqLong;
+				payload.dist_fee_short = parseInt(document.getElementById('cfg_dist_short').value, 10) || 0;
+				payload.dist_fee_long  = parseInt(document.getElementById('cfg_dist_long').value, 10) || 0;
 			}
 			fetch(API, {
 				method: 'POST',

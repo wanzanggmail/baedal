@@ -1317,10 +1317,28 @@ final class MigrateRunner
         $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
         $adds = [];
         if (!in_array('hq_fee_per_order', $cols, true)) {
-            $adds[] = "ADD COLUMN hq_fee_per_order INT NOT NULL DEFAULT 0 COMMENT '정산수수료 중 본사 몫(배달 건당 정액 원)'";
+            $adds[] = "ADD COLUMN hq_fee_per_order INT NOT NULL DEFAULT 0 COMMENT '[구] 본사 몫 단일 정액 — 구간별 hq_fee_short/long 로 대체'";
         }
         if (!in_array('fee_share_distributor_pct', $cols, true)) {
-            $adds[] = "ADD COLUMN fee_share_distributor_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00 COMMENT '본사 몫을 뺀 나머지 중 총판 몫(%%) — 대리점은 잔여'";
+            $adds[] = "ADD COLUMN fee_share_distributor_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00 COMMENT '[구] 총판 몫 비율 — 구간별 dist_fee_short/long 로 대체'";
+        }
+        // 2026-08-31 갑 지시: 본사·총판 몫을 「기준 미만/기준 이상」 두 구간으로 나눠 각각
+        // 배달 건당 정액(원)으로 배분한다. 총판도 비율(%)이 아니라 건당 정액으로 바뀐다.
+        if (!in_array('hq_fee_short', $cols, true)) {
+            $adds[] = "ADD COLUMN hq_fee_short INT NOT NULL DEFAULT 0 COMMENT '본사 몫 — 기준 미만 배달 건당(원)'";
+        }
+        if (!in_array('hq_fee_long', $cols, true)) {
+            $adds[] = "ADD COLUMN hq_fee_long INT NOT NULL DEFAULT 0 COMMENT '본사 몫 — 기준 이상 배달 건당(원)'";
+        }
+        if (!in_array('dist_fee_short', $cols, true)) {
+            $adds[] = "ADD COLUMN dist_fee_short INT NOT NULL DEFAULT 0 COMMENT '총판 몫 — 기준 미만 배달 건당(원)'";
+        }
+        if (!in_array('dist_fee_long', $cols, true)) {
+            $adds[] = "ADD COLUMN dist_fee_long INT NOT NULL DEFAULT 0 COMMENT '총판 몫 — 기준 이상 배달 건당(원)'";
+        }
+        // 대행수수료 최저 금액 = 본사 몫(건당)의 하한. 본사가 이 값보다 낮게 배분하지 못한다.
+        if (!in_array('min_agency_fee', $cols, true)) {
+            $adds[] = "ADD COLUMN min_agency_fee INT NOT NULL DEFAULT 0 COMMENT '대행수수료 최저 금액 — 본사 몫(건당) 하한(원)'";
         }
 
         if ($adds === []) {
@@ -1330,6 +1348,13 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
         echo 'OK    withdrawal_config ' . count($adds) . "개 컬럼 추가\n";
+
+        // 기존 단일 본사 몫(hq_fee_per_order)이 설정돼 있던 대리점은 두 구간에 같은 값으로 옮긴다
+        // (구간 구분이 없던 시절의 값을 그대로 이어받게 — 새 컬럼을 방금 만들었을 때만).
+        if (in_array('hq_fee_per_order', $cols, true) && !in_array('hq_fee_short', $cols, true)) {
+            db_execute('UPDATE withdrawal_config SET hq_fee_short = hq_fee_per_order, hq_fee_long = hq_fee_per_order WHERE hq_fee_per_order > 0');
+            echo "OK    기존 본사 몫(단일) → 구간별(hq_fee_short/long) 이전\n";
+        }
     }
 
     /**

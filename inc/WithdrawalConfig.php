@@ -15,9 +15,14 @@ final class WithdrawalConfig
             'fee_day_threshold' => 7,
             'fee_per_tx_short'  => 80,
             'fee_per_tx_long'   => 40,
-            // 정산수수료 3분할(2026-08-12 갑 확정) — 본사는 배달 건당 정액, 나머지를 총판·대리점이 비율로.
-            'hq_fee_per_order'          => 0,
-            'fee_share_distributor_pct' => 0.0,
+            // 정산수수료 배분(2026-08-31 갑 지시) — 본사·총판 몫을 「기준 미만/기준 이상」 두
+            // 구간으로 나눠 각각 배달 건당 정액(원)으로 뗀다. 대리점 몫 = 대행수수료 − 본사 − 총판.
+            'hq_fee_short'   => 0,
+            'hq_fee_long'    => 0,
+            'dist_fee_short' => 0,
+            'dist_fee_long'  => 0,
+            // 대행수수료 최저 금액 = 본사 몫(건당) 하한. 본사가 이보다 낮게 배분하지 못한다.
+            'min_agency_fee' => 0,
             // 라이더가 신청하는 즉시 펌뱅킹으로 내보낼지. 기본은 끔 — 켜면 관리자가 검토할 틈이 없다.
             'auto_transfer_on_request'  => 0,
         ];
@@ -66,41 +71,53 @@ final class WithdrawalConfig
             'fee_day_threshold' => max(1, (int) ($row['fee_day_threshold'] ?? $d['fee_day_threshold'])),
             'fee_per_tx_short'  => max(0, (int) ($row['fee_per_tx_short'] ?? $d['fee_per_tx_short'])),
             'fee_per_tx_long'   => max(0, (int) ($row['fee_per_tx_long'] ?? $d['fee_per_tx_long'])),
-            'hq_fee_per_order'  => max(0, (int) ($row['hq_fee_per_order'] ?? $d['hq_fee_per_order'])),
-            'fee_share_distributor_pct' => max(0.0, min(100.0, (float) ($row['fee_share_distributor_pct'] ?? $d['fee_share_distributor_pct']))),
+            'hq_fee_short'   => max(0, (int) ($row['hq_fee_short'] ?? $d['hq_fee_short'])),
+            'hq_fee_long'    => max(0, (int) ($row['hq_fee_long'] ?? $d['hq_fee_long'])),
+            'dist_fee_short' => max(0, (int) ($row['dist_fee_short'] ?? $d['dist_fee_short'])),
+            'dist_fee_long'  => max(0, (int) ($row['dist_fee_long'] ?? $d['dist_fee_long'])),
+            'min_agency_fee' => max(0, (int) ($row['min_agency_fee'] ?? $d['min_agency_fee'])),
             'auto_transfer_on_request'  => (int) !empty($row['auto_transfer_on_request']),
         ];
     }
 
     /**
-     * 정산수수료를 본사·총판·대리점 몫으로 나눈다 (2026-08-12 갑 확정).
+     * 정산수수료를 본사·총판·대리점 몫으로 나눈다 (2026-08-31 갑 지시로 구간별 재작성).
      *
-     * - **본사 몫 = 배달 건당 정액 × 건수.** 비율이 아니라 정액이며, 대리점이 라이더에게 받는
-     *   건당 수수료(80/40원)보다 작아야 대리점에 남는 게 생긴다("대리점은 그 이상을 받아야 한다").
-     * - 남은 금액을 총판 비율만큼 떼고, **나머지 전부가 대리점 몫**(끝수는 대리점으로 몰아
-     *   세 몫의 합이 항상 총액과 정확히 일치하게 한다).
-     * - 설정 실수로 본사 몫이 총액을 넘으면 총액까지만 가져간다 — 지갑이 음수로 새지 않도록.
+     * - 본사·총판 몫 모두 **배달 건당 정액**이며, 「기준 미만/기준 이상」 두 구간에 각각 다른
+     *   단가를 매길 수 있다. 예: 기준 미만은 본사 30·총판 20, 기준 이상은 본사 15·총판 10.
+     *     본사 몫 = short×hq_fee_short + long×hq_fee_long
+     *     총판 몫 = short×dist_fee_short + long×dist_fee_long
+     * - **대리점 몫 = 대행수수료 − 본사 − 총판**(끝수까지 대리점으로 몰아 세 몫 합 = 총액).
+     * - 본사 우선: 실제 걷힌 총액($totalFee, 잔액에 막혀 낮아졌을 수 있음)을 넘지 않는다.
+     *   설정 실수로 본사+총판이 총액을 넘어도 대리점 몫이 음수로 새지 않도록 총액에서 절단한다
+     *   (갑 확정: "대리점은 0이 되어도 된다").
      *
-     * @return array{hq:int, distributor:int, agency:int, hq_per_order:int, orders:int}
+     * @param int $shortOrders 기준 미만 배달 건수
+     * @param int $longOrders  기준 이상 배달 건수
+     * @param int $totalFee    실제 걷힌 정산수수료(대행수수료) 총액
+     * @return array{hq:int, distributor:int, agency:int, orders:int, short_orders:int, long_orders:int}
      */
-    public static function feeShare(int $totalFee, int $orderCount, ?int $orgId = null): array
+    public static function feeShare(int $shortOrders, int $longOrders, int $totalFee, ?int $orgId = null): array
     {
-        $cfg     = self::get($orgId);
-        $perOrder = (int) $cfg['hq_fee_per_order'];
-        $totalFee = max(0, $totalFee);
-        $orders   = max(0, $orderCount);
+        $cfg         = self::get($orgId);
+        $totalFee    = max(0, $totalFee);
+        $shortOrders = max(0, $shortOrders);
+        $longOrders  = max(0, $longOrders);
 
-        $hq   = min($totalFee, $perOrder * $orders);
-        $rest = $totalFee - $hq;
-        $dist = (int) round($rest * ((float) $cfg['fee_share_distributor_pct']) / 100);
-        $dist = max(0, min($rest, $dist));
+        $hq   = $shortOrders * (int) $cfg['hq_fee_short'] + $longOrders * (int) $cfg['hq_fee_long'];
+        $dist = $shortOrders * (int) $cfg['dist_fee_short'] + $longOrders * (int) $cfg['dist_fee_long'];
+
+        // 본사 우선 → 남은 범위에서 총판 → 나머지 대리점. 총액을 넘지 않는다.
+        $hq   = max(0, min($hq, $totalFee));
+        $dist = max(0, min($dist, $totalFee - $hq));
 
         return [
             'hq'           => $hq,
             'distributor'  => $dist,
-            'agency'       => $rest - $dist,
-            'hq_per_order' => $perOrder,
-            'orders'       => $orders,
+            'agency'       => $totalFee - $hq - $dist,
+            'orders'       => $shortOrders + $longOrders,
+            'short_orders' => $shortOrders,
+            'long_orders'  => $longOrders,
         ];
     }
 
@@ -120,22 +137,32 @@ final class WithdrawalConfig
             'fee_day_threshold' => max(1, min(365, (int) ($data['fee_day_threshold'] ?? 7))),
             'fee_per_tx_short'  => max(0, (int) ($data['fee_per_tx_short'] ?? 0)),
             'fee_per_tx_long'   => max(0, (int) ($data['fee_per_tx_long'] ?? 0)),
-            // 분배 설정은 본사만 보내는 값이라, 대리점이 저장할 땐 키가 안 온다 → 기존 값 유지.
-            'hq_fee_per_order'  => array_key_exists('hq_fee_per_order', $data)
-                ? max(0, (int) $data['hq_fee_per_order'])
-                : (int) $cur['hq_fee_per_order'],
-            'fee_share_distributor_pct' => array_key_exists('fee_share_distributor_pct', $data)
-                ? max(0.0, min(100.0, (float) $data['fee_share_distributor_pct']))
-                : (float) $cur['fee_share_distributor_pct'],
+            // 분배 설정(본사·총판 몫, 최저 금액)은 본사만 보내는 값이라, 대리점이 저장할 땐 키가
+            // 안 온다 → 각각 기존 값 유지.
+            'hq_fee_short'   => array_key_exists('hq_fee_short', $data) ? max(0, (int) $data['hq_fee_short']) : (int) $cur['hq_fee_short'],
+            'hq_fee_long'    => array_key_exists('hq_fee_long', $data) ? max(0, (int) $data['hq_fee_long']) : (int) $cur['hq_fee_long'],
+            'dist_fee_short' => array_key_exists('dist_fee_short', $data) ? max(0, (int) $data['dist_fee_short']) : (int) $cur['dist_fee_short'],
+            'dist_fee_long'  => array_key_exists('dist_fee_long', $data) ? max(0, (int) $data['dist_fee_long']) : (int) $cur['dist_fee_long'],
+            'min_agency_fee' => array_key_exists('min_agency_fee', $data) ? max(0, (int) $data['min_agency_fee']) : (int) $cur['min_agency_fee'],
             'auto_transfer_on_request' => array_key_exists('auto_transfer_on_request', $data)
                 ? (int) (bool) $data['auto_transfer_on_request']
                 : (int) $cur['auto_transfer_on_request'],
         ];
 
-        // ⚠️ 본사 건당 몫이 건당 정산수수료보다 커도 **막지 않는다**(2026-08-12 갑 확정:
-        // "대리점은 0이 되어도 되. 어차피 본사만 잘 받으면 되니까 대리점을 알아서 해야지").
-        // 본사 몫이 걷은 총액을 넘으면 feeShare()가 총액까지만 가져가고 대리점 몫이 0이 된다
-        // (음수로는 안 내려간다 — 그러면 대리점 지갑에서 없던 돈이 빠져나간다).
+        // 대행수수료 최저 금액(= 본사 몫 하한) 검증 — 본사 몫(건당)을 이보다 낮게 배분하지 못한다
+        // (2026-08-31 갑 지시). 두 구간 모두 검사한다. 총판 몫·대리점 몫은 하한 없음.
+        if ($cfg['hq_fee_short'] < $cfg['min_agency_fee'] || $cfg['hq_fee_long'] < $cfg['min_agency_fee']) {
+            throw new InvalidArgumentException(sprintf(
+                '본사 몫(건당)은 대행수수료 최저 금액(%s원)보다 낮을 수 없습니다. 현재 기준 미만 %s원 / 기준 이상 %s원.',
+                number_format($cfg['min_agency_fee']),
+                number_format($cfg['hq_fee_short']),
+                number_format($cfg['hq_fee_long'])
+            ));
+        }
+
+        // ⚠️ 본사+총판 몫이 걷은 건당 수수료(80/40원)를 넘어도 저장은 막지 않는다(갑 확정:
+        // "대리점은 0이 되어도 된다"). 넘으면 feeShare()가 총액까지만 떼고 대리점 몫을 0으로 막는다
+        // — 음수로 내려가면 대리점 지갑에서 없던 돈이 빠져나가므로.
 
         $hasOrg  = $orgId !== null && $orgId > 0;
         $exists  = $hasOrg
@@ -146,7 +173,7 @@ final class WithdrawalConfig
             db_execute(
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
-                     hq_fee_per_order = ?, fee_share_distributor_pct = ?,
+                     hq_fee_short = ?, hq_fee_long = ?, dist_fee_short = ?, dist_fee_long = ?, min_agency_fee = ?,
                      auto_transfer_on_request = ?,
                      updated_by = ?, updated_at = NOW()
                  WHERE id = ?',
@@ -155,8 +182,11 @@ final class WithdrawalConfig
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
                     $cfg['fee_per_tx_long'],
-                    $cfg['hq_fee_per_order'],
-                    $cfg['fee_share_distributor_pct'],
+                    $cfg['hq_fee_short'],
+                    $cfg['hq_fee_long'],
+                    $cfg['dist_fee_short'],
+                    $cfg['dist_fee_long'],
+                    $cfg['min_agency_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                     (int) $exists['id'],
@@ -166,16 +196,20 @@ final class WithdrawalConfig
             db_insert(
                 'INSERT INTO withdrawal_config
                     (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
-                     hq_fee_per_order, fee_share_distributor_pct, auto_transfer_on_request, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                     hq_fee_short, hq_fee_long, dist_fee_short, dist_fee_long, min_agency_fee,
+                     auto_transfer_on_request, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
                     $cfg['fee_day_threshold'],
                     $cfg['fee_per_tx_short'],
                     $cfg['fee_per_tx_long'],
-                    $cfg['hq_fee_per_order'],
-                    $cfg['fee_share_distributor_pct'],
+                    $cfg['hq_fee_short'],
+                    $cfg['hq_fee_long'],
+                    $cfg['dist_fee_short'],
+                    $cfg['dist_fee_long'],
+                    $cfg['min_agency_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                 ]
