@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 // 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
 // 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
 // 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
@@ -125,15 +127,14 @@ $platformLabels = [
 
 							<form id="dailyUploadForm" class="form" enctype="multipart/form-data" accept-charset="UTF-8">
 								<?php if (!$isAgencyUploader): ?>
-								<div class="mb-6">
-									<label class="form-label required">업로드 대리점</label>
-									<select class="form-select form-select-solid" name="agency_id" id="uploadAgencySelect">
-										<option value="">대리점 선택</option>
-										<?php foreach ($uploadAgencyOptions as $ag): ?>
-										<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
-										<?php endforeach; ?>
-									</select>
-									<div class="form-text">이 정산 파일이 귀속될 대리점입니다. 라이더 매칭도 해당 대리점 내에서만 이뤄집니다.</div>
+								<div class="row g-3 mb-6">
+									<?php // 총판 → 업로드 대리점(필수). FormData 가 name=agency_id 를 그대로 읽는다.
+									org_scope_picker('upl', 0, 0, [
+										'dist_col' => 'col-md-6', 'agency_col' => 'col-md-6',
+										'dist_label' => '총판', 'agency_label' => '업로드 대리점',
+										'agency_name' => 'agency_id', 'required' => true, 'agency_all' => false,
+									]); ?>
+									<div class="col-12"><div class="form-text">이 정산 파일이 귀속될 대리점입니다. 라이더 매칭도 해당 대리점 내에서만 이뤄집니다.</div></div>
 								</div>
 								<?php endif; ?>
 								<div class="mb-6">

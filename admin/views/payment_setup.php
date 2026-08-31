@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 // 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
 // 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
 // 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
@@ -97,18 +99,16 @@ if ($agencyId > 0) {
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
 					<input type="hidden" name="route" value="withdrawal/payment-setup" />
 				<?php endif; ?>
-				<label class="form-label fw-bold m-0">대상</label>
-				<select name="agency" class="form-select form-select-solid w-250px" onchange="this.form.submit()">
-					<option value="0"<?= (!$isHqAccount && $targetAgency === null) ? ' selected' : '' ?>>선택하세요…</option>
-					<?php if (Org::hqId() > 0) : ?>
-					<option value="<?= Org::hqId() ?>"<?= $isHqAccount ? ' selected' : '' ?>>★ 본사 — 출금 원천 계좌</option>
-					<?php endif; ?>
-					<?php foreach ($agencyOptions as $opt) : ?>
-					<option value="<?= (int) $opt['id'] ?>"<?= $targetAgency !== null && (int) $targetAgency['id'] === (int) $opt['id'] ? ' selected' : '' ?>>
-						<?= htmlspecialchars($opt['name'] . ' (' . $opt['code'] . ')', ENT_QUOTES, 'UTF-8') ?>
-					</option>
-					<?php endforeach; ?>
-				</select>
+				<?php
+				// 총판 → 대상(본사/대리점). 대리점 고르면 자동 이동. agency 파라미터 유지.
+				$psExtra = [['value' => 0, 'label' => '선택하세요…', 'selected' => (!$isHqAccount && $targetAgency === null)]];
+				if (Org::hqId() > 0) { $psExtra[] = ['value' => Org::hqId(), 'label' => '★ 본사 — 출금 원천 계좌', 'selected' => $isHqAccount]; }
+				org_scope_picker('ps2', 0, $targetAgency !== null ? (int) $targetAgency['id'] : 0, [
+					'dist_col' => 'w-200px', 'agency_col' => 'w-250px',
+					'dist_label' => '총판', 'agency_label' => '대상',
+					'agency_name' => 'agency', 'submit_on_change' => true,
+					'extra_options' => $psExtra,
+				]); ?>
 				<noscript><button type="submit" class="btn btn-sm btn-light-primary">이동</button></noscript>
 				<?php if ($isHqAccount) : ?>
 					<span class="badge badge-light-danger fs-7">라이더 이체·대리점 인출이 전부 이 계좌에서 나갑니다</span>

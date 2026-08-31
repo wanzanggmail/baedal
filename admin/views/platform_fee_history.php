@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 require_once INC_PATH . '/PgPayment.php';
 require_once INC_PATH . '/Organization.php';
 require_once INC_PATH . '/Org.php';
@@ -128,17 +130,11 @@ function platform_fee_range_url(string $base, string $from, string $to, int $age
 					<label class="form-label fs-8 mb-1">종료일</label>
 					<input type="date" name="to" class="form-control form-control-sm" value="<?= $esc($filterTo) ?>" />
 				</div>
-				<?php if (!$isAgencyLevel) : ?>
-				<div class="col-auto">
-					<label class="form-label fs-8 mb-1">대리점</label>
-					<select name="agency" class="form-select form-select-sm" style="min-width:160px">
-						<option value="0">전체</option>
-						<?php foreach ($agencyOptions as $ao) : ?>
-						<option value="<?= (int) $ao['id'] ?>" <?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>><?= $esc((string) $ao['name']) ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<?php endif; ?>
+				<?php // 총판 → 대리점 연동 선택기(공용). agency 파라미터는 그대로 유지된다.
+				org_scope_picker('pf', 0, $filterAgency, [
+					'dist_col' => 'col-auto', 'agency_col' => 'col-auto',
+					'agency_name' => 'agency',
+				]); ?>
 				<div class="col-auto">
 					<label class="form-label fs-8 mb-1">상태</label>
 					<select name="status" class="form-select form-select-sm">

@@ -17,6 +17,7 @@
 		<script src="<?= htmlspecialchars(web_asset('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<script src="<?= htmlspecialchars(web_asset('js/admin-datepickers.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<script src="<?= htmlspecialchars(web_asset('js/account-verify.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script src="<?= htmlspecialchars(web_asset('js/org-scope-picker.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<!--end::Javascript-->
 	</body>
 </html>

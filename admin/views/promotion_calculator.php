@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 /**
  * 프로모션 계산기 — 기간과 건수 구간 룰을 정하면 라이더별 프로모션 금액을 산출한다.
  *
@@ -68,17 +70,13 @@ $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'
 		<div class="card-header pt-5"><h3 class="card-title fw-bold">계산 조건</h3></div>
 		<div class="card-body pt-2">
 			<div class="row g-4 mb-6">
-				<?php if (!$isAgency) : ?>
-				<div class="col-md-4">
-					<label class="form-label required fs-8">대리점</label>
-					<select class="form-select form-select-sm" id="pc_agency">
-						<option value="">선택하세요…</option>
-						<?php foreach ($agencyOptions as $ao) : ?>
-						<option value="<?= (int) $ao['id'] ?>"><?= $esc((string) $ao['name']) ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<?php endif; ?>
+				<?php // 총판 → 대리점(필수). JS 는 'pc_osp_agency' 를 읽는다.
+				if (!$isAgency) {
+					org_scope_picker('pc', 0, 0, [
+						'dist_col' => 'col-md-3', 'agency_col' => 'col-md-3',
+						'required' => true, 'agency_all' => false,
+					]);
+				} ?>
 				<div class="col-md-3">
 					<label class="form-label required fs-8">시작일</label>
 					<input type="date" class="form-control form-control-sm" id="pc_from" value="<?= $esc($defFrom) ?>" />
@@ -267,7 +265,7 @@ $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'
 				to: document.getElementById('pc_to').value,
 				tiers: readTiers(),
 			};
-			if (!IS_AGENCY) p.agency_id = parseInt(document.getElementById('pc_agency').value, 10) || 0;
+			if (!IS_AGENCY) p.agency_id = parseInt(document.getElementById('pc_osp_agency').value, 10) || 0;
 			return p;
 		}
 

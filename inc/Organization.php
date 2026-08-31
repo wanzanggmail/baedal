@@ -130,7 +130,11 @@ final class Organization
     /**
      * 현재 계정이 라이더를 배정할 수 있는 대리점 선택지 (스코프 내 활성 agency).
      *
-     * @return list<array{id:int,name:string,code:string}>
+     * ⚠️ `parent_id` 를 포함한다 — 「총판 → 대리점」 연동 셀렉트(`org_scope_picker`)가
+     *    대리점을 소속 총판별로 걸러내려면 이 값이 필요하다. 기존 호출부는 이 키를
+     *    무시하므로 추가해도 안전하다.
+     *
+     * @return list<array{id:int,name:string,code:string,parent_id:int}>
      */
     public static function agencyOptions(): array
     {
@@ -146,15 +150,16 @@ final class Organization
             $params  = array_values($ids);
         }
         $rows = db_rows(
-            'SELECT id, name, code FROM organizations WHERE ' . implode(' AND ', $where) . ' ORDER BY name ASC',
+            'SELECT id, name, code, parent_id FROM organizations WHERE ' . implode(' AND ', $where) . ' ORDER BY name ASC',
             $params
         );
 
         return array_map(
             static fn (array $r): array => [
-                'id'   => (int) $r['id'],
-                'name' => (string) $r['name'],
-                'code' => (string) $r['code'],
+                'id'        => (int) $r['id'],
+                'name'      => (string) $r['name'],
+                'code'      => (string) $r['code'],
+                'parent_id' => (int) ($r['parent_id'] ?? 0),
             ],
             $rows
         );

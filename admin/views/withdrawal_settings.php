@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/Organization.php';
 
@@ -84,15 +86,13 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
 					<input type="hidden" name="route" value="withdrawal/settings" />
 				<?php endif; ?>
-				<label class="form-label fw-bold m-0">대상</label>
-				<select name="agency" class="form-select form-select-solid w-250px" onchange="this.form.submit()">
-					<option value="0"<?= $targetAgency === null ? ' selected' : '' ?>>전역 기본값(대리점 미지정 폴백)</option>
-					<?php foreach ($agencyOptions as $opt) : ?>
-					<option value="<?= (int) $opt['id'] ?>"<?= $targetAgency !== null && (int) $targetAgency['id'] === (int) $opt['id'] ? ' selected' : '' ?>>
-						<?= htmlspecialchars($opt['name'] . ' (' . $opt['code'] . ')', ENT_QUOTES, 'UTF-8') ?>
-					</option>
-					<?php endforeach; ?>
-				</select>
+				<?php // 총판 → 대상(전역/대리점). 대리점 고르면 자동 이동. agency 파라미터 유지.
+				org_scope_picker('wd', 0, $targetAgency !== null ? (int) $targetAgency['id'] : 0, [
+					'dist_col' => 'w-200px', 'agency_col' => 'w-250px',
+					'dist_label' => '총판', 'agency_label' => '대상',
+					'agency_name' => 'agency', 'submit_on_change' => true,
+					'extra_options' => [['value' => 0, 'label' => '전역 기본값(대리점 미지정 폴백)', 'selected' => $targetAgency === null]],
+				]); ?>
 				<noscript><button type="submit" class="btn btn-sm btn-light-primary">이동</button></noscript>
 				<?php if ($targetAgency !== null) : ?>
 					<span class="badge badge-light-primary fs-7">이 대리점 전용값을 보는 중</span>

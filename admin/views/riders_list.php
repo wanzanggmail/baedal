@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 // 예금주 조회는 펌뱅킹 실연동이 켜져 있을 때만 쓸 수 있다.
 // 꺼져 있으면 버튼을 아예 내보내지 않는다 — 눌러도 "확인 불가" 만 나오는 버튼은
 // 화면만 어지럽히고, 저장할 때마다 없앨 수 없는 경고 팝업까지 뜬다.
@@ -140,20 +142,11 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 					       placeholder="이름, 로그인ID, 전화"
 					       value="<?= htmlspecialchars($filterQ, ENT_QUOTES, 'UTF-8') ?>" autocomplete="off" />
 				</div>
-				<?php if (!empty($agencyOptions)): ?>
-				<div class="col-md-2">
-					<label class="form-label fw-semibold">대리점</label>
-					<select class="form-select form-select-solid" name="agency" data-control="select2" data-placeholder="전체">
-						<option value="">전체</option>
-						<?php foreach ($agencyOptions as $ao): ?>
-						<option value="<?= (int) $ao['id'] ?>"
-							<?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>>
-							<?= htmlspecialchars((string) $ao['name'], ENT_QUOTES, 'UTF-8') ?>
-						</option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<?php endif; ?>
+				<?php // 총판 → 대리점 필터(공용). agency 파라미터 유지.
+				org_scope_picker('rl', 0, $filterAgency, [
+					'dist_col' => 'col-md-2', 'agency_col' => 'col-md-2',
+					'agency_name' => 'agency',
+				]); ?>
 				<div class="col-md-2">
 					<label class="form-label fw-semibold">상태</label>
 					<select class="form-select form-select-solid" name="status">
@@ -300,19 +293,16 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 					<form id="rider_register_form" novalidate>
 						<?php if (!$isAgencyCreator): ?>
 						<div class="row g-6 mb-6">
-							<div class="col-md-12">
-								<label class="form-label required">소속 대리점</label>
-								<select class="form-select form-select-solid" id="reg_agency_id" required
-									data-control="select2" data-placeholder="대리점 선택" data-dropdown-parent="#kt_rider_register_modal">
-									<option value=""></option>
-									<?php foreach ($agencyOptions as $ag): ?>
-									<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
-									<?php endforeach; ?>
-								</select>
-								<?php if ($agencyOptions === []): ?>
-								<div class="form-text text-danger">먼저 「조직 관리」에서 대리점을 등록하세요.</div>
-								<?php endif; ?>
-							</div>
+							<?php // 총판 → 소속 대리점(필수, 모달 안이라 dropdown_parent 지정). JS 는 'regap_osp_agency' 를 읽는다.
+							org_scope_picker('regap', 0, 0, [
+								'dist_col' => 'col-md-6', 'agency_col' => 'col-md-6',
+								'dist_label' => '총판', 'agency_label' => '소속 대리점',
+								'required' => true, 'agency_all' => false,
+								'dropdown_parent' => '#kt_rider_register_modal',
+							]); ?>
+							<?php if ($agencyOptions === []): ?>
+							<div class="col-12"><div class="form-text text-danger">먼저 「조직 관리」에서 대리점을 등록하세요.</div></div>
+							<?php endif; ?>
 						</div>
 						<?php endif; ?>
 						<div class="row g-6 mb-6">
@@ -457,15 +447,14 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 
 					<form id="bulk_upload_form" enctype="multipart/form-data" accept-charset="UTF-8">
 						<?php if (!$isAgencyCreator): ?>
-						<div class="mb-6">
-							<label class="form-label required">소속 대리점</label>
-							<select class="form-select form-select-solid" id="bulk_agency_id"
-								data-control="select2" data-placeholder="대리점 선택" data-dropdown-parent="#kt_rider_bulk_modal">
-								<option value=""></option>
-								<?php foreach ($agencyOptions as $ag): ?>
-								<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
-								<?php endforeach; ?>
-							</select>
+						<div class="row g-6 mb-6">
+							<?php // 총판 → 소속 대리점(필수, 일괄등록 모달). JS 는 'bulk_osp_agency' 를 읽는다.
+							org_scope_picker('bulk', 0, 0, [
+								'dist_col' => 'col-md-6', 'agency_col' => 'col-md-6',
+								'dist_label' => '총판', 'agency_label' => '소속 대리점',
+								'required' => true, 'agency_all' => false,
+								'dropdown_parent' => '#kt_rider_bulk_modal',
+							]); ?>
 						</div>
 						<?php endif; ?>
 
@@ -539,7 +528,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 		if (pw !== pw2)      { showAlert('비밀번호가 일치하지 않습니다.'); return; }
 		if (!name)           { showAlert('이름을 입력하세요.'); return; }
 		if (!phone)          { showAlert('휴대전화를 입력하세요.'); return; }
-		var agencyEl = document.getElementById('reg_agency_id');
+		var agencyEl = document.getElementById('regap_osp_agency');
 		if (agencyEl && !agencyEl.value) { showAlert('소속 대리점을 선택하세요.'); return; }
 
 		var btn = document.getElementById('reg_submit_btn');
@@ -586,7 +575,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 
 	document.getElementById('kt_rider_register_modal').addEventListener('show.bs.modal', function () {
 		document.getElementById('rider_register_form').reset();
-		var resetAgencyEl = document.getElementById('reg_agency_id');
+		var resetAgencyEl = document.getElementById('regap_osp_agency');
 		if (resetAgencyEl && window.jQuery) { jQuery(resetAgencyEl).val('').trigger('change'); }
 		var al = document.getElementById('reg_alert');
 		al.className = 'd-none mb-6';
@@ -619,7 +608,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 	}
 	function agencyId() {
 		if (IS_AGENCY) return null;
-		var el = document.getElementById('bulk_agency_id');
+		var el = document.getElementById('bulk_osp_agency');
 		return el ? el.value : '';
 	}
 
@@ -713,7 +702,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 
 	modalEl.addEventListener('show.bs.modal', function () {
 		form.reset();
-		var resetAgencyEl = document.getElementById('bulk_agency_id');
+		var resetAgencyEl = document.getElementById('bulk_osp_agency');
 		if (resetAgencyEl && window.jQuery) { jQuery(resetAgencyEl).val('').trigger('change'); }
 		alertEl.className = 'd-none mb-6';
 		alertEl.innerHTML = '';

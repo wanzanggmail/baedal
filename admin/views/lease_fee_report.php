@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/RiderDebt.php';
 require_once INC_PATH . '/Org.php';
+require_once INC_PATH . '/org_scope_picker.php';
 
 // 본사 전용(2026-08-12 갑 확정). 라우트 가드가 이미 막지만, 직접 include 되는 경로가 생겨도
 // 총판·대리점에 배분 내역이 노출되지 않도록 화면에서도 한 번 더 차단한다.
@@ -40,17 +41,7 @@ $filters = ['from' => $filterFrom, 'to' => $filterTo, 'agency_id' => $filterAgen
 $sum  = $needsMigrate ? ['total' => 0, 'hq' => 0, 'distributor' => 0, 'agency' => 0, 'count' => 0, 'days' => 0] : RiderDebt::feeSummary($filters);
 $rows = $needsMigrate ? [] : RiderDebt::feeRows($filters);
 
-// 대리점 선택 목록 — 스코프 안에서만
-$agencyOptions = [];
-if (!$needsMigrate) {
-    [$scopeSql, $scopeParams] = Org::agencyScopeClause('id');
-    $agencyOptions = db_rows(
-        "SELECT id, name FROM organizations
-          WHERE level = 'agency'" . ($scopeSql !== '' ? " AND {$scopeSql}" : '') . '
-          ORDER BY name ASC',
-        $scopeParams
-    );
-}
+// 대리점 선택은 org_scope_picker('lf', …) 가 스코프 안에서 총판→대리점 2단으로 그린다.
 
 $won = static fn ($n): string => number_format((int) $n) . '원';
 $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
@@ -154,17 +145,8 @@ $currentUrl = admin_url('deduction/lease-fees');
 					<label class="form-label fw-semibold">종료</label>
 					<input type="date" class="form-control form-control-solid" name="to" value="<?= $esc($filterTo) ?>" />
 				</div>
-				<?php if ($agencyOptions !== []) : ?>
-				<div class="col-md-3">
-					<label class="form-label fw-semibold">대리점</label>
-					<select class="form-select form-select-solid" name="agency" data-control="select2" data-placeholder="전체">
-						<option value="">전체</option>
-						<?php foreach ($agencyOptions as $ao) : ?>
-						<option value="<?= (int) $ao['id'] ?>" <?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>><?= $esc((string) $ao['name']) ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<?php endif; ?>
+				<?php // 총판 → 대리점(검색형). 서버는 name="agency" 만 읽는다. ?>
+				<?php org_scope_picker('lf', 0, $filterAgency, ['agency_name' => 'agency']); ?>
 				<div class="col-md-3 d-flex gap-2 justify-content-md-end">
 					<button type="submit" class="btn btn-primary">조회</button>
 					<a href="<?= $esc($currentUrl) ?>" class="btn btn-light">초기화</a>

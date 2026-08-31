@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 /**
  * 프로모션 지급 — 템플릿 다운로드 → 금액 채워 업로드 → 미리보기 → 확정 지급.
  * 확정 시 라이더별 카드결제(프로모션액 + 플랫폼 수수료) 후 성공 건만 지갑 적립.
@@ -82,15 +84,13 @@ $fmtWon      = static fn (int $n): string => number_format($n) . '원';
 				<div class="card-body pt-5">
 					<form id="promoForm" enctype="multipart/form-data" accept-charset="UTF-8">
 						<?php if (!$isAgency) : ?>
-						<div class="mb-6">
-							<label class="form-label required">대리점</label>
-							<select class="form-select form-select-solid" name="agency_id" id="promoAgency">
-								<option value="">대리점 선택</option>
-								<?php foreach ($agencyOptions as $ag) : ?>
-								<option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name'] . ' (' . $ag['code'] . ')', ENT_QUOTES, 'UTF-8') ?></option>
-								<?php endforeach; ?>
-							</select>
-							<div class="form-text">프로모션을 지급할 대리점입니다. 템플릿도 이 대리점 라이더로 만들어집니다.</div>
+						<div class="row g-3 mb-6">
+							<?php // 총판 → 대리점(필수). JS 는 새 id 'promo_osp_agency' 를 읽는다.
+							org_scope_picker('promo', 0, 0, [
+								'dist_col' => 'col-md-6', 'agency_col' => 'col-md-6',
+								'agency_name' => 'agency_id', 'required' => true, 'agency_all' => false,
+							]); ?>
+							<div class="col-12"><div class="form-text">프로모션을 지급할 대리점입니다. 템플릿도 이 대리점 라이더로 만들어집니다.</div></div>
 						</div>
 						<?php endif; ?>
 
@@ -247,7 +247,7 @@ $fmtWon      = static fn (int $n): string => number_format($n) . '원';
 		}
 		function agencyId() {
 			if (IS_AGENCY) return null;
-			var el = document.getElementById('promoAgency');
+			var el = document.getElementById('promo_osp_agency');
 			return el ? el.value : '';
 		}
 

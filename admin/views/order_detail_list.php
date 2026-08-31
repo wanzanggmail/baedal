@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once INC_PATH . '/org_scope_picker.php';
+
 require_once INC_PATH . '/Org.php';
 require_once INC_PATH . '/Organization.php';
 
@@ -185,17 +187,12 @@ function order_detail_range_url(string $base, string $from, string $to, array $e
 						<input type="hidden" name="to" data-kt-daterange-to value="<?= $esc($filterTo) ?>" />
 					</div>
 				</div>
-				<?php if (!$isAgencyLevel) : ?>
-				<div class="col-auto">
-					<label class="form-label fs-8 mb-1">대리점</label>
-					<select name="agency" id="odFilterAgency" class="form-select form-select-sm" style="min-width:150px">
-						<option value="0">전체</option>
-						<?php foreach ($agencyOptions as $ao) : ?>
-						<option value="<?= (int) $ao['id'] ?>" <?= $filterAgency === (int) $ao['id'] ? 'selected' : '' ?>><?= $esc((string) $ao['name']) ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<?php endif; ?>
+				<?php // 총판 → 대리점 연동 선택기(공용)
+				org_scope_picker('od', 0, $filterAgency, [
+					'dist_col' => 'col-auto', 'agency_col' => 'col-auto',
+					'dist_label' => '총판', 'agency_label' => '대리점',
+					'agency_name' => 'agency',
+				]); ?>
 				<div class="col-auto">
 					<label class="form-label fs-8 mb-1">플랫폼</label>
 					<select name="platform" class="form-select form-select-sm">
