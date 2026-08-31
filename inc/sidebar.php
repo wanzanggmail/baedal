@@ -308,7 +308,7 @@ $route = $route ?? '';
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/settings') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">수수료 설정</span>
+														<span class="menu-title">수수료 설정(관리)</span>
 													</a>
 												</div>
 												<?php endif; ?>
@@ -316,7 +316,7 @@ $route = $route ?? '';
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">수수료 설정(본사)</span>
+														<span class="menu-title">수수료 설정</span>
 													</a>
 												</div>
 												<?php endif; ?>

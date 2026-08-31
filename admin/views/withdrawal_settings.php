@@ -54,13 +54,13 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
 	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
-			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">수수료 설정</h1>
+			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">수수료 설정(관리)</h1>
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-muted">설정</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-gray-900">수수료 설정(총판·대리점)</li>
+				<li class="breadcrumb-item text-gray-900">수수료 설정(관리)</li>
 			</ul>
 		</div>
 		<div class="d-flex gap-2">
@@ -188,7 +188,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 							<?php else : ?>
 							<div class="text-gray-700">현재 대행수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
 							<?php endif; ?>
-							<a href="<?= htmlspecialchars($agencyFeeUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary mt-1">수수료 설정(본사)에서 관리 →</a>
+							<a href="<?= htmlspecialchars($agencyFeeUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary mt-1">수수료 설정(본사 기본값)에서 관리 →</a>
 						</div>
 						<div class="table-responsive mb-2">
 							<table class="table table-row-bordered align-middle gy-2 mb-0">
