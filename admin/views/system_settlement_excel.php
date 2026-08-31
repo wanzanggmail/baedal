@@ -47,6 +47,16 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 </div>
 <!--end::Toolbar-->
 <?php require_once INC_PATH . '/app_content_open.php'; ?>
+	<?php // form-control-solid 는 보더색이 배경(gray-100)과 같아 보이지 않는데, 짝인 input-group-text
+	      // 는 회색 보더가 그대로라 한 그룹 안에서 접두 라벨만 테두리가 도드라져 보였다. solid 입력이
+	      // 있는 그룹의 라벨 보더를 같은 gray-100 으로 맞춰 이음매 없이 보이게 한다(하단 목록의 일반
+	      // 입력은 :has 로 제외돼 기존 보더 유지). ?>
+	<style>
+		.excel-pw-form .input-group:has(.form-control-solid) .input-group-text {
+			background-color: var(--bs-gray-100);
+			border-color: var(--bs-gray-100);
+		}
+	</style>
 
 	<?php if (!$excelConfigReady) : ?>
 	<div class="alert alert-warning mb-8">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
