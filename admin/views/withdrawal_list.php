@@ -55,7 +55,7 @@ $totalAmount = array_sum(array_map(static fn (array $r): int => (int) $r['amount
 			</ul>
 		</div>
 		<div class="d-flex align-items-center gap-2 flex-wrap">
-			<a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">출금 정책</a>
+			<a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">수수료 설정</a>
 			<a href="<?= htmlspecialchars(admin_url('withdrawal/download'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-primary fw-bold">
 				<i class="ki-duotone ki-file-down fs-3"><span class="path1"></span><span class="path2"></span></i>
 				은행 파일 다운로드

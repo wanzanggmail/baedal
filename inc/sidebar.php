@@ -277,6 +277,7 @@ $route = $route ?? '';
 										    'system/team'              => admin_can_access_route('system/team'),
 										    'withdrawal/settings'      => admin_can_access_route('withdrawal/settings'),
 										    'deduction/agency-fee'     => admin_can_access_route('deduction/agency-fee'),
+										    'system/pg-fee'            => admin_can_access_route('system/pg-fee'),
 										    'withdrawal/payment-setup' => admin_can_access_route('withdrawal/payment-setup'),
 										    'system/settlement-excel'  => admin_can_access_route('system/settlement-excel'),
 										]));
@@ -284,7 +285,7 @@ $route = $route ?? '';
 										?>
 										<?php if ($hasSettings) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
-										    'system/team', 'withdrawal/settings', 'deduction/agency-fee',
+										    'system/team', 'withdrawal/settings', 'deduction/agency-fee', 'system/pg-fee',
 										    'withdrawal/payment-setup', 'system/settlement-excel',
 										]) ?>">
 											<span class="menu-link">
@@ -307,7 +308,7 @@ $route = $route ?? '';
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/settings') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">출금 정책</span>
+														<span class="menu-title">수수료 설정</span>
 													</a>
 												</div>
 												<?php endif; ?>
@@ -315,7 +316,15 @@ $route = $route ?? '';
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('deduction/agency-fee') ?>" href="<?= htmlspecialchars(admin_url('deduction/agency-fee'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">대행수수료</span>
+														<span class="menu-title">수수료 설정(본사)</span>
+													</a>
+												</div>
+												<?php endif; ?>
+												<?php if (admin_can_access_route('system/pg-fee')) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/pg-fee') ?>" href="<?= htmlspecialchars(admin_url('system/pg-fee'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">수수료 현황</span>
 													</a>
 												</div>
 												<?php endif; ?>
@@ -344,7 +353,7 @@ $route = $route ?? '';
 										<?php if (admin_has_role('super')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'system/orgs', 'system/admins', 'system/permissions', 'system/codes',
-										    'system/audit', 'system/pg-fee', 'system/pg-integration', 'system/pg-logs',
+										    'system/audit', 'system/pg-integration', 'system/pg-logs',
 										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust',
 										]) ?>">
 											<span class="menu-link">
@@ -371,12 +380,6 @@ $route = $route ?? '';
 													<a class="menu-link<?= nav_active('system/permissions') ?>" href="<?= htmlspecialchars(admin_url('system/permissions'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">권한 관리</span>
-													</a>
-												</div>
-												<div class="menu-item">
-													<a class="menu-link<?= nav_active('system/pg-fee') ?>" href="<?= htmlspecialchars(admin_url('system/pg-fee'), ENT_QUOTES, 'UTF-8') ?>">
-														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">수수료 현황</span>
 													</a>
 												</div>
 												<div class="menu-item">

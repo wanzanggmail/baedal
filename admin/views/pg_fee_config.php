@@ -29,7 +29,7 @@ $settingsUrl = admin_url('withdrawal/settings');
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted"><a href="<?= $esc(admin_url('dashboard')) ?>" class="text-muted text-hover-primary">홈</a></li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-muted">시스템 관리</li>
+				<li class="breadcrumb-item text-muted">설정</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">수수료 현황</li>
 			</ul>
@@ -49,7 +49,7 @@ $settingsUrl = admin_url('withdrawal/settings');
 	<div class="alert bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-percentage fs-2hx text-primary me-4 mb-3 mb-sm-0"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			대리점별 수수료 설정을 <strong>한눈에 비교</strong>하는 화면입니다. <strong>값을 바꾸려면 「수수료 편집」</strong>(출금 정책 설정)에서 대리점을 고르세요.
+			대리점별 수수료 설정을 <strong>한눈에 비교</strong>하는 화면입니다. <strong>값을 바꾸려면 「수수료 설정」</strong>에서 대리점을 고르세요.
 			<span class="d-block mt-1">
 				· <strong>정산수수료</strong> — 라이더 출금 시 주문 <strong>건별</strong>로 붙는 금액(정산일로부터 경과일 기준으로 단가가 갈립니다) + 출금 후 지갑에 남기는 보증금<br />
 				· <strong>플랫폼 수수료</strong> — PG 결제 시 붙는 비율을 <strong>본사·총판·대리점</strong>이 나눠 갖습니다(대리점별로 각각 다르게 지정 가능)
