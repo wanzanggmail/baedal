@@ -29,18 +29,20 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
-$isAgency = admin_org_level() === Org::LEVEL_AGENCY;
-$myAgency = $isAgency ? admin_org_id() : 0;
+// 자체 인출은 자기 조직 지갑을 빼는 것 — 대리점·총판 모두 "셀프"(본인 조직만). 본사는 조회만.
+$level    = admin_org_level();
+$isSelf   = $level === Org::LEVEL_AGENCY || $level === Org::LEVEL_DISTRIBUTOR;
+$myOrg    = $isSelf ? admin_org_id() : 0;
 $myRole   = (string) (admin_user()['role'] ?? '');
 $adminId  = (int) ($_SESSION['admin_id'] ?? 0);
 $method   = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
     try {
-        $out = ['ok' => true, 'scope' => $isAgency ? 'agency' : 'org'];
-        if ($isAgency) {
-            $out['wallet'] = AgencyWallet::withdrawable($myAgency);
-            $out['rows']   = AgencyPayout::listScoped($myAgency);
+        $out = ['ok' => true, 'scope' => $isSelf ? 'self' : 'org'];
+        if ($isSelf) {
+            $out['wallet'] = AgencyWallet::withdrawable($myOrg);
+            $out['rows']   = AgencyPayout::listScoped($myOrg);
         } else {
             $out['rows'] = AgencyPayout::listScoped(null);
         }
@@ -55,9 +57,9 @@ if ($method !== 'POST') {
     $err('허용되지 않은 메서드입니다.', 405);
 }
 
-// 인출 신청은 대리점 운영/정산 계정만 (승인 절차 없음 — LOGIC §5.5)
-if (!$isAgency || !in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
-    $err('대리점 운영/정산 계정만 자체 인출을 신청할 수 있습니다.', 403);
+// 인출 신청은 대리점·총판 운영/정산/총괄 계정만 (승인 절차 없음 — LOGIC §5.5)
+if (!$isSelf || !in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
+    $err('대리점·총판 운영/정산 계정만 자체 인출을 신청할 수 있습니다.', 403);
 }
 
 $raw  = file_get_contents('php://input');
@@ -71,17 +73,17 @@ if ($action !== 'create') {
 
 try {
     $amount = (int) ($body['amount'] ?? 0);
-    $payout = AgencyPayout::create($myAgency, $amount, $adminId > 0 ? $adminId : null);
+    $payout = AgencyPayout::create($myOrg, $amount, $adminId > 0 ? $adminId : null);
     AuditLog::record(
         'withdrawal.agency_payout',
         (string) $payout['id'],
-        sprintf('대리점 자체 인출 %s원 신청', number_format((int) $payout['amount']))
+        sprintf('자체 인출 %s원 신청', number_format((int) $payout['amount']))
     );
     echo json_encode([
         'ok'      => true,
         'message' => number_format((int) $payout['amount']) . '원 인출 신청이 접수되었습니다.',
         'payout'  => $payout,
-        'wallet'  => AgencyWallet::withdrawable($myAgency),
+        'wallet'  => AgencyWallet::withdrawable($myOrg),
     ], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);

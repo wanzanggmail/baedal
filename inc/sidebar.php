@@ -147,7 +147,7 @@ $route = $route ?? '';
 										<!--end:수수료·채권-->
 
 										<!--begin:지급·출금-->
-										<?php if (admin_can_access_route('withdrawal/list')) : ?>
+										<?php if (admin_can_access_route('withdrawal/list') || admin_can_access_route('withdrawal/wallet-ledger') || admin_can_access_route('withdrawal/agency-payout')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'withdrawal/list', 'withdrawal/proxy', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
 										    'withdrawal/wallet-ledger', 'withdrawal/download', 'withdrawal/complete',
@@ -161,14 +161,15 @@ $route = $route ?? '';
 												<span class="menu-arrow"></span>
 											</span>
 											<div class="menu-sub menu-sub-accordion">
+												<?php if (admin_can_access_route('withdrawal/list')) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/list') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/list'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">출금 신청 목록</span>
 													</a>
 												</div>
-												<?php // 화면·API 모두 대리점 전용이라 레벨로 직접 판단한다. admin_can_access_route()는
-											      // super를 무조건 통과시켜서, 본사에 "대리점 계정만" 안내만 뜨는 빈 메뉴가 생긴다. ?>
+												<?php endif; ?>
+												<?php // 출금 대행·일일정산 지급은 라이더를 직접 지급하는 대리점 전용 기능. ?>
 												<?php if (admin_org_level() === Org::LEVEL_AGENCY) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/proxy') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/proxy'), ENT_QUOTES, 'UTF-8') ?>">
@@ -182,10 +183,14 @@ $route = $route ?? '';
 														<span class="menu-title">일일정산 지급</span>
 													</a>
 												</div>
+												<?php endif; ?>
+												<?php // 자체 인출 — 자기 조직 지갑(대리점·총판 몫)을 인출. 셀프 인출 주체(대리점·총판)만
+											      // 메뉴에 보인다(본사는 자기 지갑을 인출하지 않으므로 숨김 — 기존 동작 유지). ?>
+												<?php if (admin_org_level() === Org::LEVEL_AGENCY || admin_org_level() === Org::LEVEL_DISTRIBUTOR) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/agency-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/agency-payout'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-														<span class="menu-title">대리점 자체 인출</span>
+														<span class="menu-title">자체 인출</span>
 													</a>
 												</div>
 												<?php endif; ?>
@@ -203,12 +208,14 @@ $route = $route ?? '';
 													</a>
 												</div>
 												<?php endif; ?>
+												<?php if (admin_can_access_route('withdrawal/wallet-ledger')) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('withdrawal/wallet-ledger') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/wallet-ledger'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">지갑 입출금</span>
 													</a>
 												</div>
+												<?php endif; ?>
 												<?php // 펌뱅킹 즉시이체로 전환된 뒤 남은 구 경로 — 장애 대비 백업이라 [백업]으로 표기하고
 												      // 최고관리자에게만 보인다(2026-08-15, auth.php에서 접근도 함께 막음). ?>
 												<?php if (admin_has_role('super')) : ?>

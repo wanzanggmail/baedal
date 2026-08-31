@@ -141,6 +141,30 @@ function admin_can_access_route(string $route): bool
         return true;
     }
 
+    // 총판(distributor) 화면 최소화 (2026-09-01 갑): 총판은 아래 목록만 접근·열람한다
+    //  — 대시보드 / 수수료·채권(미수금·리스배분 제외) / 지갑 입출금 / 자체 인출 /
+    //    설정(조직 정보·계정 · 수수료 설정 조회). 그 외는 전부 차단(메뉴에서도 자동으로 사라진다).
+    //    허용된 화면 안에서도 편집 권한은 각 화면·API가 따로 막는다(총판은 대부분 조회, 자체 인출은
+    //    자기 조직 지갑만). 조직 레벨 기준이라 계정 역할(manager 등)과 무관하게 적용된다.
+    if (admin_org_level() === Org::LEVEL_DISTRIBUTOR) {
+        $distAllow = [
+            'dashboard', 'docs/manual',
+            'settlement/fees', 'settlement/fee-detail', 'settlement/platform-fee',
+            'withdrawal/wallet-ledger', 'withdrawal/agency-payout',
+            'system/team', 'deduction/agency-fee',
+        ];
+        $distOk = false;
+        foreach ($distAllow as $allowed) {
+            if ($route === $allowed || ($allowed !== 'dashboard' && str_starts_with($route, $allowed . '/'))) {
+                $distOk = true;
+                break;
+            }
+        }
+        if (!$distOk) {
+            return false;
+        }
+    }
+
     // 매뉴얼은 정보 열람용이라 역할·조직과 무관하게 로그인한 관리자 전원에게 허용
     if (str_starts_with($route, 'docs/manual')) {
         return true;
