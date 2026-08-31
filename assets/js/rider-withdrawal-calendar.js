@@ -130,6 +130,9 @@
 				if (!d.ok) throw new Error(d.message || '계산 실패');
 				setText('wdConsume', '₩ ' + won(d.consume_amount));
 				setText('wdFee', '− ₩ ' + won(d.fee_per_tx));
+				setText('wdTransferFee', '− ₩ ' + won(d.transfer_fee || 0));
+				var tfRow = document.getElementById('wdTransferFeeRow');
+				if (tfRow) { tfRow.classList.toggle('d-none', !(d.transfer_fee > 0)); }
 				setText('wdPayout', '₩ ' + won(d.payout_amount));
 				setText('wdPeriodLabel', d.period_from
 					? (d.period_from === d.period_to ? d.period_from : d.period_from + ' ~ ' + d.period_to) + ' (' + d.picked_count + '일)'

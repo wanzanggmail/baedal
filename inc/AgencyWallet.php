@@ -29,6 +29,8 @@ final class AgencyWallet
         'lease_fee_in_rev'  => '리스 수수료 수입 취소',
         'wd_fee_up'         => '정산수수료 상위 이체',
         'wd_fee_in'         => '정산수수료 수입',
+        'transfer_fee_up'   => '이체 수수료 상위 이체',
+        'transfer_fee_in'   => '이체 수수료 수입(본사)',
     ];
 
     public static function tableExists(): bool

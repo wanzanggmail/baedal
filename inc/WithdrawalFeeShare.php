@@ -103,6 +103,38 @@ final class WithdrawalFeeShare
     }
 
     /**
+     * 이체 수수료(펌뱅킹 이체 1건당 정액)를 **본사 몫으로 이동**한다 (2026-09-01 갑 지시).
+     *
+     * 정산수수료와 같은 구조 — 라이더 지갑에서 실지급액과 함께 빠지되 은행으로는 안 나가서
+     * **대리점 지갑에 남은 돈**이므로, 그중 이체 수수료만큼을 본사 지갑으로 옮긴다.
+     * (정산수수료 배분처럼 대리점 몫은 이동이 없고, 여기선 전액 본사로 간다 — 총판은 안 나눈다.)
+     *
+     * **호출부의 트랜잭션 안에서, 실제 이체가 확정되는 그 지점에서만** 부른다.
+     *
+     * @return int 실제로 본사로 옮긴 금액(0이면 이동 없음)
+     */
+    public static function chargeTransferFee(int $requestId, int $riderId, int $transferFee, ?int $adminId = null): int
+    {
+        if ($requestId < 1 || $transferFee <= 0 || !AgencyWallet::tableExists()) {
+            return 0;
+        }
+        $agencyId = self::agencyOf($riderId);
+        if ($agencyId < 1) {
+            return 0;
+        }
+        $hqId = (int) (Org::chainForAgency($agencyId)['hq'] ?? 0);
+        if ($hqId < 1) {
+            return 0; // 본사가 없으면(이론상 없음) 옮길 곳이 없다.
+        }
+
+        $note = sprintf('출금#%d 이체 수수료', $requestId);
+        AgencyWallet::debit($agencyId, $transferFee, 'transfer_fee_up', $requestId, $note, $adminId);
+        AgencyWallet::credit($hqId, $transferFee, 'transfer_fee_in', $requestId, $note . ' · 본사 귀속', $adminId);
+
+        return $transferFee;
+    }
+
+    /**
      * 이 출금이 소진한 정산 사이클을 「기준 미만/기준 이상」 배달 건수로 재구성한다.
      *
      * 구간 판정 기준일(asOf)은 **신청 시각(requested_at)** — 그때 라이더에게 부과한 수수료의

@@ -165,6 +165,13 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 							</div>
 						</div>
 
+						<div class="mb-6" style="max-width:320px">
+							<label class="form-label" for="cfg_transfer_fee">이체 수수료 (원) <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></label>
+							<input type="number" class="form-control form-control-solid" id="cfg_transfer_fee" min="0" step="10"
+								value="<?= (int) $config['transfer_fee'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							<div class="form-text fs-9">펌뱅킹 이체(일일이체·출금신청·출금대행)가 <strong>일어날 때마다</strong> 라이더에게 부과하는 정액입니다. 실지급액에서 빠져 <strong>본사로 귀속</strong>됩니다. 정산수수료를 뗀 뒤에도 지급액이 남을 때만 부과됩니다.</div>
+						</div>
+
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
 						<div class="text-muted fs-8 mb-4">
@@ -382,6 +389,11 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				payload.hq_fee_long    = hqLong;
 				payload.dist_fee_short = parseInt(document.getElementById('cfg_dist_short').value, 10) || 0;
 				payload.dist_fee_long  = parseInt(document.getElementById('cfg_dist_long').value, 10) || 0;
+			}
+			// 이체 수수료도 본사 전용 — 편집 가능할 때만 보낸다.
+			var tfEl = document.getElementById('cfg_transfer_fee');
+			if (tfEl && !tfEl.disabled) {
+				payload.transfer_fee = parseInt(tfEl.value, 10) || 0;
 			}
 			fetch(API, {
 				method: 'POST',

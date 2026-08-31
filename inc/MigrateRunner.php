@@ -74,6 +74,7 @@ final class MigrateRunner
         self::migrateNoticeEndsAt();
         self::migrateSettlementExcelKind();
         self::migrateWeeklyRiders();
+        self::migrateTransferFee();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1389,6 +1390,50 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * 이체 수수료 — 펌뱅킹 이체(일일이체·출금신청·출금대행) 1건당 라이더에게 부과하는 정액.
+     * 2026-09-01 갑 지시. 실지급액에서 빼고 **본사**로 귀속된다.
+     *
+     * - `withdrawal_config.transfer_fee`(기본 330) : 대리점별 설정 가능(전역/오버라이드).
+     * - `withdrawal_requests.withhold_transfer_fee` : 출금 건별로 실제 부과한 이체 수수료 기록.
+     */
+    private static function migrateTransferFee(): void
+    {
+        echo "== 이체 수수료 컬럼 ==\n";
+
+        if (db_table_exists('withdrawal_config')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+            if (!in_array('transfer_fee', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE withdrawal_config
+                     ADD COLUMN transfer_fee INT NOT NULL DEFAULT 330
+                         COMMENT '펌뱅킹 이체 1건당 이체 수수료(원) — 실지급액에서 빼 본사 귀속'"
+                );
+                echo "OK    withdrawal_config.transfer_fee 추가(기본 330)\n";
+            } else {
+                echo "SKIP  withdrawal_config.transfer_fee (이미 있음)\n";
+            }
+        } else {
+            echo "SKIP  withdrawal_config (테이블 없음)\n";
+        }
+
+        if (db_table_exists('withdrawal_requests')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_requests'), 'Field');
+            if (!in_array('withhold_transfer_fee', $cols, true)) {
+                db_execute(
+                    "ALTER TABLE withdrawal_requests
+                     ADD COLUMN withhold_transfer_fee INT NOT NULL DEFAULT 0
+                         COMMENT '이 출금에 부과한 이체 수수료(원) — 본사 귀속'"
+                );
+                echo "OK    withdrawal_requests.withhold_transfer_fee 추가\n";
+            } else {
+                echo "SKIP  withdrawal_requests.withhold_transfer_fee (이미 있음)\n";
+            }
+        } else {
+            echo "SKIP  withdrawal_requests (테이블 없음)\n";
+        }
     }
 
     /**

@@ -137,7 +137,15 @@ final class RiderWallet
             $consume = ($toDate !== null && $toDate !== '') ? 0 : $afterReserve;
         }
 
-        $payout = max(0, $consume - $fee);
+        // 이체 수수료 — 펌뱅킹 이체 1건당 정액(본사 귀속). 실지급액에서 뺀다(2026-09-01 갑).
+        // 정산수수료·이체수수료를 다 빼고도 라이더에게 갈 게 남을 때만 부과한다(=이체가 실제로 일어남).
+        $transferFee = (int) ($cfg['transfer_fee'] ?? 0);
+        if ($consume - $fee - $transferFee > 0) {
+            $payout = $consume - $fee - $transferFee;
+        } else {
+            $payout      = 0;   // 수수료를 빼면 남는 게 없음 → 이체 불가
+            $transferFee = 0;   // 이체가 안 일어나니 이체 수수료도 부과하지 않음
+        }
 
         return [
             // ── 기존 키(라이더 화면·applyForRider 호환) ──
@@ -147,6 +155,7 @@ final class RiderWallet
             'fee_per_tx'        => $fee,          // 이제 age-bucket 합산 총액
             'fee_day_threshold' => (int) $cfg['fee_day_threshold'],
             'after_reserve'     => $afterReserve,
+            'transfer_fee'      => $transferFee,  // 이 출금에 실제 부과할 이체 수수료(불가 시 0)
             'payout_amount'     => $payout,
             'can_apply'         => $payout > 0,
             // ── 신규: 수수료 구간 내역 + 사이클 선택 결과 ──

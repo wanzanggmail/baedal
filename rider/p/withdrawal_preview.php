@@ -48,6 +48,7 @@ echo json_encode([
     'balance'           => (int) $p['balance'],
     'reserve_amount'    => (int) $p['reserve_amount'],
     'fee_per_tx'        => (int) $p['fee_per_tx'],
+    'transfer_fee'      => (int) ($p['transfer_fee'] ?? 0),
     'consume_amount'    => (int) $p['consume_amount'],
     'payout_amount'     => (int) $p['payout_amount'],
     'can_apply'         => (bool) $p['can_apply'],

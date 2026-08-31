@@ -21,6 +21,9 @@ final class WithdrawalConfig
             'hq_fee_long'    => 0,
             'dist_fee_short' => 0,
             'dist_fee_long'  => 0,
+            // 이체 수수료(2026-09-01 갑) — 펌뱅킹 이체 1건당 라이더에게 부과하는 정액. 실지급액에서
+            // 빼서 **본사**로 귀속된다. 본사가 설정(대리점은 조회).
+            'transfer_fee'   => 330,
             // 라이더가 신청하는 즉시 펌뱅킹으로 내보낼지. 기본은 끔 — 켜면 관리자가 검토할 틈이 없다.
             'auto_transfer_on_request'  => 0,
         ];
@@ -73,6 +76,7 @@ final class WithdrawalConfig
             'hq_fee_long'    => max(0, (int) ($row['hq_fee_long'] ?? $d['hq_fee_long'])),
             'dist_fee_short' => max(0, (int) ($row['dist_fee_short'] ?? $d['dist_fee_short'])),
             'dist_fee_long'  => max(0, (int) ($row['dist_fee_long'] ?? $d['dist_fee_long'])),
+            'transfer_fee'   => max(0, (int) ($row['transfer_fee'] ?? $d['transfer_fee'])),
             'auto_transfer_on_request'  => (int) !empty($row['auto_transfer_on_request']),
         ];
     }
@@ -140,6 +144,8 @@ final class WithdrawalConfig
             'hq_fee_long'    => array_key_exists('hq_fee_long', $data) ? max(0, (int) $data['hq_fee_long']) : (int) $cur['hq_fee_long'],
             'dist_fee_short' => array_key_exists('dist_fee_short', $data) ? max(0, (int) $data['dist_fee_short']) : (int) $cur['dist_fee_short'],
             'dist_fee_long'  => array_key_exists('dist_fee_long', $data) ? max(0, (int) $data['dist_fee_long']) : (int) $cur['dist_fee_long'],
+            // 이체 수수료도 본사만 보내는 값 — 대리점 저장 시 키가 안 와서 기존 값 유지.
+            'transfer_fee'   => array_key_exists('transfer_fee', $data) ? max(0, (int) $data['transfer_fee']) : (int) $cur['transfer_fee'],
             'auto_transfer_on_request' => array_key_exists('auto_transfer_on_request', $data)
                 ? (int) (bool) $data['auto_transfer_on_request']
                 : (int) $cur['auto_transfer_on_request'],
@@ -177,7 +183,7 @@ final class WithdrawalConfig
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
                      hq_fee_short = ?, hq_fee_long = ?, dist_fee_short = ?, dist_fee_long = ?,
-                     auto_transfer_on_request = ?,
+                     transfer_fee = ?, auto_transfer_on_request = ?,
                      updated_by = ?, updated_at = NOW()
                  WHERE id = ?',
                 [
@@ -189,6 +195,7 @@ final class WithdrawalConfig
                     $cfg['hq_fee_long'],
                     $cfg['dist_fee_short'],
                     $cfg['dist_fee_long'],
+                    $cfg['transfer_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                     (int) $exists['id'],
@@ -199,8 +206,8 @@ final class WithdrawalConfig
                 'INSERT INTO withdrawal_config
                     (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
                      hq_fee_short, hq_fee_long, dist_fee_short, dist_fee_long,
-                     auto_transfer_on_request, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                     transfer_fee, auto_transfer_on_request, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
@@ -211,6 +218,7 @@ final class WithdrawalConfig
                     $cfg['hq_fee_long'],
                     $cfg['dist_fee_short'],
                     $cfg['dist_fee_long'],
+                    $cfg['transfer_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                 ]

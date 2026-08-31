@@ -324,7 +324,7 @@ final class Withdrawal
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $rows = db_rows(
-            "SELECT wr.id, wr.rider_id, wr.kind, wr.amount, wr.withhold_other, wr.withhold_min_retain, wr.status,
+            "SELECT wr.id, wr.rider_id, wr.kind, wr.amount, wr.withhold_other, wr.withhold_transfer_fee, wr.withhold_min_retain, wr.status,
                     COALESCE(wr.agency_id, r.agency_id) AS agency_id, r.rider_code
                FROM withdrawal_requests wr
                LEFT JOIN riders r ON r.id = wr.rider_id
@@ -350,11 +350,11 @@ final class Withdrawal
                 }
                 $completed++;
                 if ((string) ($row['kind'] ?? '') === 'rider_manual') {
-                    // 지갑에서 실제로 빠지는 총액 = 실지급액 + 정산수수료(withhold_other).
+                    // 지갑에서 실제로 빠지는 총액 = 실지급액 + 정산수수료 + 이체수수료.
                     // 보증금(withhold_min_retain)은 지급하지 않고 지갑에 남는 몫이라 차감 대상이 아니다.
                     RiderWallet::deductAfterWithdrawal(
                         (int) $row['rider_id'],
-                        (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
+                        (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0) + (int) ($row['withhold_transfer_fee'] ?? 0)
                     );
                     // 실지급액을 대리점 지갑에서도 차감한다. 이 경로는 관리자가 은행에서 직접
                     // 이체를 끝낸 뒤 누르는 백업 흐름이라, 돈은 이미 나갔으므로 잔액이 음수가
@@ -375,6 +375,12 @@ final class Withdrawal
                         $id,
                         (int) $row['rider_id'],
                         (int) ($row['withhold_other'] ?? 0)
+                    );
+                    // 이체 수수료를 본사로 이동(2026-09-01 갑 지시).
+                    WithdrawalFeeShare::chargeTransferFee(
+                        $id,
+                        (int) $row['rider_id'],
+                        (int) ($row['withhold_transfer_fee'] ?? 0)
                     );
                 }
             }
@@ -735,7 +741,7 @@ final class Withdrawal
     public static function finalizeSuccess(int $id, string $note): bool
     {
         $row = db_row(
-            'SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.withhold_other, r.rider_code
+            'SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.withhold_other, wr.withhold_transfer_fee, r.rider_code
                FROM withdrawal_requests wr
                LEFT JOIN riders r ON r.id = wr.rider_id
               WHERE wr.id = ? LIMIT 1',
@@ -762,13 +768,13 @@ final class Withdrawal
             $done = true;
 
             if ((string) ($row['kind'] ?? '') === 'rider_manual') {
-                // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료. 보증금은 남는 몫이라 제외.
+                // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료 + 이체수수료. 보증금은 남는 몫이라 제외.
                 RiderWallet::deductAfterWithdrawal(
                     (int) $row['rider_id'],
-                    (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0)
+                    (int) ($row['amount'] ?? 0) + (int) ($row['withhold_other'] ?? 0) + (int) ($row['withhold_transfer_fee'] ?? 0)
                 );
                 // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
-                // (정산수수료는 대리점에 남았다가 아래 배분에서 본사·총판 몫만 빠져나간다.)
+                // (정산수수료·이체수수료는 대리점에 남았다가 아래에서 각각 상위로 빠져나간다.)
                 if ($agencyId > 0) {
                     AgencyWallet::debit(
                         $agencyId,
@@ -784,6 +790,12 @@ final class Withdrawal
                     $id,
                     (int) $row['rider_id'],
                     (int) ($row['withhold_other'] ?? 0)
+                );
+                // 이체 수수료를 본사로 이동(2026-09-01 갑 지시).
+                WithdrawalFeeShare::chargeTransferFee(
+                    $id,
+                    (int) $row['rider_id'],
+                    (int) ($row['withhold_transfer_fee'] ?? 0)
                 );
             }
         });
@@ -1062,6 +1074,7 @@ final class Withdrawal
         $balance  = (int) $preview['balance'];
         $reserve  = (int) $preview['reserve_amount'];
         $fee      = (int) $preview['fee_per_tx'];
+        $transferFee = (int) ($preview['transfer_fee'] ?? 0); // 이체 수수료(본사 귀속). payout 은 이미 이만큼 뺀 값.
         $payout   = (int) $preview['payout_amount'];
         $accrued  = (int) $preview['accrued_days'];
         $picked   = (array) ($preview['picked_cycles'] ?? []);
@@ -1095,21 +1108,24 @@ final class Withdrawal
                 number_format($reserve),
                 number_format($fee)
             );
+        if ($transferFee > 0) {
+            $note .= sprintf(' · 이체수수료 %s원', number_format($transferFee));
+        }
 
         // 신청 기록 + 사이클 점유를 한 트랜잭션으로 — 중간 실패 시 점유가 남지 않게 한다.
         require_once INC_PATH . '/WithdrawalCycles.php';
         $newId = db_transaction(static function () use (
-            $hasAccruedCol, $riderId, $payout, $balance, $reserve, $fee, $accrued, $rider, $note, $picked
+            $hasAccruedCol, $riderId, $payout, $balance, $reserve, $fee, $transferFee, $accrued, $rider, $note, $picked
         ): int {
             if ($hasAccruedCol) {
                 $id = db_insert(
                     'INSERT INTO withdrawal_requests
                         (rider_id, agency_id, kind, amount, gross_amount,
-                         withhold_min_retain, withhold_other, accrued_days,
+                         withhold_min_retain, withhold_other, withhold_transfer_fee, accrued_days,
                          bank_code, bank_account, account_holder,
                          status, note, requested_at)
                      VALUES (?, ?, \'rider_manual\', ?, ?,
-                             ?, ?, ?,
+                             ?, ?, ?, ?,
                              ?, ?, ?,
                              \'pending\', ?, NOW())',
                     [
@@ -1119,6 +1135,7 @@ final class Withdrawal
                         $balance,
                         $reserve,
                         $fee,
+                        $transferFee,
                         $accrued,
                         (string) $rider['bank_code'],
                         (string) $rider['bank_account'],
@@ -1130,11 +1147,11 @@ final class Withdrawal
                 $id = db_insert(
                     'INSERT INTO withdrawal_requests
                         (rider_id, agency_id, kind, amount, gross_amount,
-                         withhold_min_retain, withhold_other,
+                         withhold_min_retain, withhold_other, withhold_transfer_fee,
                          bank_code, bank_account, account_holder,
                          status, note, requested_at)
                      VALUES (?, ?, \'rider_manual\', ?, ?,
-                             ?, ?,
+                             ?, ?, ?,
                              ?, ?, ?,
                              \'pending\', ?, NOW())',
                     [
@@ -1144,6 +1161,7 @@ final class Withdrawal
                         $balance,
                         $reserve,
                         $fee,
+                        $transferFee,
                         (string) $rider['bank_code'],
                         (string) $rider['bank_account'],
                         (string) ($rider['account_holder'] ?: $rider['name']),

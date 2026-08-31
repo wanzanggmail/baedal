@@ -142,6 +142,10 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 				<span class="text-danger fw-semibold" id="wdFee">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
 			</div>
 			<div class="fs-8 text-gray-600" id="wdFeeDetail"></div>
+				<div class="d-flex justify-content-between mb-2<?= (int) ($preview['transfer_fee'] ?? 0) > 0 ? '' : ' d-none' ?>" id="wdTransferFeeRow">
+					<span class="text-gray-600 fs-7 fw-semibold">이체수수료</span>
+					<span class="text-danger fw-semibold" id="wdTransferFee">− ₩ <?= number_format((int) ($preview['transfer_fee'] ?? 0)) ?></span>
+				</div>
 			<div class="border-top pt-3 mt-2 d-flex justify-content-between align-items-center">
 				<span class="fw-bold text-gray-800">실지급 예정액</span>
 				<span class="fs-3 fw-bold text-primary" id="wdPayout">₩ <?= number_format((int) ($preview['payout_amount'] ?? 0)) ?></span>
