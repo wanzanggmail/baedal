@@ -41,7 +41,10 @@ $err = static function (string $msg, int $code = 422): never {
     exit;
 };
 
-$isAgencySelf = admin_org_level() === Org::LEVEL_AGENCY;
+// 대리점·총판 모두 "자기 조직" 결제수단을 관리한다(총판은 정산금 수령 계좌만 — 아래에서 제한).
+$selfLevel    = admin_org_level();
+$isSelf       = $selfLevel === Org::LEVEL_AGENCY || $selfLevel === Org::LEVEL_DISTRIBUTOR;
+$isDistSelf   = $selfLevel === Org::LEVEL_DISTRIBUTOR;
 $myRole   = (string) (admin_user()['role'] ?? '');
 $adminId  = (int) ($_SESSION['admin_id'] ?? 0);
 $method   = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -67,9 +70,9 @@ if ($method === 'POST') {
 // - 대리점 계정: 요청에 뭐가 오든 항상 자기 조직 고정(남의 카드·계좌를 절대 못 봄/못 고침)
 // - 본사(super): agency_id 로 대상 대리점을 지정해 대신 설정(지원 업무)
 $targetAgency = null;
-if ($isAgencySelf) {
+if ($isSelf) {
     if (!in_array($myRole, ['operation', 'settlement', 'manager'], true)) {
-        $err('대리점 운영·정산·총괄 계정만 사용할 수 있습니다.', 403);
+        $err('운영·정산·총괄 계정만 사용할 수 있습니다.', 403);
     }
     $agencyId = admin_org_id();
 } elseif (admin_has_role('super')) {
@@ -110,6 +113,11 @@ $action = trim((string) ($body['action'] ?? ''));
 // 본사 행은 **출금 원천 계좌** 전용이다. PG 결제 카드·잔액 충전은 대리점 기능이라 대상이 될 수 없다.
 if (!empty($isHqTarget) && $action !== 'account_save') {
     $err('본사는 출금 원천 계좌만 설정할 수 있습니다.', 400);
+}
+
+// 총판은 자기 **정산금 수령 계좌**만 설정한다(라이더 자금조달 카드·충전은 대리점 기능).
+if ($isDistSelf && $action !== 'account_save') {
+    $err('총판은 정산금 수령 계좌만 설정할 수 있습니다.', 400);
 }
 
 // 본사가 남의 대리점을 대신 설정한 기록은 감사로그에 대상을 남긴다(누가 어느 대리점 것을 건드렸는지).

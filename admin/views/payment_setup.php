@@ -19,8 +19,10 @@ require_once INC_PATH . '/PgGateway.php';
 $apiUrl   = ADMIN_BASE . '/api/payment_setup.php';
 $needsMigrate = !AgencyCard::tableExists() || !BankAccount::tableExists();
 
-// 대리점 계정=자기 것만 / 본사(super)=?agency=ID 로 대상 대리점 선택해 대신 설정
+// 대리점·총판=자기 것만(총판은 정산금 수령 계좌만) / 본사(super)=?agency=ID 로 대상 선택해 대신 설정
 $isAgencySelf  = admin_org_level() === Org::LEVEL_AGENCY;
+$isDistSelf    = admin_org_level() === Org::LEVEL_DISTRIBUTOR;
+$isSelf        = $isAgencySelf || $isDistSelf;
 $isSuper       = admin_has_role('super');
 $agencyOptions = [];
 $targetAgency  = null;
@@ -30,7 +32,7 @@ $agencyId      = 0;
 // (2026-08-15 단일 계좌 구조 — 라이더 이체·대리점 인출이 전부 이 계좌에서 나간다.)
 $isHqAccount = false;
 
-if ($isAgencySelf) {
+if ($isSelf) {
     $agencyId = admin_org_id();
 } elseif ($isSuper) {
     $agencyOptions = Organization::agencyOptions();
@@ -48,6 +50,9 @@ if ($isAgencySelf) {
         }
     }
 }
+
+// 카드·PG충전 영역은 라이더 자금조달용(대리점 기능)이라 본사 출금원천계좌·총판에는 감춘다.
+$accountOnly = $isHqAccount || $isDistSelf;
 
 $canUse  = $agencyId > 0 && !$needsMigrate;
 $cards   = $canUse ? AgencyCard::listForAgency($agencyId) : [];
@@ -87,11 +92,11 @@ if ($agencyId > 0) {
 
 	<?php if ($needsMigrate) : ?>
 	<div class="alert alert-warning mb-8">서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
-	<?php elseif (!$isAgencySelf && !$isSuper) : ?>
-	<div class="alert alert-info mb-8">이 화면은 대리점 계정과 본사 최고관리자만 사용할 수 있습니다.</div>
+	<?php elseif (!$isSelf && !$isSuper) : ?>
+	<div class="alert alert-info mb-8">이 화면은 대리점·총판 계정과 본사 최고관리자만 사용할 수 있습니다.</div>
 	<?php else : ?>
 
-	<?php if (!$isAgencySelf) : ?>
+	<?php if ($isSuper) : ?>
 	<!--begin::본사용 대리점 선택-->
 	<div class="card card-flush mb-6">
 		<div class="card-body py-4">
@@ -127,7 +132,7 @@ if ($agencyId > 0) {
 
 	<?php // 배너는 실제 상태를 따라간다 — 실 연동인데 "모의"라고 떠 있으면 진짜 카드를 마음 놓고 넣는다. ?>
 	<?php if (PgGatewayFactory::isMock()) : ?>
-	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 <?= $isHqAccount ? '핀테크이용번호는' : '빌링키/핀테크번호는' ?> 모의 값으로 동작합니다.<?php if (!$isHqAccount) : ?> 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.<?php endif; ?></div>
+	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 연동</strong> — 실 PG사·오픈뱅킹 계약 전까지 <?= $accountOnly ? '계좌 정보는' : '빌링키/핀테크번호는' ?> 모의 값으로 동작합니다.<?php if (!$accountOnly) : ?> 카드 <strong>모의 한도</strong>를 낮게 잡으면 대체결제(다음 카드 자동 시도)를 테스트할 수 있습니다.<?php endif; ?></div>
 	<?php else : ?>
 	<div class="alert bg-light-danger fs-8 p-3 mb-6">⚠️ <strong>실 연동(<?= htmlspecialchars(PgGatewayFactory::make()->label(), ENT_QUOTES, 'UTF-8') ?>)</strong> — 카드를 등록하면 <strong>실제 빌키가 발급</strong>되고, 결제 기능은 <strong>실제로 청구</strong>됩니다. 취소는 우리 시스템이 아니라 PG 가맹점 관리자에서 해야 합니다.</div>
 	<?php endif; ?>
@@ -138,8 +143,8 @@ if ($agencyId > 0) {
 	</div>
 
 	<div class="row g-6">
-		<?php // 본사 행은 **출금 원천 계좌** 하나만 쓴다. PG 결제 카드와 잔액 충전은 대리점 기능이라 감춘다. ?>
-		<?php if (!$isHqAccount) : ?>
+		<?php // 카드와 잔액 충전은 라이더 자금조달(대리점 기능)이라, 본사 출금원천계좌·총판에는 감춘다. ?>
+		<?php if (!$accountOnly) : ?>
 		<!-- 카드 -->
 		<div class="col-xl-7">
 			<div class="card card-flush mb-6">
@@ -248,7 +253,7 @@ if ($agencyId > 0) {
 		<?php endif; ?>
 
 		<!-- 계좌 + PG 충전 -->
-		<div class="<?= $isHqAccount ? 'col-xl-7' : 'col-xl-5' ?>">
+		<div class="<?= $accountOnly ? 'col-xl-7' : 'col-xl-5' ?>">
 			<div class="card card-flush mb-6">
 				<div class="card-header pt-5">
 					<h3 class="card-title fw-bold"><?= $isHqAccount ? '출금 원천 계좌 (본사)' : '정산금 수령 계좌' ?></h3>
@@ -293,7 +298,7 @@ if ($agencyId > 0) {
 					<button type="button" class="btn btn-primary" id="ps_account_save">계좌 저장</button>
 				</div>
 			</div>
-			<?php if (!$isHqAccount) : ?>
+			<?php if (!$accountOnly) : ?>
 			<div class="card card-flush">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">PG 잔액 충전</h3></div>
 				<div class="card-body pt-2 fs-7">
@@ -314,7 +319,7 @@ if ($agencyId > 0) {
 		// 본사가 대상(대리점 또는 본사 출금 원천 계좌)을 골라 설정할 때만 값이 있다.
 		// 대리점 자기 계정은 0 → 서버가 세션 조직으로 고정한다.
 		// ⚠️ `$targetAgency`만 보면 **본사 자신을 고른 경우**(그때는 null)에 0이 나가 "대상을 선택하세요"가 뜬다.
-		var TARGET_AGENCY_ID = <?= $isAgencySelf ? 0 : (int) $agencyId ?>;
+		var TARGET_AGENCY_ID = <?= $isSelf ? 0 : (int) $agencyId ?>;
 		var toast = document.getElementById('ps_toast'), toastMsg = document.getElementById('ps_toast_msg');
 		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger'); toastMsg.textContent = m; toast.classList.remove('d-none'); window.scrollTo(0, 0); }
 		function post(p) {

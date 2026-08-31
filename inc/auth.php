@@ -151,7 +151,7 @@ function admin_can_access_route(string $route): bool
             'dashboard', 'docs/manual',
             'settlement/fees', 'settlement/fee-detail', 'settlement/platform-fee',
             'withdrawal/wallet-ledger', 'withdrawal/agency-payout',
-            'system/team', 'deduction/agency-fee',
+            'system/team', 'deduction/agency-fee', 'withdrawal/payment-setup',
         ];
         $distOk = false;
         foreach ($distAllow as $allowed) {
@@ -214,10 +214,10 @@ function admin_can_access_route(string $route): bool
         return admin_org_level() === Org::LEVEL_AGENCY;
     }
 
-    // 결제 설정(카드·계좌) — 대리점 본인 + 본사(대행 설정)만. 총판은 대상이 아니라서
-    // 라우트에서 막는다(열어두면 화면에 "쓸 수 없습니다" 안내만 뜨는 빈 화면이 된다).
+    // 결제 설정(카드·계좌) — 대리점·총판 본인(자기 것만) + 본사(대행 설정). 총판은 자체 인출용
+    // 정산금 수령 계좌를 스스로 등록해야 하므로 연다(2026-09-01 갑). 카드·충전은 화면·API가 감춤.
     if (str_starts_with($route, 'withdrawal/payment-setup')) {
-        return admin_org_level() === Org::LEVEL_AGENCY || admin_has_role('super');
+        return in_array(admin_org_level(), [Org::LEVEL_AGENCY, Org::LEVEL_DISTRIBUTOR], true) || admin_has_role('super');
     }
 
     // 멀티테넌시: 출금 정책 — 대리점(자기 설정 편집) · 본사(대리점 지정 편집) · 총판(하위 조회만).
