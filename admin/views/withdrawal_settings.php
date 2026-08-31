@@ -6,6 +6,7 @@ require_once INC_PATH . '/org_scope_picker.php';
 
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/Organization.php';
+require_once INC_PATH . '/AgencyFeeConfig.php';
 
 // 멀티테넌시: 대리점=자기 설정 편집 / 본사=대리점 지정해 편집 / 총판=하위 대리점 조회만
 $isAgencySelf = admin_org_level() === Org::LEVEL_AGENCY;
@@ -42,6 +43,9 @@ require_once INC_PATH . '/PgFeeConfig.php';
 $pgFeeReady = PgFeeConfig::tableExists();
 $pgFee      = ($pgFeeReady && $cfgOrgId !== null) ? PgFeeConfig::breakdownForAgency($cfgOrgId) : null;
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
+// 본사 몫 하한값은 「대행수수료 설정」의 최저 금액(구간별)을 그대로 쓴다 — 별도 필드 없음.
+$agencyMin    = AgencyFeeConfig::minimums(); // ['fee_per_tx_short'=>int, 'fee_per_tx_long'=>int]
+$agencyFeeUrl = admin_url('deduction/agency-fee');
 $listUrl = admin_url('withdrawal/list');
 $settingsBaseUrl = admin_url('withdrawal/settings');
 $needsMigrate = !db_table_exists('withdrawal_config');
@@ -168,11 +172,16 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 							<strong>본사·총판 몫 모두 배달 건당 정액(원)</strong>이며, <strong>기준 미만/기준 이상</strong> 두 구간에 각각 다르게 매길 수 있습니다.
 							<strong>대리점 몫 = 대행수수료 − 본사 − 총판</strong>(나머지 전부)입니다.
 						</div>
-						<div class="mb-4" style="max-width:280px">
-							<label class="form-label" for="cfg_min_agency_fee">대행수수료 최저 금액 (원)</label>
-							<input type="number" class="form-control form-control-solid" id="cfg_min_agency_fee" min="0"
-								value="<?= (int) $config['min_agency_fee'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
-							<div class="form-text fs-9"><strong>본사 몫(건당)의 하한</strong>입니다. 본사 몫을 이 금액보다 낮게 저장할 수 없습니다.</div>
+						<?php // 본사 몫 하한 = 「대행수수료 설정」의 최저 금액(구간별). 여기서 값을 만들지 않고 참조만 한다. ?>
+						<div class="alert bg-light-info d-flex flex-column p-4 mb-4 fs-8" id="cfg_min_ref"
+							data-min-short="<?= (int) $agencyMin['fee_per_tx_short'] ?>" data-min-long="<?= (int) $agencyMin['fee_per_tx_long'] ?>">
+							<div class="fw-semibold text-gray-800 mb-1">본사 몫(건당) 하한 — <span class="text-primary">대행수수료 최저 금액</span> 적용</div>
+							<?php if ((int) $agencyMin['fee_per_tx_short'] > 0 || (int) $agencyMin['fee_per_tx_long'] > 0) : ?>
+							<div class="text-gray-700">기준 미만 <strong><?= number_format((int) $agencyMin['fee_per_tx_short']) ?>원</strong> · 기준 이상 <strong><?= number_format((int) $agencyMin['fee_per_tx_long']) ?>원</strong> 미만으로는 본사 몫을 저장할 수 없습니다.</div>
+							<?php else : ?>
+							<div class="text-gray-700">현재 대행수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
+							<?php endif; ?>
+							<a href="<?= htmlspecialchars($agencyFeeUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary mt-1">대행수수료 설정에서 관리 →</a>
 						</div>
 						<div class="table-responsive mb-2">
 							<table class="table table-row-bordered align-middle gy-2 mb-0">
@@ -189,7 +198,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 									<tr>
 										<td class="fw-semibold">기준 미만</td>
 										<td class="text-end" id="cfg_fee_short_ref"><?= number_format((int) $config['fee_per_tx_short']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="0"
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="<?= (int) $agencyMin['fee_per_tx_short'] ?>"
 											value="<?= (int) $config['hq_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_short" min="0"
 											value="<?= (int) $config['dist_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
@@ -198,7 +207,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 									<tr>
 										<td class="fw-semibold">기준 이상</td>
 										<td class="text-end" id="cfg_fee_long_ref"><?= number_format((int) $config['fee_per_tx_long']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="0"
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="<?= (int) $agencyMin['fee_per_tx_long'] ?>"
 											value="<?= (int) $config['hq_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_long" min="0"
 											value="<?= (int) $config['dist_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
@@ -318,7 +327,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'));
 				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'));
 			}
-			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long','cfg_min_agency_fee']
+			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long']
 				.forEach(function (id) { var e = document.getElementById(id); if (e) { e.addEventListener('input', recompute); } });
 			recompute();
 		})();
@@ -359,15 +368,16 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.
 			var hqShortEl = document.getElementById('cfg_hq_short');
 			if (hqShortEl && !hqShortEl.disabled) {
-				var minFee  = parseInt(document.getElementById('cfg_min_agency_fee').value, 10) || 0;
+				// 하한은 「대행수수료 설정」의 최저 금액(구간별)을 참조. 서버도 막지만 저장 전에 알려준다.
+				var ref     = document.getElementById('cfg_min_ref');
+				var minS    = ref ? (parseInt(ref.getAttribute('data-min-short'), 10) || 0) : 0;
+				var minL    = ref ? (parseInt(ref.getAttribute('data-min-long'), 10) || 0) : 0;
 				var hqShort = parseInt(hqShortEl.value, 10) || 0;
 				var hqLong  = parseInt(document.getElementById('cfg_hq_long').value, 10) || 0;
-				// 서버도 막지만, 저장 전에 바로 알려준다(본사 몫 하한).
-				if (hqShort < minFee || hqLong < minFee) {
-					showToast('본사 몫(건당)은 대행수수료 최저 금액(' + minFee.toLocaleString() + '원)보다 낮을 수 없습니다.', false);
+				if ((minS > 0 && hqShort < minS) || (minL > 0 && hqLong < minL)) {
+					showToast('본사 몫(건당)은 대행수수료 최저 금액(미만 ' + minS.toLocaleString() + '원 / 이상 ' + minL.toLocaleString() + '원)보다 낮을 수 없습니다.', false);
 					return;
 				}
-				payload.min_agency_fee = minFee;
 				payload.hq_fee_short   = hqShort;
 				payload.hq_fee_long    = hqLong;
 				payload.dist_fee_short = parseInt(document.getElementById('cfg_dist_short').value, 10) || 0;

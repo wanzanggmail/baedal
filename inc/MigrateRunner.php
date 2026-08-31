@@ -1336,9 +1336,12 @@ final class MigrateRunner
         if (!in_array('dist_fee_long', $cols, true)) {
             $adds[] = "ADD COLUMN dist_fee_long INT NOT NULL DEFAULT 0 COMMENT '총판 몫 — 기준 이상 배달 건당(원)'";
         }
-        // 대행수수료 최저 금액 = 본사 몫(건당)의 하한. 본사가 이 값보다 낮게 배분하지 못한다.
-        if (!in_array('min_agency_fee', $cols, true)) {
-            $adds[] = "ADD COLUMN min_agency_fee INT NOT NULL DEFAULT 0 COMMENT '대행수수료 최저 금액 — 본사 몫(건당) 하한(원)'";
+        // min_agency_fee 는 한때 여기 뒀다가 폐기했다 — 본사 몫 하한값은 별도 필드가 아니라
+        // 「대행수수료 설정」(deduction_global_config.agency_fee_min_short/long)을 그대로 쓴다
+        // (2026-08-31 갑: "대행수수료 최저 금액은 대행수수료 설정 부분에 되어 있어"). 이미 만들어졌으면 제거.
+        if (in_array('min_agency_fee', $cols, true)) {
+            db_execute('ALTER TABLE withdrawal_config DROP COLUMN min_agency_fee');
+            echo "OK    withdrawal_config.min_agency_fee 제거(대행수수료 설정의 최저 금액을 참조)\n";
         }
 
         if ($adds === []) {

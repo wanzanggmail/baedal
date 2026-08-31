@@ -21,8 +21,6 @@ final class WithdrawalConfig
             'hq_fee_long'    => 0,
             'dist_fee_short' => 0,
             'dist_fee_long'  => 0,
-            // 대행수수료 최저 금액 = 본사 몫(건당) 하한. 본사가 이보다 낮게 배분하지 못한다.
-            'min_agency_fee' => 0,
             // 라이더가 신청하는 즉시 펌뱅킹으로 내보낼지. 기본은 끔 — 켜면 관리자가 검토할 틈이 없다.
             'auto_transfer_on_request'  => 0,
         ];
@@ -75,7 +73,6 @@ final class WithdrawalConfig
             'hq_fee_long'    => max(0, (int) ($row['hq_fee_long'] ?? $d['hq_fee_long'])),
             'dist_fee_short' => max(0, (int) ($row['dist_fee_short'] ?? $d['dist_fee_short'])),
             'dist_fee_long'  => max(0, (int) ($row['dist_fee_long'] ?? $d['dist_fee_long'])),
-            'min_agency_fee' => max(0, (int) ($row['min_agency_fee'] ?? $d['min_agency_fee'])),
             'auto_transfer_on_request'  => (int) !empty($row['auto_transfer_on_request']),
         ];
     }
@@ -143,21 +140,27 @@ final class WithdrawalConfig
             'hq_fee_long'    => array_key_exists('hq_fee_long', $data) ? max(0, (int) $data['hq_fee_long']) : (int) $cur['hq_fee_long'],
             'dist_fee_short' => array_key_exists('dist_fee_short', $data) ? max(0, (int) $data['dist_fee_short']) : (int) $cur['dist_fee_short'],
             'dist_fee_long'  => array_key_exists('dist_fee_long', $data) ? max(0, (int) $data['dist_fee_long']) : (int) $cur['dist_fee_long'],
-            'min_agency_fee' => array_key_exists('min_agency_fee', $data) ? max(0, (int) $data['min_agency_fee']) : (int) $cur['min_agency_fee'],
             'auto_transfer_on_request' => array_key_exists('auto_transfer_on_request', $data)
                 ? (int) (bool) $data['auto_transfer_on_request']
                 : (int) $cur['auto_transfer_on_request'],
         ];
 
-        // 대행수수료 최저 금액(= 본사 몫 하한) 검증 — 본사 몫(건당)을 이보다 낮게 배분하지 못한다
-        // (2026-08-31 갑 지시). 두 구간 모두 검사한다. 총판 몫·대리점 몫은 하한 없음.
-        if ($cfg['hq_fee_short'] < $cfg['min_agency_fee'] || $cfg['hq_fee_long'] < $cfg['min_agency_fee']) {
-            throw new InvalidArgumentException(sprintf(
-                '본사 몫(건당)은 대행수수료 최저 금액(%s원)보다 낮을 수 없습니다. 현재 기준 미만 %s원 / 기준 이상 %s원.',
-                number_format($cfg['min_agency_fee']),
-                number_format($cfg['hq_fee_short']),
-                number_format($cfg['hq_fee_long'])
-            ));
+        // 본사 몫(건당) 하한 검증 — 하한값은 **「대행수수료 설정」의 최저 금액**(AgencyFeeConfig)을
+        // 그대로 쓴다(2026-08-31 갑: "대행수수료 최저 금액은 대행수수료 설정 부분에 되어 있어").
+        // 별도 필드를 만들지 않고 구간별(미만/이상) 최저를 각각 본사 몫에 건다. 0이면 하한 없음.
+        require_once __DIR__ . '/AgencyFeeConfig.php';
+        $min = AgencyFeeConfig::minimums();
+        $tooLow = [];
+        if ($min['fee_per_tx_short'] > 0 && $cfg['hq_fee_short'] < $min['fee_per_tx_short']) {
+            $tooLow[] = sprintf('기준 미만 본사 몫 %d원(최저 %d원)', $cfg['hq_fee_short'], $min['fee_per_tx_short']);
+        }
+        if ($min['fee_per_tx_long'] > 0 && $cfg['hq_fee_long'] < $min['fee_per_tx_long']) {
+            $tooLow[] = sprintf('기준 이상 본사 몫 %d원(최저 %d원)', $cfg['hq_fee_long'], $min['fee_per_tx_long']);
+        }
+        if ($tooLow !== []) {
+            throw new InvalidArgumentException(
+                '본사 몫(건당)은 대행수수료 최저 금액보다 낮을 수 없습니다 — ' . implode(' · ', $tooLow)
+            );
         }
 
         // ⚠️ 본사+총판 몫이 걷은 건당 수수료(80/40원)를 넘어도 저장은 막지 않는다(갑 확정:
@@ -173,7 +176,7 @@ final class WithdrawalConfig
             db_execute(
                 'UPDATE withdrawal_config
                  SET reserve_amount = ?, fee_day_threshold = ?, fee_per_tx_short = ?, fee_per_tx_long = ?,
-                     hq_fee_short = ?, hq_fee_long = ?, dist_fee_short = ?, dist_fee_long = ?, min_agency_fee = ?,
+                     hq_fee_short = ?, hq_fee_long = ?, dist_fee_short = ?, dist_fee_long = ?,
                      auto_transfer_on_request = ?,
                      updated_by = ?, updated_at = NOW()
                  WHERE id = ?',
@@ -186,7 +189,6 @@ final class WithdrawalConfig
                     $cfg['hq_fee_long'],
                     $cfg['dist_fee_short'],
                     $cfg['dist_fee_long'],
-                    $cfg['min_agency_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                     (int) $exists['id'],
@@ -196,9 +198,9 @@ final class WithdrawalConfig
             db_insert(
                 'INSERT INTO withdrawal_config
                     (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
-                     hq_fee_short, hq_fee_long, dist_fee_short, dist_fee_long, min_agency_fee,
+                     hq_fee_short, hq_fee_long, dist_fee_short, dist_fee_long,
                      auto_transfer_on_request, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $cfg['reserve_amount'],
@@ -209,7 +211,6 @@ final class WithdrawalConfig
                     $cfg['hq_fee_long'],
                     $cfg['dist_fee_short'],
                     $cfg['dist_fee_long'],
-                    $cfg['min_agency_fee'],
                     $cfg['auto_transfer_on_request'],
                     ($adminId !== null && $adminId > 0) ? $adminId : null,
                 ]

@@ -241,8 +241,9 @@ UNIQUE(`org_id`,`platform`,`kind`), `org_id IS NULL`=전역 기본. 복호화 �
 
 ### `withdrawal_config` — 정산수수료(구 이체수수료) 정책 + 3분할 배분 설정
 
-🆕 **(2026-08-31 갑 지시) 정산수수료 구간별 배분** — 본사·총판 몫 **모두 배달 건당 정액(원)**이며, 「기준 미만/기준 이상」 두 구간에 각각 다르게 매긴다: `hq_fee_short`/`hq_fee_long`(본사 몫) · `dist_fee_short`/`dist_fee_long`(총판 몫). **대리점 몫 = 대행수수료 − 본사 − 총판**(나머지 전부). `min_agency_fee`(대행수수료 최저 금액) = **본사 몫(건당)의 하한** — 저장 시 `hq_fee_short < min_agency_fee || hq_fee_long < min_agency_fee`면 거부(InvalidArgumentException→422). 대리점별 설정이지만 **편집은 본사만**(대리점은 조회).
-  - 구 컬럼 `hq_fee_per_order`(단일 본사 몫) · `fee_share_distributor_pct`(총판 %)는 **폐기·미사용**(컬럼은 남겨 둠). 마이그레이션 시 `hq_fee_per_order` 값을 `hq_fee_short`/`hq_fee_long` 두 구간에 복사해 기존 동작을 이어받는다. (구 검증 "본사 몫 < 건당 수수료"는 2026-08-12 "대리점 0 OK"로 이미 제거됨 — 새 하한은 그와 별개로 본사 몫에 대한 것.)
+🆕 **(2026-08-31 갑 지시) 정산수수료 구간별 배분** — 본사·총판 몫 **모두 배달 건당 정액(원)**이며, 「기준 미만/기준 이상」 두 구간에 각각 다르게 매긴다: `hq_fee_short`/`hq_fee_long`(본사 몫) · `dist_fee_short`/`dist_fee_long`(총판 몫). **대리점 몫 = 대행수수료 − 본사 − 총판**(나머지 전부). **본사 몫(건당)의 하한**은 별도 컬럼이 아니라 **「대행수수료 설정」의 최저 금액**(`deduction_global_config.agency_fee_min_short`/`agency_fee_min_long`, `AgencyFeeConfig::minimums()`)을 구간별로 그대로 쓴다 — 저장 시 `hq_fee_short < min_short || hq_fee_long < min_long`이면 거부(InvalidArgumentException→422). 0이면 하한 없음. 대리점별 설정이지만 **편집은 본사만**(대리점은 조회).
+  - 구 컬럼 `hq_fee_per_order`(단일 본사 몫) · `fee_share_distributor_pct`(총판 %)는 **폐기·미사용**(컬럼은 남겨 둠). 마이그레이션 시 `hq_fee_per_order` 값을 `hq_fee_short`/`hq_fee_long` 두 구간에 복사해 기존 동작을 이어받는다. (구 검증 "본사 몫 < 건당 수수료"는 2026-08-12 "대리점 0 OK"로 이미 제거됨.)
+  - ⚠️ 한때 `min_agency_fee` 컬럼을 여기 두려다 폐기 — 대행수수료 최저 금액이 이미 「대행수수료 설정」에 있어(2026-08-15) 중복이라, 마이그레이션이 그 컬럼을 **DROP** 한다.
 계산·이동은 `WithdrawalConfig::feeShare()` + `inc/WithdrawalFeeShare.php`. **대리점 몫은 이동하지 않는다**(정산수수료는 라이더 지갑에서 빠져 이미 대리점 지갑에 남아 있는 돈) — 본사·총판 몫만 대리점 지갑에서 빼서 각 조직 지갑으로 옮기고 `agency_wallet_ledger`에 `wd_fee_up`(대리점 출금)·`wd_fee_in`(상위 수입)으로 기록한다.
 `fee_day_threshold`(기준일수, 기본 7) · `fee_per_tx_short`(80원) · `fee_per_tx_long`(40원) — **대리점별 설정 가능**(2026-07-16 재정정, 방향 불변: 최근=비쌈/오래됨=쌈). `reserve_amount`(출금 시 남기는 보증금).
 ✅ 실제 계산은 주문별 age-bucket 합산 모델(`WithdrawalConfig::feeForCycles` + `WithdrawalCycles`)로 전환 완료(§7 #18). `accrued_days` 단일값 모델은 사이클이 하나도 없는 경우의 폴백으로만 남아 있다.
