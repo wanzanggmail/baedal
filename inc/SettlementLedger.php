@@ -683,15 +683,23 @@ final class SettlementLedger
         }
 
         // #15 원천세 예수금 누적 — 원천세 대상 라이더 공제분을 대리점 지갑 reserve에 적립.
+        //     고용·산재도 같은 방식으로 insurance_reserve 에 적립한다(2026-09-01 갑 — 세무대리가 수집).
         if ($orgId !== null && $orgId > 0) {
-            $withheld = 0;
+            $withheld  = 0;
+            $insurance = 0;
             foreach ($fees as $f) {
-                if (($f['fee_code'] ?? '') === 'withholding') {
+                $code = (string) ($f['fee_code'] ?? '');
+                if ($code === 'withholding') {
                     $withheld += (int) $f['amount'];
+                } elseif ($code === 'employment_ins' || $code === 'accident_ins') {
+                    $insurance += (int) $f['amount'];
                 }
             }
             if ($withheld > 0) {
                 AgencyWallet::addWithholdingReserve($orgId, $withheld);
+            }
+            if ($insurance > 0) {
+                AgencyWallet::addInsuranceReserve($orgId, $insurance);
             }
         }
 

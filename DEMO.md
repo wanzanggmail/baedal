@@ -14,6 +14,7 @@
 | `admin` | 최고관리자 | super | 본사 |
 | `mshconnect` | 민세훈대표 | manager | 민세훈커넥트(총판) |
 | `dkkb` | 도깨비총괄 | manager | 팀도깨비(대리점) |
+| `tax` | 세무대리 | manager | 세무대리(독립·고용산재 예수금) |
 
 ### 라이더 — 비밀번호 `0000` · 주소는 `/rider/login`
 

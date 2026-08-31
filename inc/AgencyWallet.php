@@ -33,6 +33,8 @@ final class AgencyWallet
         'transfer_fee_in'   => '이체 수수료 수입(본사)',
         'agency_fee_up'     => '대행수수료 상위 이체',
         'agency_fee_in'     => '대행수수료 수입(본사)',
+        'ins_collect_out'   => '고용·산재 예수금 납부(세무대리)',
+        'ins_collect_in'    => '고용·산재 예수금 수집',
     ];
 
     public static function tableExists(): bool
@@ -54,15 +56,17 @@ final class AgencyWallet
         }
     }
 
-    /** @return array{balance:int, withholding_reserve:int} */
+    /** @return array{balance:int, withholding_reserve:int, insurance_reserve:int} */
     public static function get(int $agencyId): array
     {
         self::ensure($agencyId);
-        $row = db_row('SELECT balance, withholding_reserve FROM agency_wallets WHERE agency_id = ? LIMIT 1', [$agencyId]);
+        // insurance_reserve 컬럼이 아직 없을 수 있어(마이그레이션 전) 방어적으로 조회한다.
+        $row = db_row('SELECT * FROM agency_wallets WHERE agency_id = ? LIMIT 1', [$agencyId]);
 
         return [
             'balance'             => (int) ($row['balance'] ?? 0),
             'withholding_reserve' => (int) ($row['withholding_reserve'] ?? 0),
+            'insurance_reserve'   => (int) ($row['insurance_reserve'] ?? 0),
         ];
     }
 
@@ -86,21 +90,23 @@ final class AgencyWallet
     }
 
     /**
-     * 대리점 자체 인출가능액 = balance − 라이더 정산금 − 원천세 예수금 (0 하한).
+     * 대리점 자체 인출가능액 = balance − 라이더 정산금 − 원천세 예수금 − 고용·산재 예수금 (0 하한).
      *
-     * @return array{balance:int, rider_debt:int, withholding_reserve:int, withdrawable:int}
+     * @return array{balance:int, rider_debt:int, withholding_reserve:int, insurance_reserve:int, withdrawable:int}
      */
     public static function withdrawable(int $agencyId): array
     {
         $w        = self::get($agencyId);
         $debt     = self::riderDebt($agencyId);
         $reserve  = (int) $w['withholding_reserve'];
-        $avail    = max(0, (int) $w['balance'] - $debt - $reserve);
+        $insReserve = (int) $w['insurance_reserve'];
+        $avail    = max(0, (int) $w['balance'] - $debt - $reserve - $insReserve);
 
         return [
             'balance'             => (int) $w['balance'],
             'rider_debt'          => $debt,
             'withholding_reserve' => $reserve,
+            'insurance_reserve'   => $insReserve,
             'withdrawable'        => $avail,
         ];
     }
@@ -117,6 +123,22 @@ final class AgencyWallet
         self::ensure($agencyId);
         db_execute(
             'UPDATE agency_wallets SET withholding_reserve = withholding_reserve + ?, updated_at = NOW() WHERE agency_id = ?',
+            [$amount, $agencyId]
+        );
+    }
+
+    /**
+     * 고용·산재 예수금 누적 (정산 반영 시 고용·산재 공제분). 원천세 예수금과 같은 방식 —
+     * balance 이동이 아니라 별도 accumulator라 원장은 남기지 않는다. 세무대리가 나중에 수집한다.
+     */
+    public static function addInsuranceReserve(int $agencyId, int $amount): void
+    {
+        if ($agencyId < 1 || $amount === 0 || !self::tableExists()) {
+            return;
+        }
+        self::ensure($agencyId);
+        db_execute(
+            'UPDATE agency_wallets SET insurance_reserve = insurance_reserve + ?, updated_at = NOW() WHERE agency_id = ?',
             [$amount, $agencyId]
         );
     }

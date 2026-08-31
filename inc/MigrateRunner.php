@@ -76,6 +76,7 @@ final class MigrateRunner
         self::migrateWeeklyRiders();
         self::migrateTransferFee();
         self::migrateAgencyFeePayer();
+        self::migrateTaxAgent();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1391,6 +1392,105 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * 세무대리 — 독립 조직 + 고용·산재 예수금 수집(2026-09-01 갑 지시).
+     *
+     * 고용·산재보험 공제분을 원천세처럼 대리점 지갑에 **예수금(insurance_reserve)** 으로 누적하고,
+     * 세무대리(독립 조직)가 월별로 각 대리점 지갑에서 자기 지갑으로 가져와 신고·납입한다.
+     */
+    private static function migrateTaxAgent(): void
+    {
+        echo "== 세무대리(고용·산재 예수금) ==\n";
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations 없음\n";
+
+            return;
+        }
+
+        // 1) organizations.level 에 'tax_agent' 추가
+        $col = db_row("SHOW COLUMNS FROM organizations LIKE 'level'");
+        if ($col !== null && !str_contains((string) $col['Type'], "tax_agent")) {
+            db_execute("ALTER TABLE organizations MODIFY COLUMN level ENUM('admin','distributor','agency','tax_agent') NOT NULL");
+            echo "OK    organizations.level 에 tax_agent 추가\n";
+        }
+
+        // 2) 세무대리 조직(단일) — 없으면 생성
+        $tax = db_row("SELECT id FROM organizations WHERE level='tax_agent' ORDER BY id ASC LIMIT 1");
+        if ($tax === null) {
+            $taxId = db_insert(
+                "INSERT INTO organizations (parent_id, level, code, name, is_active, created_at)
+                 VALUES (NULL, 'tax_agent', 'TAX', '세무대리', 1, NOW())"
+            );
+            echo "OK    세무대리 조직 생성(id={$taxId})\n";
+        } else {
+            $taxId = (int) $tax['id'];
+            echo "SKIP  세무대리 조직 (이미 있음, id={$taxId})\n";
+        }
+
+        // 3) 세무대리 대표계정 — 없으면 생성(로그인 tax / 비번 Admin1234! · 데모 공통)
+        if (db_table_exists('admins')) {
+            $exists = db_row('SELECT id FROM admins WHERE org_id = ? LIMIT 1', [$taxId]);
+            if ($exists === null) {
+                db_insert(
+                    "INSERT INTO admins (login_id, password_hash, name, role, org_id, is_active)
+                     VALUES ('tax', ?, '세무대리', 'manager', ?, 1)",
+                    [password_hash('Admin1234!', PASSWORD_BCRYPT, ['cost' => 12]), $taxId]
+                );
+                echo "OK    세무대리 계정 생성(tax / Admin1234!)\n";
+            }
+        }
+
+        // 4) agency_wallets.insurance_reserve (고용·산재 예수금) + 세무대리 지갑 행
+        if (db_table_exists('agency_wallets')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM agency_wallets'), 'Field');
+            $freshCol = !in_array('insurance_reserve', $cols, true);
+            if ($freshCol) {
+                db_execute("ALTER TABLE agency_wallets ADD COLUMN insurance_reserve INT NOT NULL DEFAULT 0 COMMENT '고용·산재 예수금(세무대리가 수집)'");
+                echo "OK    agency_wallets.insurance_reserve 추가\n";
+            }
+            db_execute('INSERT IGNORE INTO agency_wallets (agency_id, balance, withholding_reserve) VALUES (?, 0, 0)', [$taxId]);
+
+            // 백필 — 기존 정산 고용·산재 공제분을 예수금으로 1회 채운다(신규 컬럼일 때만).
+            if ($freshCol && db_table_exists('settlement_fee_items') && db_table_exists('settlement_rider_cycles')) {
+                db_execute(
+                    "UPDATE agency_wallets w
+                        JOIN (
+                            SELECT r.agency_id AS aid, COALESCE(SUM(fi.amount),0) AS ins
+                              FROM settlement_fee_items fi
+                              JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+                              JOIN riders r ON r.id = c.rider_id
+                             WHERE fi.fee_code IN ('employment_ins','accident_ins')
+                               AND r.agency_id IS NOT NULL
+                             GROUP BY r.agency_id
+                        ) s ON s.aid = w.agency_id
+                        SET w.insurance_reserve = s.ins"
+                );
+                echo "OK    기존 고용·산재 공제분을 예수금으로 백필\n";
+            }
+        }
+
+        // 5) 수집 이력 테이블
+        if (!db_table_exists('tax_insurance_collections')) {
+            db_execute(
+                "CREATE TABLE tax_insurance_collections (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tax_org_id INT NOT NULL,
+                    agency_id INT NOT NULL,
+                    period VARCHAR(7) NOT NULL COMMENT '수집 귀속월 YYYY-MM',
+                    amount INT NOT NULL,
+                    collected_by INT NULL,
+                    collected_at DATETIME NOT NULL,
+                    note VARCHAR(255) NULL,
+                    INDEX idx_agency (agency_id),
+                    INDEX idx_period (period)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            echo "OK    tax_insurance_collections 생성\n";
+        } else {
+            echo "SKIP  tax_insurance_collections (이미 있음)\n";
+        }
     }
 
     /**

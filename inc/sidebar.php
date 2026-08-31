@@ -48,6 +48,19 @@ $route = $route ?? '';
 										</div>
 										<!--end:매뉴얼-->
 
+										<!--begin:세무대리(고용·산재 예수금) — 세무대리 계정 전용 별도 메뉴-->
+										<?php if (admin_can_access_route('tax/dashboard')) : ?>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('tax/dashboard') ?>" href="<?= htmlspecialchars(admin_url('tax/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-shield-tick fs-2"><span class="path1"></span><span class="path2"></span></i>
+												</span>
+												<span class="menu-title">고용·산재 예수금</span>
+											</a>
+										</div>
+										<?php endif; ?>
+										<!--end:세무대리-->
+
 										<!--begin:정산-->
 										<?php if (admin_can_access_route('settlement/upload')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([

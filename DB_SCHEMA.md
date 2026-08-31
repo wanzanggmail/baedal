@@ -92,7 +92,7 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 |---|---|---|
 | `id` | PK | |
 | `parent_id` | FK→`organizations.id`, `ON DELETE CASCADE` | 상위 조직(본사 루트는 NULL) |
-| `level` | enum(`admin`,`distributor`,`agency`) | 본사/총판/대리점 |
+| `level` | enum(`admin`,`distributor`,`agency`,`tax_agent`) | 본사/총판/대리점/세무대리. 🆕(2026-09-01) `tax_agent`=세무대리(독립 조직, 고용·산재 예수금 수집·신고). 메뉴 완전 별도(auth 게이트 tax/*), `Org::taxAgentOrgId()` |
 | `code` | varchar(40) UNIQUE | 조직 식별 코드 |
 | `name`, `contact_name`, `contact_phone`, `memo` | | |
 | `ceo_*`, `biz_*` | | 대표자·사업자 정보 |
@@ -289,8 +289,9 @@ UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: �
 - `agency_payout`: 대리점 자체 인출, **승인 절차 없음**, 신청 즉시 이체 실행(`AgencyPayout::create`)
 
 ### `agency_wallets` — 🆕(2026-07-22) 조직 지갑 잔액
-PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점 모두 사용**). `balance`(PG 충전·수수료 수입 잔액) · `withholding_reserve`(원천세 예수금 누적, 고용·산재는 예수금 아님이라 제외).
-**대리점 인출가능액 = balance − 라이더 정산금(rider_wallets 합계) − withholding_reserve** (`AgencyWallet::withdrawable`). 본사·총판은 라이더 정산금·예수금이 보통 0이라 잔액≈인출가능액.
+PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점·세무대리 모두 사용**). `balance`(PG 충전·수수료 수입 잔액) · `withholding_reserve`(원천세 예수금 누적) · 🆕(2026-09-01) `insurance_reserve`(고용·산재 예수금 누적 — 세무대리가 수집. 예전엔 고용·산재가 예수금 아니었으나 전환, 마이그레이션이 기존 fee_items 합으로 1회 백필).
+**대리점 인출가능액 = balance − 라이더 정산금(rider_wallets 합계) − withholding_reserve − insurance_reserve** (`AgencyWallet::withdrawable`). 본사·총판·세무대리는 라이더 정산금·예수금이 보통 0이라 잔액≈인출가능액.
+🆕 **`tax_insurance_collections`** — 세무대리 예수금 수집 이력(`tax_org_id`·`agency_id`·`period`(YYYY-MM)·`amount`·`collected_at`). `TaxAgent::collect()` 가 대리점 지갑에서 예수금을 빼(balance 차감 + insurance_reserve 0) 세무대리 지갑으로 옮기고(`ins_collect_out`/`ins_collect_in`) 이 표에 기록.
 
 ### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)
 `direction`(credit/debit) · `reason` · `amount`(양수) · `balance_after`(스냅샷) · `ref_id`(연관 레코드) · `note` · `created_by`.

@@ -13,6 +13,7 @@ final class Org
     public const LEVEL_ADMIN       = 'admin';
     public const LEVEL_DISTRIBUTOR = 'distributor';
     public const LEVEL_AGENCY      = 'agency';
+    public const LEVEL_TAX_AGENT   = 'tax_agent'; // 세무대리 — 독립 조직, 고용·산재 예수금 신고·수집(2026-09-01)
 
     /** @var array<int, array<string,mixed>>|null  id => row */
     private static ?array $cache = null;
@@ -28,8 +29,17 @@ final class Org
             self::LEVEL_ADMIN       => '본사',
             self::LEVEL_DISTRIBUTOR => '총판',
             self::LEVEL_AGENCY      => '대리점',
+            self::LEVEL_TAX_AGENT   => '세무대리',
             default                 => $level,
         };
+    }
+
+    /** 세무대리 조직 id (독립 조직, 단일). 없으면 0. */
+    public static function taxAgentOrgId(): int
+    {
+        $row = db_row("SELECT id FROM organizations WHERE level = 'tax_agent' ORDER BY id ASC LIMIT 1");
+
+        return $row !== null ? (int) $row['id'] : 0;
     }
 
     /** @return array<int, array<string,mixed>> */
