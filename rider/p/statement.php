@@ -99,7 +99,13 @@ if ($rider === null) {
 
 StatementLink::markViewed($token);
 
-$st = RiderStatement::build($riderId, $from, $to);
+try {
+    $st = RiderStatement::build($riderId, $from, $to);
+} catch (Throwable $e) {
+    error_log('statement public build failed: ' . $e->getMessage());
+    $render('명세서를 불러올 수 없습니다', '<div class="notice"><div class="ico">⚠️</div>'
+        . '<h1>명세서를 불러올 수 없습니다</h1><p>잠시 후 다시 시도하거나 대리점에 문의해 주세요.</p></div>');
+}
 $sm = $st['summary'];
 $pt = $st['participation'];
 

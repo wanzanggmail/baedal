@@ -64,11 +64,26 @@ final class RiderStatement
         ) ?? ['o' => 0, 's' => 0, 'f' => 0, 'n' => 0];
 
         // 고정차감 = 리스 + 대여금 + (전주차미납: 데이터 없음 → 0). 선지급차감 = 선지급.
-        $fixed   = $get('lease') + $get('rental') + $get('loan');
-        $advance = $get('advance');
+        $fixed    = $get('lease') + $get('rental') + $get('loan');
+        $advance  = $get('advance');
+        $totalFee = (int) $cyc['f'];
+
+        // 개별 표기 공제 항목들.
+        $withholding = $get('withholding');
+        $employment  = $get('employment_ins');
+        $accident    = $get('accident_ins');
+        $hourly      = $get('hourly_ins');
+        $agencyFee   = $get('agency_fee');
+
+        // 「차감액」은 **잔여 흡수(catch-all)** — 총공제(total_fee_amount)에서 개별 표기 항목을 뺀
+        // 나머지(엑셀 차감내역·수동차감, 그리고 아직 개별 표기하지 않는 새 코드까지)를 담는다.
+        // 이렇게 하면 표시 공제 합 == total_fee 가 되어 "정산금액 + 지원 − 공제 = 실수령" 균형이
+        // 어떤 fee_code 조합에서도 깨지지 않는다.
+        $deduction = $totalFee - ($withholding + $employment + $accident + $hourly + $agencyFee + $advance + $fixed);
+
         // 정산금액 = 실수령 + 총공제 − 지원금 (PDF 로직: 정산금액 + 지원 − 공제 = 실수령).
         // net_amount 이 gross−fee 와 안 맞는 구 데이터가 있어 도출값으로 항상 균형을 맞춘다.
-        $settleAmount = (int) $cyc['n'] + (int) $cyc['f'] - (int) $cyc['s'];
+        $settleAmount = (int) $cyc['n'] + $totalFee - (int) $cyc['s'];
 
         return [
             'orders'        => (int) $cyc['o'],
@@ -76,14 +91,15 @@ final class RiderStatement
             'promo'         => $get('promo1'),
             'promo2'        => $get('promo2'),
             'support'       => (int) $cyc['s'],
-            'deduction'     => $get('excel_deduction') + $get('manual'),
-            'withholding'   => $get('withholding'),
-            'employment'    => $get('employment_ins'),
-            'accident'      => $get('accident_ins'),
-            'hourly_ins'    => $get('hourly_ins'),
-            'agency_fee'    => $get('agency_fee'),
+            'deduction'     => $deduction,
+            'withholding'   => $withholding,
+            'employment'    => $employment,
+            'accident'      => $accident,
+            'hourly_ins'    => $hourly,
+            'agency_fee'    => $agencyFee,
             'advance'       => $advance,
             'fixed'         => $fixed,
+            'total_fee'     => $totalFee,
             'net'           => (int) $cyc['n'],
         ];
     }
@@ -296,7 +312,6 @@ final class RiderStatement
     public static function participation(int $riderId, string $from, string $to): array
     {
         $weekdays = array_values(self::WEEK_ORDER);           // ['수',...'화']
-        $wByW     = array_keys(self::WEEK_ORDER);              // [3,4,5,6,0,1,2]
 
         // (일자, 버킷) 건수 — 근무일자(settlement_date) 기준
         $byDate = [];   // date => bucket(원본) => count
