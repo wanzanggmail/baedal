@@ -97,6 +97,8 @@ system_codes                        bank/vehicle/rider_status/... 코드마스�
 | `name`, `contact_name`, `contact_phone`, `memo` | | |
 | `ceo_*`, `biz_*` | | 대표자·사업자 정보 |
 | `agency_fee_payer` | enum(`rider`,`agency`) 기본 `rider` | 🆕(2026-09-01) 대행수수료 부담 주체(대리점만 의미). `rider`=선정산 반영 시 라이더 net 공제 / `agency`=라이더 전액 정산, 대행수수료를 대리점 지갑에서 부담. **두 경우 모두 대행수수료는 본사 귀속**(반영 시 대리점→본사 이체). 본사가 「조직 관리」에서 설정 |
+| `stmt_weekly_enabled` | tinyint(1) 기본 `1` | 🆕(2026-09-01) 정산서 기능 on/off(대리점만). 켜면 이 대리점 계정에서 「정산명세서 발급」 메뉴(`settlement/statement`) 사용. 끄면 메뉴·화면 접근 차단. 본사·총판은 무관(항상 사용). `Org::statementFlag()` |
+| `stmt_daily_alimtalk` | tinyint(1) 기본 `0` | 🆕(2026-09-01) 정산서 기능 on/off(대리점만). 켜면 일정산 반영(`settlement_apply`) 시 대상 라이더에게 요약 명세서를 알림톡 발송 큐(`message_queue`)에 자동 적재(`RiderStatement::enqueueDailyStatements`). 문자 수신용 번호(`riders.sms_phone`) 우선 |
 | `is_active` | tinyint(1) | 비활성화 시 소속 계정도 함께 잠금(`Organization::setActive`) |
 
 - 코드: `inc/Organization.php`, `inc/Org.php`(스코핑 엔진)

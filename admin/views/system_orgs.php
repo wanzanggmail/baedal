@@ -357,6 +357,25 @@ foreach ($agencyByParent as $orphans) {
 							</label>
 						</div>
 
+						<?php // 정산서(명세서) 기능 on/off — 대리점에만 해당. ?>
+						<div class="mb-5 d-none" id="org_stmt_wrap">
+							<label class="form-label">정산서(명세서) 기능</label>
+							<label class="form-check form-switch form-check-custom form-check-solid align-items-start mb-3">
+								<input class="form-check-input me-3 mt-1" type="checkbox" id="org_stmt_weekly" checked />
+								<span class="d-flex flex-column">
+									<span class="fw-semibold text-gray-800">주급 명세서 발급 사용</span>
+									<span class="text-muted fs-8">이 대리점 계정에서 <strong>정산명세서 발급</strong> 메뉴(기간→라이더→명세서 인쇄)를 사용합니다. 끄면 메뉴가 숨겨집니다.</span>
+								</span>
+							</label>
+							<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+								<input class="form-check-input me-3 mt-1" type="checkbox" id="org_stmt_daily_alimtalk" />
+								<span class="d-flex flex-column">
+									<span class="fw-semibold text-gray-800">일정산 명세서 알림톡 자동 발송</span>
+									<span class="text-muted fs-8">일정산 반영 시 대상 라이더에게 요약 명세서를 <strong>알림톡 발송 큐</strong>에 자동 적재합니다(문자 수신용 번호 우선).</span>
+								</span>
+							</label>
+						</div>
+
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-4">대표자 정보</h4>
 						<div class="row">
@@ -709,9 +728,11 @@ foreach ($agencyByParent as $orphans) {
 		function syncParent() {
 			var lvl = $('org_level').value;
 			$('org_parent_wrap').classList.toggle('d-none', lvl !== 'agency');
-			// 대행수수료 부담 주체 스위치는 대리점에만 노출
+			// 대행수수료 부담 주체·정산서 기능 스위치는 대리점에만 노출
 			var afw = $('org_agency_fee_wrap');
 			if (afw) { afw.classList.toggle('d-none', lvl !== 'agency'); }
+			var sw = $('org_stmt_wrap');
+			if (sw) { sw.classList.toggle('d-none', lvl !== 'agency'); }
 		}
 		function fetchCode() {
 			var lvl = $('org_level').value;
@@ -762,10 +783,16 @@ foreach ($agencyByParent as $orphans) {
 				$('org_biz_category').value = row.biz_category || '';
 				$('org_biz_address').value = row.biz_address || '';
 					var afw = $('org_agency_fee_wrap');
+					var isAgency = row.level === 'agency';
 					if (afw) {
-						var isAgency = row.level === 'agency';
 						afw.classList.toggle('d-none', !isAgency);
 						$('org_agency_pays_fee').checked = isAgency && row.agency_fee_payer === 'agency';
+					}
+					var sw = $('org_stmt_wrap');
+					if (sw) {
+						sw.classList.toggle('d-none', !isAgency);
+						$('org_stmt_weekly').checked = isAgency ? (row.stmt_weekly_enabled !== false) : true;
+						$('org_stmt_daily_alimtalk').checked = isAgency && row.stmt_daily_alimtalk === true;
 					}
 				bootstrap.Modal.getOrCreateInstance($('kt_org_modal')).show();
 				return;
@@ -796,7 +823,9 @@ foreach ($agencyByParent as $orphans) {
 				biz_type: $('org_biz_type').value.trim(),
 				biz_category: $('org_biz_category').value.trim(),
 				biz_address: $('org_biz_address').value.trim(),
-				agency_fee_payer: ($('org_agency_pays_fee') && $('org_agency_pays_fee').checked) ? 'agency' : 'rider'
+				agency_fee_payer: ($('org_agency_pays_fee') && $('org_agency_pays_fee').checked) ? 'agency' : 'rider',
+				stmt_weekly_enabled: ($('org_stmt_weekly') && $('org_stmt_weekly').checked) ? 1 : 0,
+				stmt_daily_alimtalk: ($('org_stmt_daily_alimtalk') && $('org_stmt_daily_alimtalk').checked) ? 1 : 0
 			};
 			if (!payload.name) { showToast('조직 이름을 입력하세요.', false); return; }
 			if (!editId) {

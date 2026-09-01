@@ -278,6 +278,34 @@ final class Org
         return $v === 'agency' ? 'agency' : 'rider';
     }
 
+    /**
+     * 정산서(명세서) 기능 대리점별 on/off 플래그(2026-09-01 갑).
+     * 컬럼이 아직 없으면 기본값으로 안전 폴백.
+     *
+     * @param 'stmt_weekly_enabled'|'stmt_daily_alimtalk' $key
+     */
+    public static function statementFlag(int $orgId, string $key, ?bool $default = null): bool
+    {
+        $defaults = ['stmt_weekly_enabled' => true, 'stmt_daily_alimtalk' => false];
+        $def      = $default ?? ($defaults[$key] ?? false);
+        if ($orgId < 1 || !isset($defaults[$key]) || !db_table_exists('organizations')) {
+            return $def;
+        }
+        static $cols = null;
+        if ($cols === null) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+        }
+        if (!in_array($key, $cols, true)) {
+            return $def;
+        }
+        $row = db_row("SELECT {$key} AS v FROM organizations WHERE id = ? LIMIT 1", [$orgId]);
+        if ($row === null || $row['v'] === null) {
+            return $def;
+        }
+
+        return (int) $row['v'] === 1;
+    }
+
     public static function chainForAgency(int $agencyId): array
     {
         $out = ['agency' => 0, 'distributor' => 0, 'hq' => 0];

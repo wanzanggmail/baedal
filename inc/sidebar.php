@@ -3,6 +3,18 @@ declare(strict_types=1);
 /** @var string $route */
 $route = $route ?? '';
 
+/** 정산명세서 발급 메뉴 노출 — 대리점은 「주급 명세서 발급 사용」 설정을 따르고, 본사·총판은 항상 노출. */
+if (!function_exists('stmt_menu_visible')) {
+    function stmt_menu_visible(): bool
+    {
+        if ((string) (Org::current()['level'] ?? '') !== Org::LEVEL_AGENCY) {
+            return true;
+        }
+
+        return Org::statementFlag((int) admin_org_id(), 'stmt_weekly_enabled');
+    }
+}
+
 /**
  * 메뉴 구조 (2026-08-13 재편 — REF_MENU_STRUCTURE.md)
  *
@@ -118,7 +130,7 @@ $route = $route ?? '';
 														<span class="menu-title">원천세 명세</span>
 													</a>
 												</div>
-												<?php if (admin_can_access_route('settlement/statement')) : ?>
+												<?php if (admin_can_access_route('settlement/statement') && stmt_menu_visible()) : ?>
 												<div class="menu-item">
 													<a class="menu-link<?= nav_active('settlement/statement') ?>" href="<?= htmlspecialchars(admin_url('settlement/statement'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>

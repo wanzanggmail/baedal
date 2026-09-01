@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/RiderDebt.php';
+require_once __DIR__ . '/MessageQueue.php';
+require_once __DIR__ . '/Org.php';
 
 /**
  * 주급 명세서(라이더 정산명세서) 데이터 — **우리가 가진 데이터만** 사용해 실제 명세서 레이아웃을 재현.
@@ -75,6 +77,98 @@ final class RiderStatement
             'support_rows'  => self::supportRows($riderId, $from, $to),
             'participation' => self::participation($riderId, $from, $to),
         ];
+    }
+
+    /**
+     * 카톡(알림톡)·문자용 **요약 명세서 텍스트**. 중요한 항목만 리스트로.
+     * 0원 차감 항목은 생략해 짧게 유지한다(지원/프로모션·실수령은 항상 표기).
+     */
+    public static function compactText(int $riderId, string $from, string $to, string $riderName = ''): string
+    {
+        $s   = self::build($riderId, $from, $to)['summary'];
+        $won = static fn (int $v): string => number_format($v) . '원';
+
+        $period = $from === $to ? $from : ($from . ' ~ ' . $to);
+        $name   = $riderName !== '' ? $riderName : ('#' . $riderId);
+
+        $lines   = [];
+        $lines[] = '[정산 명세서] ' . $name;
+        $lines[] = '■ 정산일 ' . $period;
+        $lines[] = '━━━━━━━━━━';
+        $lines[] = '· 총 오더수 : ' . number_format((int) $s['orders']) . '건';
+        $lines[] = '· 정산금액 : ' . $won((int) $s['settle_amount']);
+        if ((int) $s['promo'] > 0)   { $lines[] = '· 프로모션 : ' . $won((int) $s['promo']); }
+        if ((int) $s['promo2'] > 0)  { $lines[] = '· 프로모션2 : ' . $won((int) $s['promo2']); }
+        if ((int) $s['support'] > 0) { $lines[] = '· 지원금 : ' . $won((int) $s['support']); }
+
+        // 차감 항목 — 있는 것만
+        $deducts = [
+            '차감액'    => (int) $s['deduction'],
+            '원천세'    => (int) $s['withholding'],
+            '고용보험'  => (int) $s['employment'],
+            '산재보험'  => (int) $s['accident'],
+            '시간제보험' => (int) $s['hourly_ins'],
+            '정산수수료' => (int) $s['agency_fee'],
+            '선지급차감' => (int) $s['advance'],
+            '고정차감'  => (int) $s['fixed'],
+        ];
+        $deductLines = [];
+        foreach ($deducts as $label => $amt) {
+            if ($amt > 0) {
+                $deductLines[] = '· ' . $label . ' : -' . $won($amt);
+            }
+        }
+        if ($deductLines !== []) {
+            $lines[] = '─ 차감 ─';
+            $lines   = array_merge($lines, $deductLines);
+        }
+        $lines[] = '━━━━━━━━━━';
+        $lines[] = '▶ 실수령액 : ' . $won((int) $s['net']);
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * 일정산 업로드 반영 직후 — 대상 라이더에게 요약 명세서를 **알림톡 큐에 적재**한다(2026-09-01 갑).
+     * 대리점 설정 `stmt_daily_alimtalk` 가 켜져 있을 때만 동작. 실제 발송은 발송 큐에서 처리.
+     *
+     * @return array{enabled:bool, queued:int, skipped:int, errors:list<string>}
+     */
+    public static function enqueueDailyStatements(int $uploadId, int $agencyId, ?int $adminId = null): array
+    {
+        $out = ['enabled' => false, 'queued' => 0, 'skipped' => 0, 'errors' => []];
+
+        if (!MessageQueue::ready() || !Org::statementFlag($agencyId, 'stmt_daily_alimtalk')) {
+            return $out;
+        }
+        $out['enabled'] = true;
+
+        // 이번 업로드로 새로 생성된 사이클의 라이더(일일정산 대상)만. 라이더별 정산일 범위로 묶는다.
+        $rows = db_rows(
+            "SELECT c.rider_id, r.name AS rider_name,
+                    MIN(c.settlement_date) AS from_d, MAX(c.settlement_date) AS to_d
+               FROM settlement_rider_cycles c
+               INNER JOIN riders r ON r.id = c.rider_id
+              WHERE c.upload_id = ? AND r.is_daily_settlement = 1
+              GROUP BY c.rider_id, r.name",
+            [$uploadId]
+        );
+
+        foreach ($rows as $row) {
+            $riderId = (int) $row['rider_id'];
+            $from    = (string) $row['from_d'];
+            $to      = (string) $row['to_d'];
+            try {
+                $text = self::compactText($riderId, $from, $to, (string) ($row['rider_name'] ?? ''));
+                MessageQueue::enqueueForRider($riderId, 'alimtalk', $text, '정산 명세서', $adminId);
+                $out['queued']++;
+            } catch (Throwable $e) {
+                $out['skipped']++;
+                $out['errors'][] = ((string) ($row['rider_name'] ?? $riderId)) . ': ' . $e->getMessage();
+            }
+        }
+
+        return $out;
     }
 
     /** 기간 공제 항목 합(fee_code => amount). */

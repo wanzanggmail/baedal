@@ -80,7 +80,7 @@ final class Organization
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     o.ceo_name, o.ceo_phone, o.ceo_birth,
                     o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
-                    o.agency_fee_payer,
+                    o.agency_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -174,7 +174,7 @@ final class Organization
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     o.ceo_name, o.ceo_phone, o.ceo_birth,
                     o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
-                    o.agency_fee_payer,
+                    o.agency_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -358,15 +358,23 @@ final class Organization
         $bizCategory = mb_substr(trim((string) ($data['biz_category'] ?? '')), 0, 60);
         $bizAddress  = mb_substr(trim((string) ($data['biz_address'] ?? '')), 0, 200);
 
-        // 대행수수료 부담 주체 — 대리점에만 적용. 키가 온 경우에만 갱신(다른 화면 저장 시 기존값 유지).
+        // 대행수수료 부담 주체·정산서 기능 플래그 — 대리점에만 적용. 키가 온 경우에만 갱신(다른 화면 저장 시 기존값 유지).
         $extraSql   = '';
         $extraParam = [];
+        $orgCols    = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+        $isAgency   = (string) (Org::find($id)['level'] ?? '') === Org::LEVEL_AGENCY;
         if (array_key_exists('agency_fee_payer', $data)
-            && in_array('agency_fee_payer', array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field'), true)
-            && (string) (Org::find($id)['level'] ?? '') === Org::LEVEL_AGENCY
+            && in_array('agency_fee_payer', $orgCols, true)
+            && $isAgency
         ) {
             $extraSql     = ', agency_fee_payer = ?';
             $extraParam[] = ((string) $data['agency_fee_payer'] === 'agency') ? 'agency' : 'rider';
+        }
+        foreach (['stmt_weekly_enabled', 'stmt_daily_alimtalk'] as $flagCol) {
+            if (array_key_exists($flagCol, $data) && in_array($flagCol, $orgCols, true) && $isAgency) {
+                $extraSql    .= ", {$flagCol} = ?";
+                $extraParam[] = !empty($data[$flagCol]) ? 1 : 0;
+            }
         }
 
         db_execute(
@@ -607,6 +615,8 @@ final class Organization
             'biz_category'         => (string) ($row['biz_category'] ?? ''),
             'biz_address'          => (string) ($row['biz_address'] ?? ''),
             'agency_fee_payer'     => ((string) ($row['agency_fee_payer'] ?? 'rider')) === 'agency' ? 'agency' : 'rider',
+            'stmt_weekly_enabled'  => (int) ($row['stmt_weekly_enabled'] ?? 1) === 1,
+            'stmt_daily_alimtalk'  => (int) ($row['stmt_daily_alimtalk'] ?? 0) === 1,
             'active'               => (int) ($row['is_active'] ?? 0) === 1,
             'account_count'        => (int) ($row['account_count'] ?? 0),
             'active_account_count' => (int) ($row['active_account_count'] ?? 0),

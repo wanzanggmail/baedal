@@ -123,6 +123,17 @@ try {
         );
     }
 
+    // 일정산 명세서 알림톡 자동 발송 — 대리점 설정(stmt_daily_alimtalk)이 켜져 있을 때만 큐 적재.
+    require_once INC_PATH . '/RiderStatement.php';
+    $stmt = RiderStatement::enqueueDailyStatements($uploadId, (int) ($uploadRow['agency_id'] ?? 0), $adminId > 0 ? $adminId : null);
+    if ($stmt['queued'] > 0) {
+        AuditLog::record(
+            'settlement.statement_alimtalk',
+            (string) $uploadId,
+            sprintf('일정산 명세서 알림톡 큐 적재 %d건 · 실패 %d건', $stmt['queued'], $stmt['skipped'])
+        );
+    }
+
     $message = "정산 반영 {$result['applied']}명 완료" . ($result['skipped'] > 0 ? " (건너뜀 {$result['skipped']}명)" : '');
     if ($result['applied'] === 0) {
         $message .= "\n(이미 반영된 건은 다시 반영되지 않습니다)";
@@ -162,12 +173,20 @@ try {
         $message .= "\n\n일일정산 자동출금: 출금할 정산분이 남은 대상이 없습니다(이미 전부 지급됨).";
     }
 
+    if ($stmt['queued'] > 0) {
+        $message .= sprintf("\n\n일정산 명세서 알림톡: %d건 발송 대기(큐)", $stmt['queued']);
+        if ($stmt['skipped'] > 0) {
+            $message .= " · 실패 {$stmt['skipped']}건";
+        }
+    }
+
     echo json_encode([
         'ok'        => true,
         'message'   => $message,
         'result'    => $result,
         'pg_fund'   => $fund,
         'auto_withdraw' => $auto,
+        'statement_alimtalk' => $stmt,
     ], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {
     http_response_code(422);

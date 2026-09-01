@@ -16,6 +16,14 @@ if ($level !== Org::LEVEL_ADMIN && $level !== Org::LEVEL_AGENCY) {
 
     return;
 }
+// 대리점은 「주급 명세서 발급 사용」 설정이 꺼져 있으면 접근 차단(URL 직접 진입 방어).
+if ($level === Org::LEVEL_AGENCY && !Org::statementFlag((int) admin_org_id(), 'stmt_weekly_enabled')) {
+    require_once INC_PATH . '/app_content_open.php';
+    echo '<div class="alert alert-warning p-5">정산명세서 발급 기능이 꺼져 있습니다. 본사에 문의하세요.</div>';
+    require_once INC_PATH . '/app_content_close.php';
+
+    return;
+}
 
 $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 $won = static fn ($n): string => number_format((int) $n) . '원';

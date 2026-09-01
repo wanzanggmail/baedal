@@ -79,6 +79,7 @@ final class MigrateRunner
         self::migrateTaxAgent();
         self::migrateRiderReserveOverride();
         self::migrateMessaging();
+        self::migrateStatementFlags();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1600,6 +1601,43 @@ final class MigrateRunner
      * - `withdrawal_config.transfer_fee`(기본 330) : 대리점별 설정 가능(전역/오버라이드).
      * - `withdrawal_requests.withhold_transfer_fee` : 출금 건별로 실제 부과한 이체 수수료 기록.
      */
+    /**
+     * 정산서(명세서) 기능 대리점별 on/off (2026-09-01 갑).
+     *  - stmt_weekly_enabled : 주급(정산) 명세서 발급 메뉴 사용 여부(기본 켬).
+     *  - stmt_daily_alimtalk : 일정산 반영 시 라이더에게 요약 명세서 알림톡 자동 발송(기본 끔).
+     * 대리점마다 기능별로 켜고 끌 수 있게 organizations 에 플래그를 둔다.
+     */
+    private static function migrateStatementFlags(): void
+    {
+        echo "== organizations 정산서 기능 플래그 ==\n";
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+        if (!in_array('stmt_weekly_enabled', $cols, true)) {
+            db_execute(
+                "ALTER TABLE organizations
+                 ADD COLUMN stmt_weekly_enabled TINYINT(1) NOT NULL DEFAULT 1
+                     COMMENT '주급 명세서 발급 메뉴 사용(대리점)'"
+            );
+            echo "OK    organizations.stmt_weekly_enabled 추가(기본 1)\n";
+        } else {
+            echo "SKIP  stmt_weekly_enabled (이미 있음)\n";
+        }
+        if (!in_array('stmt_daily_alimtalk', $cols, true)) {
+            db_execute(
+                "ALTER TABLE organizations
+                 ADD COLUMN stmt_daily_alimtalk TINYINT(1) NOT NULL DEFAULT 0
+                     COMMENT '일정산 반영 시 명세서 알림톡 자동 발송(대리점)'"
+            );
+            echo "OK    organizations.stmt_daily_alimtalk 추가(기본 0)\n";
+        } else {
+            echo "SKIP  stmt_daily_alimtalk (이미 있음)\n";
+        }
+    }
+
     private static function migrateTransferFee(): void
     {
         echo "== 이체 수수료 컬럼 ==\n";
