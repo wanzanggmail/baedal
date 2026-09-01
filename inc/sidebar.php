@@ -118,6 +118,14 @@ $route = $route ?? '';
 														<span class="menu-title">원천세 명세</span>
 													</a>
 												</div>
+												<?php if (admin_can_access_route('settlement/statement')) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('settlement/statement') ?>" href="<?= htmlspecialchars(admin_url('settlement/statement'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">정산명세서 발급</span>
+													</a>
+												</div>
+												<?php endif; ?>
 											</div>
 										</div>
 										<?php endif; ?>

@@ -22,6 +22,7 @@ return [
     'deduction/lease-fees' => ['title' => '리스 수수료 배분', 'view' => 'lease_fee_report'],
     'withdrawal/list' => ['title' => '출금 신청 목록', 'view' => 'withdrawal_list'],
     'withdrawal/settings' => ['title' => '수수료 설정(관리)', 'view' => 'withdrawal_settings'],
+    'settlement/statement' => ['title' => '정산명세서', 'view' => 'settlement_statement'],
     'withdrawal/download' => ['title' => '출금 다운로드', 'view' => 'withdrawal_download'],
     'withdrawal/complete' => ['title' => '출금 처리 완료', 'view' => 'withdrawal_complete'],
     'withdrawal/wallet-ledger' => ['title' => '지갑 입출금', 'view' => 'wallet_ledger'],
