@@ -297,6 +297,8 @@ PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점
 
 🆕 **`message_send_logs`**(2026-09-01) — 발송 로그(**append-only**). 큐 행은 재발송 시 상태가 덮이므로, 발송 시도마다 1행씩 영구 기록. `message_id`(nullable, message_queue.id)·`channel`·`rider_id`·`recipient_name/phone`·`title`·`content`·`status`(sent/failed)·`provider/provider_ref/error`·`attempted_by`(admins.id)·`attempted_at`. `MessageQueue::send()`가 성공·실패 양쪽에 `logAttempt()`로 기록(로그 실패는 발송 무시). 조회: `MessageQueue::listLogs()/logCounts()`(기간·채널·상태·검색 필터), 화면 `system/messages` 하단 「발송 로그」 카드(API `?logs=1`). 큐가 정리돼도 로그는 남는다.
 
+🆕 **`statement_links`**(2026-09-01) — 모바일 명세서 공개 링크 토큰. 라이더가 파일 대신 **링크**로 명세서를 연다(알림톡). `token`(40 hex, unique)·`rider_id`·`period_from/to`·`created_by`·`created_at`·`expires_at`(기본 +90일)·`view_count`·`last_viewed_at`. `StatementLink`(create[같은 라이더·기간 유효 링크 재사용]·resolve[만료 체크]·markViewed·url[절대 URL, env `PUBLIC_BASE_URL` 우선]). 공개 페이지 `rider/p/statement.php?t=토큰`(로그인 불필요·자체완결 경량 HTML·noindex). 일정산 자동 알림톡 본문에 링크 자동 첨부(`RiderStatement::enqueueDailyStatements`).
+
 🆕 **`tax_insurance_collections`** — 세무대리 예수금 수집 이력(`tax_org_id`·`agency_id`·`period`(YYYY-MM)·`amount`·`collected_at`). `TaxAgent::collect()` 가 대리점 지갑에서 예수금을 빼(balance 차감 + insurance_reserve 0) 세무대리 지갑으로 옮기고(`ins_collect_out`/`ins_collect_in`) 이 표에 기록.
 
 ### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)

@@ -80,6 +80,7 @@ final class MigrateRunner
         self::migrateRiderReserveOverride();
         self::migrateMessaging();
         self::migrateStatementFlags();
+        self::migrateStatementLinks();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1667,6 +1668,38 @@ final class MigrateRunner
         } else {
             echo "SKIP  stmt_daily_alimtalk (이미 있음)\n";
         }
+    }
+
+    /**
+     * 모바일 명세서 공개 링크(2026-09-01 갑) — 알림톡 링크로 로그인 없이 명세서를 여는 토큰.
+     * 토큰 하나가 (라이더 + 정산기간)에 매핑되며 만료된다.
+     */
+    private static function migrateStatementLinks(): void
+    {
+        echo "== 모바일 명세서 공개 링크 ==\n";
+        if (db_table_exists('statement_links')) {
+            echo "SKIP  statement_links (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE statement_links (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                token CHAR(40) NOT NULL,
+                rider_id INT NOT NULL,
+                period_from DATE NOT NULL,
+                period_to DATE NOT NULL,
+                created_by INT NULL,
+                created_at DATETIME NOT NULL,
+                expires_at DATETIME NULL,
+                view_count INT NOT NULL DEFAULT 0,
+                last_viewed_at DATETIME NULL,
+                UNIQUE KEY uq_token (token),
+                INDEX idx_rider_period (rider_id, period_from, period_to),
+                INDEX idx_expires (expires_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+        echo "OK    statement_links 생성\n";
     }
 
     private static function migrateTransferFee(): void

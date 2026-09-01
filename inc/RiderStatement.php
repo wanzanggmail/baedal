@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/RiderDebt.php';
 require_once __DIR__ . '/MessageQueue.php';
 require_once __DIR__ . '/Org.php';
+require_once __DIR__ . '/StatementLink.php';
 
 /**
  * 주급 명세서(라이더 정산명세서) 데이터 — **우리가 가진 데이터만** 사용해 실제 명세서 레이아웃을 재현.
@@ -160,6 +161,15 @@ final class RiderStatement
             $to      = (string) $row['to_d'];
             try {
                 $text = self::compactText($riderId, $from, $to, (string) ($row['rider_name'] ?? ''));
+                // 모바일 명세서 링크 — 파일 대신 링크로 상세 명세서를 열 수 있게 첨부.
+                if (StatementLink::ready()) {
+                    try {
+                        $link = StatementLink::create($riderId, $from, $to, $adminId);
+                        $text .= "\n\n▶ 상세 명세서 보기\n" . $link['url'];
+                    } catch (Throwable) {
+                        // 링크 생성 실패는 발송 자체를 막지 않는다(텍스트만 발송).
+                    }
+                }
                 MessageQueue::enqueueForRider($riderId, 'alimtalk', $text, '정산 명세서', $adminId);
                 $out['queued']++;
             } catch (Throwable $e) {
