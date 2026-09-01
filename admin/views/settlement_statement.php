@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/SettlementLedger.php';
 require_once INC_PATH . '/RiderDebt.php';
+require_once INC_PATH . '/RiderStatement.php';
 require_once INC_PATH . '/Org.php';
 
 // 본사(super) 또는 대리점(자기 라이더). 총판은 라우트 허용목록에서 제외됨.
@@ -72,150 +73,164 @@ if ($riderId > 0) {
 </style>
 
 <?php if ($riderId > 0 && $scopeAllowed) :
-	// ── 명세서 모드 ─────────────────────────────────────────────
+	// ── 명세서 모드 (주급 명세서 레이아웃) ───────────────────────
 	$rider = db_row(
-		'SELECT r.*, o.name AS agency_name, o.code AS agency_code
-		   FROM riders r LEFT JOIN organizations o ON o.id = r.agency_id
-		  WHERE r.id = ? LIMIT 1',
+		'SELECT r.*, o.name AS agency_name FROM riders r LEFT JOIN organizations o ON o.id = r.agency_id WHERE r.id = ? LIMIT 1',
 		[$riderId]
 	);
-	$f = ['from' => $from, 'to' => $to];
-	$sum   = SettlementLedger::sumForRider($riderId, $f);
-	$daily = db_rows(
-		"SELECT settlement_date, platform, SUM(order_count) AS orders, SUM(gross_amount+support_amount) AS gross,
-		        SUM(total_fee_amount) AS fee, SUM(net_amount) AS net
-		   FROM settlement_rider_cycles WHERE rider_id = ? AND settlement_date BETWEEN ? AND ?
-		  GROUP BY settlement_date ORDER BY settlement_date ASC",
-		[$riderId, $from, $to]
-	);
-	$fees  = SettlementLedger::feeBreakdownForRider($riderId, $f);
-	$debts = RiderDebt::forRider($riderId, false);
-	$grossTot = (int) $sum['gross'] + (int) $sum['support'];
+	$st = RiderStatement::build($riderId, $from, $to);
+	$sm = $st['summary'];
+	$pt = $st['participation'];
 	?>
 	<div class="d-flex justify-content-end gap-2 mb-4 st-noprint">
-		<a href="<?= $esc($qs(['orders' => $withOrders ? 0 : 1, 'rider' => $riderId])) ?>" class="btn btn-sm btn-light-primary"><?= $withOrders ? '건별 상세 숨기기' : '건별 상세 포함' ?></a>
+		<a href="<?= $esc($qs(['orders' => $withOrders ? 0 : 1, 'rider' => $riderId])) ?>" class="btn btn-sm btn-light-primary"><?= $withOrders ? '오더별 상세 숨기기' : '오더별 상세 포함' ?></a>
 		<a href="<?= $esc($qs([])) ?>" class="btn btn-sm btn-light">목록으로</a>
 		<button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="ki-duotone ki-printer fs-5"><span class="path1"></span><span class="path2"></span></i> 인쇄</button>
 	</div>
 
-	<div class="card card-flush st-statement">
-		<div class="card-body">
-			<!--헤더-->
-			<div class="d-flex flex-stack border-bottom border-gray-300 pb-4 mb-4">
-				<div>
-					<h2 class="fw-bold mb-1">정산명세서</h2>
-					<div class="fs-7 text-gray-700"><?= $esc((string) ($rider['name'] ?? '')) ?> <span class="text-muted">(<?= $esc((string) ($rider['rider_code'] ?? '')) ?>)</span>
-						· <?= (int) ($rider['is_daily_settlement'] ?? 0) === 1 ? '선정산' : '주정산' ?>
-						· <?= $esc((string) ($rider['agency_name'] ?? '')) ?></div>
-				</div>
-				<div class="text-end fs-8 text-gray-600">
-					<div>정산기간 <strong><?= $esc($from) ?> ~ <?= $esc($to) ?></strong></div>
-					<div>발행일 <?= date('Y-m-d H:i') ?></div>
-				</div>
-			</div>
-
-			<!--요약-->
-			<div class="row g-3 mb-5">
-				<?php
-				$cards = [
-					['총 주문', number_format($sum['orders']) . '건'],
-					['정산금액', $won($grossTot)],
-					['총 공제', $won($sum['fee'])],
-					['실지급액', $won($sum['net'])],
-				];
-				foreach ($cards as $c) : ?>
-				<div class="col-3"><div class="border border-gray-300 rounded p-3 text-center">
-					<div class="fs-8 text-gray-500"><?= $esc($c[0]) ?></div>
-					<div class="fs-5 fw-bold text-gray-900"><?= $esc($c[1]) ?></div>
-				</div></div>
-				<?php endforeach; ?>
-			</div>
-
-			<!--일자별-->
-			<h4 class="fs-6 fw-bold mb-2">일자별 정산</h4>
-			<table class="table table-bordered align-middle fs-8 mb-5">
-				<thead class="bg-light fw-bold"><tr><th>정산일</th><th>플랫폼</th><th class="text-end">건수</th><th class="text-end">정산금액</th><th class="text-end">공제</th><th class="text-end">실지급</th></tr></thead>
-				<tbody>
-					<?php if ($daily === []) : ?><tr><td colspan="6" class="text-center text-muted py-4">해당 기간 정산 내역이 없습니다.</td></tr>
-					<?php else : foreach ($daily as $d) : ?>
-					<tr>
-						<td><?= $esc((string) $d['settlement_date']) ?></td>
-						<td><?= $esc($platLabel[(string) $d['platform']] ?? (string) $d['platform']) ?></td>
-						<td class="text-end"><?= number_format((int) $d['orders']) ?></td>
-						<td class="text-end"><?= $won($d['gross']) ?></td>
-						<td class="text-end text-danger"><?= $won($d['fee']) ?></td>
-						<td class="text-end fw-bold"><?= $won($d['net']) ?></td>
-					</tr>
-					<?php endforeach; endif; ?>
-				</tbody>
-				<?php if ($daily !== []) : ?>
-				<tfoot class="fw-bold bg-light"><tr><td colspan="2">합계</td><td class="text-end"><?= number_format($sum['orders']) ?></td><td class="text-end"><?= $won($grossTot) ?></td><td class="text-end text-danger"><?= $won($sum['fee']) ?></td><td class="text-end"><?= $won($sum['net']) ?></td></tr></tfoot>
-				<?php endif; ?>
-			</table>
-
-			<div class="row g-5 mb-4">
-				<!--공제 내역-->
-				<div class="col-md-6">
-					<h4 class="fs-6 fw-bold mb-2">공제 내역</h4>
-					<table class="table table-bordered align-middle fs-8">
-						<thead class="bg-light fw-bold"><tr><th>항목</th><th class="text-end">건수</th><th class="text-end">금액</th></tr></thead>
-						<tbody>
-							<?php $feeOnly = array_filter($fees, static fn ($x) => !$x['is_debt']); if ($feeOnly === []) : ?><tr><td colspan="3" class="text-center text-muted py-3">공제 없음</td></tr>
-							<?php else : foreach ($feeOnly as $x) : ?>
-							<tr><td><?= $esc($x['label']) ?></td><td class="text-end"><?= number_format($x['count']) ?></td><td class="text-end text-danger"><?= $won($x['amount']) ?></td></tr>
-							<?php endforeach; endif; ?>
-						</tbody>
-					</table>
-				</div>
-				<!--대여금·리스-->
-				<div class="col-md-6">
-					<h4 class="fs-6 fw-bold mb-2">대여금·리스·선지급</h4>
-					<table class="table table-bordered align-middle fs-8">
-						<thead class="bg-light fw-bold"><tr><th>종류</th><th>내용</th><th class="text-end">잔액</th></tr></thead>
-						<tbody>
-							<?php if (($debts ?? []) === []) : ?><tr><td colspan="3" class="text-center text-muted py-3">없음</td></tr>
-							<?php else : foreach ($debts as $dt) : ?>
-							<tr>
-								<td><?= $esc((string) ($dt['kind_label'] ?? $dt['kind'] ?? '')) ?></td>
-								<td class="text-muted"><?= $esc((string) ($dt['title'] ?? $dt['note'] ?? '')) ?></td>
-								<td class="text-end fw-bold"><?= $won($dt['balance_amount'] ?? 0) ?></td>
-							</tr>
-							<?php endforeach; endif; ?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-
-			<?php if ($withOrders) :
-				$orders = db_rows(
-					"SELECT settlement_date, assigned_at, order_no, store_name, delivery_area, distance_m, net_amount
-					   FROM settlement_order_details WHERE rider_id = ? AND settlement_date BETWEEN ? AND ?
-					  ORDER BY settlement_date ASC, assigned_at ASC LIMIT 2000",
-					[$riderId, $from, $to]
-				); ?>
-			<h4 class="fs-6 fw-bold mb-2">건별 배달 내역 <span class="text-muted fs-8 fw-normal"><?= number_format(count($orders)) ?>건</span></h4>
-			<table class="table table-bordered align-middle fs-9">
-				<thead class="bg-light fw-bold"><tr><th>일자</th><th>배정시각</th><th>주문번호</th><th>매장</th><th>도착지</th><th class="text-end">거리(m)</th><th class="text-end">배달비</th></tr></thead>
-				<tbody>
-					<?php if ($orders === []) : ?><tr><td colspan="7" class="text-center text-muted py-3">건별 내역이 없습니다.</td></tr>
-					<?php else : foreach ($orders as $od) : ?>
-					<tr>
-						<td><?= $esc((string) $od['settlement_date']) ?></td>
-						<td><?= $esc(substr((string) ($od['assigned_at'] ?? ''), 11, 8)) ?></td>
-						<td><?= $esc((string) ($od['order_no'] ?? '')) ?></td>
-						<td><?= $esc((string) ($od['store_name'] ?? '')) ?></td>
-						<td><?= $esc((string) ($od['delivery_area'] ?? '')) ?></td>
-						<td class="text-end"><?= number_format((int) ($od['distance_m'] ?? 0)) ?></td>
-						<td class="text-end"><?= $won($od['net_amount'] ?? 0) ?></td>
-					</tr>
-					<?php endforeach; endif; ?>
-				</tbody>
-			</table>
-			<?php endif; ?>
-
-			<div class="text-center text-muted fs-9 mt-4 pt-3 border-top border-gray-300">본 명세서는 도깨비 배달 정산 시스템에서 발행되었습니다.</div>
+	<div class="card card-flush st-statement"><div class="card-body">
+		<!--헤더-->
+		<div class="text-center mb-4">
+			<h1 class="fw-bold mb-2" style="font-size:1.8rem">주급 명세서</h1>
+			<div class="fs-7 text-gray-700">기사명: <strong><?= $esc((string) ($rider['name'] ?? '')) ?></strong>
+				&nbsp;|&nbsp; 인정구간: <strong><?= (int) $pt['total'] ?>구간</strong>
+				&nbsp;|&nbsp; 정산일시: <?= date('Y-m-d H:i') ?></div>
+			<div class="fs-8 text-muted mt-1"><?= $esc((string) ($rider['agency_name'] ?? '')) ?> · <?= (int) ($rider['is_daily_settlement'] ?? 0) === 1 ? '선정산' : '주정산' ?> · 정산기간 <?= $esc($from) ?> ~ <?= $esc($to) ?></div>
 		</div>
-	</div>
+
+		<!--주간 정산 요약-->
+		<h4 class="fs-6 fw-bold text-center mb-2">주간 정산 요약</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-2">
+			<thead class="bg-light fw-bold"><tr><th>총 오더수</th><th>정산금액</th><th>프로모션</th><th>프로모션2</th><th>지원금 합계</th></tr></thead>
+			<tbody><tr>
+				<td><?= number_format($sm['orders']) ?> 건</td>
+				<td><?= $won($sm['settle_amount']) ?></td>
+				<td><?= (int) $sm['promo'] === 0 ? '0 원 (미지급)' : $won($sm['promo']) ?></td>
+				<td><?= $won($sm['promo2']) ?></td>
+				<td><?= $won($sm['support']) ?></td>
+			</tr></tbody>
+		</table>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>차감액</th><th>원천세</th><th>고용보험</th><th>산재보험</th><th>시간제보험</th><th>정산수수료</th><th>선지급차감</th><th>고정차감</th><th>실수령액</th></tr></thead>
+			<tbody><tr>
+				<td><?= $won($sm['deduction']) ?></td>
+				<td><?= $won($sm['withholding']) ?></td>
+				<td><?= $won($sm['employment']) ?></td>
+				<td><?= $won($sm['accident']) ?></td>
+				<td><?= $won($sm['hourly_ins']) ?></td>
+				<td><?= $won($sm['agency_fee']) ?></td>
+				<td><?= $won($sm['advance']) ?></td>
+				<td><?= $won($sm['fixed']) ?></td>
+				<td class="fw-bold bg-light-warning"><?= $won($sm['net']) ?></td>
+			</tr></tbody>
+		</table>
+
+		<!--일자별 상세 내역-->
+		<h4 class="fs-6 fw-bold text-center mb-2">일자별 상세 내역</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>근무일자</th><th>오더수</th><th>정산금액</th><th>정산수수료</th><th>정산 예정금액</th><th>선지급금</th><th>차감 후 금액</th></tr></thead>
+			<tbody>
+				<?php if ($st['daily'] === []) : ?><tr><td colspan="7" class="text-muted py-4">해당 기간 정산 내역이 없습니다.</td></tr>
+				<?php else : foreach ($st['daily'] as $d) : ?>
+				<tr>
+					<td><?= $esc((string) $d['date']) ?></td>
+					<td><?= number_format((int) $d['orders']) ?> 건</td>
+					<td><?= $won($d['gross']) ?></td>
+					<td><?= $won($d['agency']) ?></td>
+					<td><?= $won($d['planned']) ?></td>
+					<td><?= $won($d['advance']) ?></td>
+					<td class="fw-bold"><?= $won($d['after']) ?></td>
+				</tr>
+				<?php endforeach; endif; ?>
+			</tbody>
+		</table>
+
+		<!--추가지원금-->
+		<?php if ($st['support_rows'] !== []) : ?>
+		<h4 class="fs-6 fw-bold text-center mb-2">추가지원금</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>주문일자</th><th>축약형ID</th><th>구분</th><th>금액</th></tr></thead>
+			<tbody>
+				<?php foreach ($st['support_rows'] as $sr) : ?>
+				<tr>
+					<td><?= $esc((string) ($sr['assigned_at'] ?: $sr['settlement_date'])) ?></td>
+					<td><?= $esc((string) ($sr['order_no'] ?? '')) ?></td>
+					<td><?= $esc((string) ($sr['category'] ?? '')) ?></td>
+					<td><?= $won($sr['amount']) ?></td>
+				</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php endif; ?>
+
+		<!--시간제보험-->
+		<?php if ((int) $sm['hourly_ins'] > 0) : ?>
+		<h4 class="fs-6 fw-bold text-center mb-2">시간제보험</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>구분</th><th>금액</th></tr></thead>
+			<tbody><tr><td>해당 주차 시간제보험료 총액 (쿠팡 정산 기준)</td><td><?= $won($sm['hourly_ins']) ?></td></tr></tbody>
+		</table>
+		<?php endif; ?>
+
+		<!--참여인정구간 세부 요약-->
+		<h4 class="fs-6 fw-bold text-center mb-2">기사별 참여인정구간 세부 요약</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>총 참여인정구간</th><?php foreach (RiderStatement::BUCKETS as $lb) : ?><th><?= $esc($lb) ?></th><?php endforeach; ?></tr></thead>
+			<tbody><tr>
+				<td class="fw-bold"><?= (int) $pt['total'] ?></td>
+				<?php foreach (RiderStatement::BUCKETS as $lb) : ?><td><?= (int) ($pt['scores'][$lb] ?? 0) ?></td><?php endforeach; ?>
+			</tr></tbody>
+		</table>
+
+		<!--요일/구간별 수행 건수-->
+		<h4 class="fs-6 fw-bold text-center mb-2">기사별 요일/구간별 수행 건수</h4>
+		<table class="table table-bordered align-middle text-center fs-8 mb-5">
+			<thead class="bg-light fw-bold"><tr><th>버킷 \ 요일</th><?php foreach ($pt['weekdays'] as $wd) : ?><th><?= $esc($wd) ?></th><?php endforeach; ?></tr></thead>
+			<tbody>
+				<?php foreach (RiderStatement::BUCKETS as $lb) : ?>
+				<tr>
+					<td class="fw-semibold"><?= $esc($lb) ?></td>
+					<?php foreach ($pt['weekdays'] as $wd) : $v = (int) ($pt['grid'][$lb][$wd] ?? 0); ?>
+					<td class="<?= $v > 0 ? 'bg-light-success fw-bold' : 'text-muted' ?>"><?= $v ?></td>
+					<?php endforeach; ?>
+				</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+
+		<!--오더별 상세 내역-->
+		<h4 class="fs-6 fw-bold text-center mb-2">오더별 상세 내역</h4>
+		<?php if ($withOrders) :
+			$orders = db_rows(
+				"SELECT settlement_date, assigned_at, order_no, store_name, delivery_area, distance_m, net_amount
+				   FROM settlement_order_details WHERE rider_id = ? AND settlement_date BETWEEN ? AND ?
+				  ORDER BY settlement_date ASC, assigned_at ASC LIMIT 2000",
+				[$riderId, $from, $to]
+			); ?>
+		<div class="text-muted fs-9 mb-1"><?= number_format(count($orders)) ?>건</div>
+		<table class="table table-bordered align-middle text-center fs-9">
+			<thead class="bg-light fw-bold"><tr><th>일자</th><th>배정시각</th><th>주문번호</th><th>매장</th><th>도착지</th><th>거리(m)</th><th>배달비</th></tr></thead>
+			<tbody>
+				<?php if ($orders === []) : ?><tr><td colspan="7" class="text-muted py-3">건별 내역이 없습니다.</td></tr>
+				<?php else : foreach ($orders as $od) : ?>
+				<tr>
+					<td><?= $esc((string) $od['settlement_date']) ?></td>
+					<td><?= $esc(substr((string) ($od['assigned_at'] ?? ''), 11, 8)) ?></td>
+					<td><?= $esc((string) ($od['order_no'] ?? '')) ?></td>
+					<td class="text-start"><?= $esc((string) ($od['store_name'] ?? '')) ?></td>
+					<td class="text-start"><?= $esc((string) ($od['delivery_area'] ?? '')) ?></td>
+					<td class="text-end"><?= number_format((int) ($od['distance_m'] ?? 0)) ?></td>
+					<td class="text-end"><?= $won($od['net_amount'] ?? 0) ?></td>
+				</tr>
+				<?php endforeach; endif; ?>
+			</tbody>
+		</table>
+		<?php else : ?>
+		<div class="text-center text-muted fs-8 py-3 border border-gray-300 rounded mb-3">상단의 <strong>「오더별 상세 포함」</strong>을 누르면 건별 배달 내역이 표시됩니다.</div>
+		<?php endif; ?>
+
+		<div class="text-center text-muted fs-9 mt-4 pt-3 border-top border-gray-300">본 명세서는 도깨비 배달 정산 시스템에서 발행되었습니다.</div>
+	</div></div>
 
 <?php elseif ($riderId > 0 && !$scopeAllowed) : ?>
 	<div class="alert alert-danger p-5">이 라이더의 명세서를 조회할 권한이 없습니다. <a href="<?= $esc($qs([])) ?>" class="ms-2">목록으로</a></div>
