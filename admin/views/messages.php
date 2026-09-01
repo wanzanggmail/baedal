@@ -79,6 +79,15 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 						<input type="number" min="1" max="3650" class="form-control form-control-solid" id="cfg_link_ttl_days" value="<?= (int) $mcfg['link_ttl_days'] ?>" />
 						<div class="form-text fs-9">생성된 링크가 만료되기까지의 일수.</div>
 					</div>
+					<div class="col-12">
+						<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+							<input class="form-check-input me-3 mt-1" type="checkbox" id="cfg_alimtalk_fallback_sms" <?= (int) ($mcfg['alimtalk_fallback_sms'] ?? 1) === 1 ? 'checked' : '' ?> />
+							<span class="d-flex flex-column">
+								<span class="fw-semibold text-gray-800">알림톡 실패 시 <strong>SMS 대체발송</strong></span>
+								<span class="text-muted fs-9">카카오톡 미설치·차단·미사용자 등 <strong>수신불가</strong>로 알림톡이 실패하면 같은 내용을 문자(SMS)로 자동 재발송합니다. (템플릿 오류 등 다른 실패는 대체발송하지 않습니다.)</span>
+							</span>
+						</label>
+					</div>
 				</div>
 				<div class="d-flex justify-content-end mt-4">
 					<button type="button" class="btn btn-sm btn-primary" id="cfg_save">설정 저장</button>
@@ -197,8 +206,9 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 			var content = esc(r.content).slice(0, 60) + (r.content.length > 60 ? '…' : '');
 			var err = r.error ? '<div class="text-danger fs-9">' + esc(r.error) + '</div>' : '';
 			var refv = r.provider_ref ? '<div class="text-muted fs-9">' + esc(r.provider_ref) + '</div>' : '';
+			var fb = r.fallback_from ? ' <span class="badge badge-light-warning">SMS 대체발송</span>' : '';
 			return '<tr>' +
-				'<td><span class="badge badge-light-' + (r.channel === 'alimtalk' ? 'info' : 'primary') + '">' + esc(r.channel_label) + '</span></td>' +
+				'<td><span class="badge badge-light-' + (r.channel === 'alimtalk' ? 'info' : 'primary') + '">' + esc(r.channel_label) + '</span>' + fb + '</td>' +
 				'<td>' + (r.recipient_name ? esc(r.recipient_name) + '<br>' : '') + '<span class="text-muted">' + esc(r.recipient_phone) + '</span></td>' +
 				'<td>' + (r.title ? '<div class="fw-semibold">' + esc(r.title) + '</div>' : '') + content + err + refv + '</td>' +
 				'<td><span class="badge badge-light-' + (BADGE[r.status] || 'secondary') + '">' + esc(r.status_label) + '</span></td>' +
@@ -257,7 +267,8 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 		function logRowHtml(r) {
 			var badge = r.status === 'sent' ? 'success' : 'danger';
 			var content = esc(r.content).slice(0, 50) + (r.content.length > 50 ? '…' : '');
-			var err = r.error ? '<div class="text-danger fs-9">' + esc(r.error) + '</div>' : '';
+			var reason = r.reason_label ? '<div class="fs-9"><span class="badge badge-light-warning">' + esc(r.reason_label) + '</span></div>' : '';
+			var err = r.error ? '<div class="text-danger fs-9">' + esc(r.error) + '</div>' + reason : reason;
 			var ref = r.provider_ref ? '<div class="text-muted fs-9">' + esc(r.provider_ref) + '</div>' : '';
 			var who = r.sender_name ? '<div class="fs-9">' + esc(r.sender_name) + '</div>' : '';
 			return '<tr>' +
@@ -296,7 +307,8 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 					alimtalk_channel: document.getElementById('cfg_alimtalk_channel').value.trim(),
 					statement_template: document.getElementById('cfg_statement_template').value.trim(),
 					public_base_url: document.getElementById('cfg_public_base_url').value.trim(),
-					link_ttl_days: Number(document.getElementById('cfg_link_ttl_days').value || 90)
+					link_ttl_days: Number(document.getElementById('cfg_link_ttl_days').value || 90),
+					alimtalk_fallback_sms: document.getElementById('cfg_alimtalk_fallback_sms').checked ? 1 : 0
 				}, '설정을 저장했습니다.').catch(function () {});
 			});
 		}

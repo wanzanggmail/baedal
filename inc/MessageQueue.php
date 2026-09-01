@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/MessageDeliveryException.php';
+require_once __DIR__ . '/MessagingConfig.php';
+
 /**
  * 문자(SMS)·알림톡 발송 큐 (2026-09-01 갑).
  *
@@ -9,6 +12,9 @@ declare(strict_types=1);
  * 아직 계약 전이라 **모의(mock) 게이트웨이**로 동작한다 — 발송을 누르면 "보냄"으로 처리되고
  * 가짜 발송 ref 를 남긴다. 실 연동 시 `deliver()` 한 곳만 실제 API 호출로 바꾸면 된다
  * (PG·펌뱅킹의 mock 패턴과 동일).
+ *
+ * **알림톡 SMS 대체발송**(2026-09-02): 알림톡이 카카오 수신불가(미설치·차단·미사용자 등)로
+ * 실패하면 같은 내용을 SMS 로 자동 재발송한다(`FALLBACK_REASONS`·`messaging_config.alimtalk_fallback_sms`).
  */
 final class MessageQueue
 {
@@ -21,6 +27,26 @@ final class MessageQueue
         'canceled' => '취소',
     ];
 
+    /**
+     * SMS 대체발송 대상이 되는 알림톡 실패 사유 — **카카오로는 받을 수 없는** 경우.
+     * 실 발송사 연동 시 응답 코드를 이 키로 매핑해 MessageDeliveryException(fallbackEligible=true)을 던진다.
+     */
+    public const FALLBACK_REASONS = [
+        'not_kakao_user'      => '카카오톡 미사용자',
+        'kakao_not_installed' => '카카오톡 미설치',
+        'kakao_blocked'       => '채널 차단',
+        'kakao_disabled'      => '알림톡 수신거부',
+        'kakao_timeout'       => '카카오 전송 시간초과',
+    ];
+
+    /**
+     * 발송 게이트웨이 훅. null 이면 mock(항상 성공). 실 연동/테스트에서
+     * `fn(array $msg): array{provider:string,ref:string}` 를 주입한다(실패 시 MessageDeliveryException).
+     *
+     * @var (callable(array<string,mixed>):array{provider:string,ref:string})|null
+     */
+    public static $deliverHook = null;
+
     public static function ready(): bool
     {
         return db_table_exists('message_queue');
@@ -32,7 +58,7 @@ final class MessageQueue
      * @param array{channel?:string, rider_id?:int, recipient_name?:string, recipient_phone:string,
      *              title?:string, content:string, scheduled_at?:string} $data
      */
-    public static function enqueue(array $data, ?int $adminId = null): int
+    public static function enqueue(array $data, ?int $adminId = null, ?int $fallbackFrom = null): int
     {
         if (!self::ready()) {
             throw new RuntimeException('message_queue 테이블이 없습니다. php migrate.php 를 실행하세요.');
@@ -51,21 +77,38 @@ final class MessageQueue
             $scheduled = str_replace('T', ' ', substr((string) $data['scheduled_at'], 0, 16)) . ':00';
         }
 
-        return db_insert(
-            'INSERT INTO message_queue
-                (channel, rider_id, recipient_name, recipient_phone, title, content, status, scheduled_at, created_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, \'queued\', ?, ?, NOW())',
-            [
-                $channel,
-                (int) ($data['rider_id'] ?? 0) ?: null,
-                mb_substr(trim((string) ($data['recipient_name'] ?? '')), 0, 80) ?: null,
-                $phone,
-                mb_substr(trim((string) ($data['title'] ?? '')), 0, 120) ?: null,
-                mb_substr($content, 0, 2000),
-                $scheduled,
-                ($adminId !== null && $adminId > 0) ? $adminId : null,
-            ]
-        );
+        // fallback_from 컬럼이 있을 때만 채운다(마이그레이션 이전 호환).
+        $hasFallbackCol = self::hasColumn('fallback_from');
+        $cols = 'channel, rider_id, recipient_name, recipient_phone, title, content, status, scheduled_at, created_by, created_at'
+              . ($hasFallbackCol ? ', fallback_from' : '');
+        $ph   = '?, ?, ?, ?, ?, ?, \'queued\', ?, ?, NOW()' . ($hasFallbackCol ? ', ?' : '');
+        $params = [
+            $channel,
+            (int) ($data['rider_id'] ?? 0) ?: null,
+            mb_substr(trim((string) ($data['recipient_name'] ?? '')), 0, 80) ?: null,
+            $phone,
+            mb_substr(trim((string) ($data['title'] ?? '')), 0, 120) ?: null,
+            mb_substr($content, 0, 2000),
+            $scheduled,
+            ($adminId !== null && $adminId > 0) ? $adminId : null,
+        ];
+        if ($hasFallbackCol) {
+            $params[] = ($fallbackFrom !== null && $fallbackFrom > 0) ? $fallbackFrom : null;
+        }
+
+        return db_insert("INSERT INTO message_queue ({$cols}) VALUES ({$ph})", $params);
+    }
+
+    /** 컬럼 존재 여부 캐시(마이그레이션 이전 호환). */
+    private static function hasColumn(string $col): bool
+    {
+        static $cache = [];
+        if (!isset($cache[$col])) {
+            $cache[$col] = self::ready()
+                && in_array($col, array_column(db_rows('SHOW COLUMNS FROM message_queue'), 'Field'), true);
+        }
+
+        return $cache[$col];
     }
 
     /** 라이더에게 보낼 때 — 문자 수신용 번호(sms_phone) 우선, 없으면 기본 phone. */
@@ -152,16 +195,68 @@ final class MessageQueue
                 "UPDATE message_queue SET status='sent', provider=?, provider_ref=?, error=NULL, sent_at=NOW() WHERE id = ?",
                 [$res['provider'], $res['ref'], $id]
             );
-            self::logAttempt($msg, 'sent', $res['provider'], $res['ref'], null, $adminId);
+            self::logAttempt($msg, 'sent', $res['provider'], $res['ref'], null, null, $adminId);
 
             return ['ok' => true, 'id' => $id, 'ref' => $res['ref']];
         } catch (Throwable $e) {
-            $err = mb_substr($e->getMessage(), 0, 250);
+            $reason   = $e instanceof MessageDeliveryException ? $e->reasonCode : '';
+            $eligible = $e instanceof MessageDeliveryException && $e->fallbackEligible;
+            $err      = mb_substr(($reason !== '' ? '[' . $reason . '] ' : '') . $e->getMessage(), 0, 250);
             db_execute("UPDATE message_queue SET status='failed', error=? WHERE id = ?", [$err, $id]);
-            self::logAttempt($msg, 'failed', null, null, $err, $adminId);
+            self::logAttempt($msg, 'failed', null, null, $err, $reason ?: null, $adminId);
 
-            return ['ok' => false, 'id' => $id, 'error' => $e->getMessage()];
+            // 알림톡이 카카오 수신불가로 실패 → SMS 대체발송.
+            $fallbackId = $eligible ? self::maybeFallbackToSms($msg, $adminId) : null;
+
+            return ['ok' => false, 'id' => $id, 'error' => $e->getMessage(), 'reason' => $reason, 'fallback_id' => $fallbackId];
         }
+    }
+
+    /**
+     * 알림톡 수신불가 실패 → 같은 내용을 SMS 로 **대체발송**(2026-09-02 갑).
+     * 조건: 원본이 알림톡 · 설정(alimtalk_fallback_sms) 켬 · 자신이 대체발송본이 아님 · 이미 만든 대체본 없음.
+     * SMS 를 새로 큐에 넣고 즉시 발송한다. 실패해도 원본 처리는 이미 끝났다.
+     *
+     * @param array<string,mixed> $msg 실패한 원본 메시지 행
+     * @return int|null 생성된 SMS message_queue.id (안 만들면 null)
+     */
+    private static function maybeFallbackToSms(array $msg, ?int $adminId): ?int
+    {
+        if ((string) ($msg['channel'] ?? '') !== 'alimtalk') {
+            return null;
+        }
+        if (!empty($msg['fallback_from'])) {
+            return null; // 이미 대체발송본(무한 루프 방지)
+        }
+        if (!MessagingConfig::alimtalkFallbackSms()) {
+            return null;
+        }
+        $originId = (int) ($msg['id'] ?? 0);
+        // 같은 원본으로 이미 대체 SMS 를 만들었으면 재사용(중복 방지).
+        if (self::hasColumn('fallback_from') && $originId > 0) {
+            $exists = db_row('SELECT id FROM message_queue WHERE fallback_from = ? ORDER BY id ASC LIMIT 1', [$originId]);
+            if ($exists !== null) {
+                return (int) $exists['id'];
+            }
+        }
+
+        try {
+            $smsId = self::enqueue([
+                'channel'         => 'sms',
+                'rider_id'        => (int) ($msg['rider_id'] ?? 0),
+                'recipient_name'  => (string) ($msg['recipient_name'] ?? ''),
+                'recipient_phone' => (string) ($msg['recipient_phone'] ?? ''),
+                'title'           => (string) ($msg['title'] ?? ''),
+                'content'         => (string) ($msg['content'] ?? ''),
+            ], $adminId, $originId > 0 ? $originId : null);
+        } catch (Throwable) {
+            return null; // 번호 이상 등으로 SMS 조차 못 만들면 포기(원본 실패는 이미 기록됨).
+        }
+
+        // 즉시 발송(대기로 두지 않고 바로 시도). SMS 는 채널이 sms 라 다시 대체발송되지 않는다.
+        self::send($smsId, $adminId);
+
+        return $smsId;
     }
 
     /**
@@ -169,32 +264,34 @@ final class MessageQueue
      *
      * @param array<string,mixed> $msg message_queue 행
      */
-    private static function logAttempt(array $msg, string $status, ?string $provider, ?string $ref, ?string $error, ?int $adminId): void
+    private static function logAttempt(array $msg, string $status, ?string $provider, ?string $ref, ?string $error, ?string $reasonCode, ?int $adminId): void
     {
         if (!db_table_exists('message_send_logs')) {
             return;
         }
+        $hasReason = in_array('reason_code', array_column(db_rows('SHOW COLUMNS FROM message_send_logs'), 'Field'), true);
         try {
-            db_insert(
-                'INSERT INTO message_send_logs
-                    (message_id, channel, rider_id, recipient_name, recipient_phone, title, content,
-                     status, provider, provider_ref, error, attempted_by, attempted_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-                [
-                    (int) ($msg['id'] ?? 0) ?: null,
-                    (string) ($msg['channel'] ?? 'sms'),
-                    (int) ($msg['rider_id'] ?? 0) ?: null,
-                    ($msg['recipient_name'] ?? null) !== null ? mb_substr((string) $msg['recipient_name'], 0, 80) : null,
-                    (string) ($msg['recipient_phone'] ?? ''),
-                    ($msg['title'] ?? null) !== null ? mb_substr((string) $msg['title'], 0, 120) : null,
-                    mb_substr((string) ($msg['content'] ?? ''), 0, 2000),
-                    $status === 'sent' ? 'sent' : 'failed',
-                    $provider,
-                    $ref,
-                    $error !== null ? mb_substr($error, 0, 250) : null,
-                    ($adminId !== null && $adminId > 0) ? $adminId : null,
-                ]
-            );
+            $cols = 'message_id, channel, rider_id, recipient_name, recipient_phone, title, content, status, provider, provider_ref, error, attempted_by, attempted_at'
+                  . ($hasReason ? ', reason_code' : '');
+            $ph   = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()' . ($hasReason ? ', ?' : '');
+            $params = [
+                (int) ($msg['id'] ?? 0) ?: null,
+                (string) ($msg['channel'] ?? 'sms'),
+                (int) ($msg['rider_id'] ?? 0) ?: null,
+                ($msg['recipient_name'] ?? null) !== null ? mb_substr((string) $msg['recipient_name'], 0, 80) : null,
+                (string) ($msg['recipient_phone'] ?? ''),
+                ($msg['title'] ?? null) !== null ? mb_substr((string) $msg['title'], 0, 120) : null,
+                mb_substr((string) ($msg['content'] ?? ''), 0, 2000),
+                $status === 'sent' ? 'sent' : 'failed',
+                $provider,
+                $ref,
+                $error !== null ? mb_substr($error, 0, 250) : null,
+                ($adminId !== null && $adminId > 0) ? $adminId : null,
+            ];
+            if ($hasReason) {
+                $params[] = $reasonCode !== null ? mb_substr($reasonCode, 0, 40) : null;
+            }
+            db_insert("INSERT INTO message_send_logs ({$cols}) VALUES ({$ph})", $params);
         } catch (Throwable) {
             // 로그 적재 실패는 무시(발송 자체는 이미 처리됨).
         }
@@ -308,15 +405,22 @@ final class MessageQueue
     }
 
     /**
-     * 실제 발송 — **모의(mock)**. 실 SMS/알림톡 발송사 연동 전까지 항상 성공 처리하고 가짜 ref 반환.
-     * 실 연동 시 여기만 발송사 API 호출로 교체한다(실패 시 예외를 던지면 상위가 failed 로 기록).
+     * 실제 발송. 기본은 **모의(mock)** — 실 SMS/알림톡 발송사 연동 전까지 항상 성공 처리하고 가짜 ref 반환.
+     *
+     * 실 연동/테스트는 `MessageQueue::$deliverHook` 로 주입한다(여기만 교체하는 seam). 알림톡이
+     * 카카오 수신불가면 `MessageDeliveryException($reasonCode, true)` 를 던지면 상위(`send`)가 SMS 로
+     * 대체발송한다. 그 외 실패는 `fallbackEligible=false` 로 던진다.
      *
      * @param array<string,mixed> $msg
      * @return array{provider:string, ref:string}
      */
     private static function deliver(array $msg): array
     {
-        // TODO(실연동): SMS/알림톡 발송사 API 호출. 지금은 모의.
+        if (self::$deliverHook !== null) {
+            return (self::$deliverHook)($msg); // 실패 시 MessageDeliveryException 을 던짐
+        }
+
+        // 모의(mock): 항상 성공.
         return [
             'provider' => 'mock',
             'ref'      => 'MOCK-' . date('YmdHis') . '-' . str_pad((string) ($msg['id'] ?? 0), 5, '0', STR_PAD_LEFT),

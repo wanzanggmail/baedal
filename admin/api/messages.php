@@ -52,6 +52,7 @@ $payload = static function (): array {
                 'status_label'    => MessageQueue::statusLabel((string) $r['status']),
                 'provider_ref'    => (string) ($r['provider_ref'] ?? ''),
                 'error'           => (string) ($r['error'] ?? ''),
+                'fallback_from'   => isset($r['fallback_from']) ? (int) $r['fallback_from'] : 0,
                 'scheduled_at'    => (string) ($r['scheduled_at'] ?? ''),
                 'sent_at'         => (string) ($r['sent_at'] ?? ''),
                 'created_at'      => (string) $r['created_at'],
@@ -84,6 +85,8 @@ if ($method === 'GET' && !empty($_GET['logs'])) {
             'provider'        => (string) ($r['provider'] ?? ''),
             'provider_ref'    => (string) ($r['provider_ref'] ?? ''),
             'error'           => (string) ($r['error'] ?? ''),
+            'reason_code'     => (string) ($r['reason_code'] ?? ''),
+            'reason_label'    => (string) (MessageQueue::FALLBACK_REASONS[(string) ($r['reason_code'] ?? '')] ?? ''),
             'sender_name'     => (string) ($r['sender_name'] ?? ''),
             'attempted_at'    => (string) ($r['attempted_at'] ?? ''),
         ];

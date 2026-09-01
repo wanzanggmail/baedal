@@ -10,15 +10,16 @@ declare(strict_types=1);
  */
 final class MessagingConfig
 {
-    /** @return array{sender_phone:string, alimtalk_channel:string, statement_template:string, public_base_url:string, link_ttl_days:int} */
+    /** @return array{sender_phone:string, alimtalk_channel:string, statement_template:string, public_base_url:string, link_ttl_days:int, alimtalk_fallback_sms:int} */
     public static function defaults(): array
     {
         return [
-            'sender_phone'       => '',
-            'alimtalk_channel'   => '',
-            'statement_template' => '',
-            'public_base_url'    => '',
-            'link_ttl_days'      => 90,
+            'sender_phone'          => '',
+            'alimtalk_channel'      => '',
+            'statement_template'    => '',
+            'public_base_url'       => '',
+            'link_ttl_days'         => 90,
+            'alimtalk_fallback_sms' => 1,
         ];
     }
 
@@ -41,11 +42,12 @@ final class MessagingConfig
         }
 
         return self::$cache = [
-            'sender_phone'       => trim((string) ($row['sender_phone'] ?? '')),
-            'alimtalk_channel'   => trim((string) ($row['alimtalk_channel'] ?? '')),
-            'statement_template' => trim((string) ($row['statement_template'] ?? '')),
-            'public_base_url'    => rtrim(trim((string) ($row['public_base_url'] ?? '')), '/'),
-            'link_ttl_days'      => max(1, (int) ($row['link_ttl_days'] ?? $d['link_ttl_days'])),
+            'sender_phone'          => trim((string) ($row['sender_phone'] ?? '')),
+            'alimtalk_channel'      => trim((string) ($row['alimtalk_channel'] ?? '')),
+            'statement_template'    => trim((string) ($row['statement_template'] ?? '')),
+            'public_base_url'       => rtrim(trim((string) ($row['public_base_url'] ?? '')), '/'),
+            'link_ttl_days'         => max(1, (int) ($row['link_ttl_days'] ?? $d['link_ttl_days'])),
+            'alimtalk_fallback_sms' => array_key_exists('alimtalk_fallback_sms', $row) ? (int) !empty($row['alimtalk_fallback_sms']) : 1,
         ];
     }
 
@@ -68,22 +70,32 @@ final class MessagingConfig
         if ($baseRaw !== '' && $base === '') {
             throw new InvalidArgumentException('링크 도메인은 http(s)://로 시작하는 주소여야 합니다.');
         }
-        $ttl = max(1, min(3650, (int) ($data['link_ttl_days'] ?? 90)));
+        $ttl      = max(1, min(3650, (int) ($data['link_ttl_days'] ?? 90)));
+        $fallback = !empty($data['alimtalk_fallback_sms']) ? 1 : 0;
+
+        $hasFallbackCol = in_array('alimtalk_fallback_sms', array_column(db_rows('SHOW COLUMNS FROM messaging_config'), 'Field'), true);
+        $fbCol = $hasFallbackCol ? ', alimtalk_fallback_sms=?' : '';
+        $fbIns = $hasFallbackCol ? ', alimtalk_fallback_sms' : '';
 
         $existing = db_row('SELECT id FROM messaging_config ORDER BY id ASC LIMIT 1');
         if ($existing !== null) {
+            $params = [$phone ?: null, $channel ?: null, $tpl ?: null, $base ?: null, $ttl];
+            if ($hasFallbackCol) { $params[] = $fallback; }
+            $params[] = ($adminId !== null && $adminId > 0) ? $adminId : null;
+            $params[] = (int) $existing['id'];
             db_execute(
-                'UPDATE messaging_config SET sender_phone=?, alimtalk_channel=?, statement_template=?,
-                        public_base_url=?, link_ttl_days=?, updated_by=?, updated_at=NOW() WHERE id=?',
-                [$phone ?: null, $channel ?: null, $tpl ?: null, $base ?: null, $ttl,
-                 ($adminId !== null && $adminId > 0) ? $adminId : null, (int) $existing['id']]
+                "UPDATE messaging_config SET sender_phone=?, alimtalk_channel=?, statement_template=?,
+                        public_base_url=?, link_ttl_days=?{$fbCol}, updated_by=?, updated_at=NOW() WHERE id=?",
+                $params
             );
         } else {
+            $params = [$phone ?: null, $channel ?: null, $tpl ?: null, $base ?: null, $ttl];
+            if ($hasFallbackCol) { $params[] = $fallback; }
+            $params[] = ($adminId !== null && $adminId > 0) ? $adminId : null;
             db_insert(
-                'INSERT INTO messaging_config (sender_phone, alimtalk_channel, statement_template, public_base_url, link_ttl_days, updated_by, updated_at, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
-                [$phone ?: null, $channel ?: null, $tpl ?: null, $base ?: null, $ttl,
-                 ($adminId !== null && $adminId > 0) ? $adminId : null]
+                "INSERT INTO messaging_config (sender_phone, alimtalk_channel, statement_template, public_base_url, link_ttl_days{$fbIns}, updated_by, updated_at, created_at)
+                 VALUES (?, ?, ?, ?, ?" . ($hasFallbackCol ? ', ?' : '') . ", ?, NOW(), NOW())",
+                $params
             );
         }
         self::$cache = null;
@@ -103,6 +115,12 @@ final class MessagingConfig
     public static function linkTtlDays(): int
     {
         return self::get()['link_ttl_days'];
+    }
+
+    /** 알림톡 수신불가 시 SMS 대체발송 여부. */
+    public static function alimtalkFallbackSms(): bool
+    {
+        return (int) self::get()['alimtalk_fallback_sms'] === 1;
     }
 
     private static function normalizePhone(string $s): string

@@ -83,6 +83,7 @@ final class MigrateRunner
         self::migrateStatementLinks();
         self::migrateStatementNotified();
         self::migrateMessagingConfig();
+        self::migrateAlimtalkFallback();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1753,6 +1754,44 @@ final class MigrateRunner
         );
         db_execute('INSERT INTO messaging_config (link_ttl_days, created_at) VALUES (90, NOW())');
         echo "OK    messaging_config 생성(기본 링크 유효 90일)\n";
+    }
+
+    /**
+     * 알림톡 실패 시 SMS 대체발송(2026-09-02 갑) — 카카오 수신불가(미설치·차단·미사용자 등)로 실패한
+     * 알림톡을 같은 내용으로 SMS 재발송한다. `message_queue.fallback_from`(원본 알림톡 id)으로
+     * 추적하고, `messaging_config.alimtalk_fallback_sms`(기본 켬)로 on/off.
+     */
+    private static function migrateAlimtalkFallback(): void
+    {
+        echo "== 알림톡 SMS 대체발송 ==\n";
+        if (db_table_exists('message_queue')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM message_queue'), 'Field');
+            if (!in_array('fallback_from', $cols, true)) {
+                db_execute("ALTER TABLE message_queue ADD COLUMN fallback_from INT NULL DEFAULT NULL COMMENT '알림톡 실패 대체발송이면 원본 알림톡 message_queue.id'");
+                db_execute('ALTER TABLE message_queue ADD INDEX idx_fallback (fallback_from)');
+                echo "OK    message_queue.fallback_from 추가\n";
+            } else {
+                echo "SKIP  message_queue.fallback_from (이미 있음)\n";
+            }
+        }
+        if (db_table_exists('message_send_logs')) {
+            $lcols = array_column(db_rows('SHOW COLUMNS FROM message_send_logs'), 'Field');
+            if (!in_array('reason_code', $lcols, true)) {
+                db_execute("ALTER TABLE message_send_logs ADD COLUMN reason_code VARCHAR(40) NULL DEFAULT NULL COMMENT '실패 분류 코드(대체발송 판정용)'");
+                echo "OK    message_send_logs.reason_code 추가\n";
+            } else {
+                echo "SKIP  message_send_logs.reason_code (이미 있음)\n";
+            }
+        }
+        if (db_table_exists('messaging_config')) {
+            $ccols = array_column(db_rows('SHOW COLUMNS FROM messaging_config'), 'Field');
+            if (!in_array('alimtalk_fallback_sms', $ccols, true)) {
+                db_execute("ALTER TABLE messaging_config ADD COLUMN alimtalk_fallback_sms TINYINT(1) NOT NULL DEFAULT 1 COMMENT '알림톡 수신불가 시 SMS 대체발송'");
+                echo "OK    messaging_config.alimtalk_fallback_sms 추가(기본 1)\n";
+            } else {
+                echo "SKIP  messaging_config.alimtalk_fallback_sms (이미 있음)\n";
+            }
+        }
     }
 
     private static function migrateTransferFee(): void
