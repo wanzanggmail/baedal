@@ -37,6 +37,11 @@ if (!$rider) {
     return;
 }
 
+// 보증금 — 대리점 기본값(예외 보증금 미설정 시 적용). 라이더 예외 보증금 입력칸의 플레이스홀더용.
+require_once INC_PATH . '/WithdrawalConfig.php';
+$agencyReserveDefault = (int) WithdrawalConfig::get((int) ($rider['agency_id'] ?? 0) ?: null)['reserve_amount'];
+$riderReserveOverride = isset($rider['reserve_override']) && $rider['reserve_override'] !== null ? (int) $rider['reserve_override'] : null;
+
 // 멀티테넌시: 소속 대리점 스코프 밖이면 차단
 if (!Org::canAccessAgency((int) ($rider['agency_id'] ?? 0))) {
     require_once INC_PATH . '/app_content_open.php';
@@ -190,9 +195,20 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 						<input class="form-check-input" type="checkbox" id="withholding_toggle" <?= !empty($rider['withholding_tax_enabled']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="withholding_toggle">원천세 공제 대상 </label>
 					</div>
-					<div class="form-check form-switch d-flex align-items-center justify-content-left gap-2">
+					<div class="form-check form-switch d-flex align-items-center justify-content-left gap-2 mb-4">
 						<input class="form-check-input" type="checkbox" id="hold_toggle" <?= !empty($rider['withdrawal_hold']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="hold_toggle">출금 보류</label>
+					</div>
+					<?php // 예외 보증금 — 비우면 대리점 기본, 값을 넣으면 그 금액이 우선(2026-09-01 갑). ?>
+					<div class="mb-1">
+						<label class="form-label fw-semibold fs-8 mb-1" for="reserve_override">예외 보증금 (원)</label>
+						<div class="input-group input-group-sm">
+							<input type="number" class="form-control form-control-solid" id="reserve_override" min="0" step="1000"
+								value="<?= $riderReserveOverride !== null ? $riderReserveOverride : '' ?>"
+								placeholder="대리점 기본 <?= number_format($agencyReserveDefault) ?>원" />
+							<button type="button" class="btn btn-light-primary" id="reserve_save">저장</button>
+						</div>
+						<div class="form-text fs-9">비우고 저장하면 <strong>대리점 기본(<?= number_format($agencyReserveDefault) ?>원)</strong>을 따릅니다. 값을 넣으면 이 라이더는 그 금액이 우선 적용됩니다.</div>
 					</div>
 					<?php if ((string) ($rider['status'] ?? '') !== 'active') : ?>
 					<div class="separator separator-dashed my-4"></div>
@@ -902,6 +918,13 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	document.getElementById('hold_toggle').addEventListener('change', function () {
 		var hold = this.checked;
 		apiPatch({ action: 'withdrawal_hold', hold: hold }, hold ? '출금 보류로 설정했습니다.' : '출금 보류를 해제했습니다.');
+	});
+	document.getElementById('reserve_save').addEventListener('click', function () {
+		var el = document.getElementById('reserve_override');
+		var raw = el.value.trim();
+		// 비우면 null(대리점 기본), 값이 있으면 그 금액.
+		var payload = { action: 'reserve_override', reserve: raw === '' ? null : (parseInt(raw, 10) || 0) };
+		apiPatch(payload, raw === '' ? '예외 보증금을 해제했습니다(대리점 기본 적용).' : '예외 보증금을 저장했습니다.');
 	});
 
 	// 플랫폼 ID 추가/삭제 (한 라이더가 팀지역별로 여러 개 보유 가능)

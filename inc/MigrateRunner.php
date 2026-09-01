@@ -77,6 +77,7 @@ final class MigrateRunner
         self::migrateTransferFee();
         self::migrateAgencyFeePayer();
         self::migrateTaxAgent();
+        self::migrateRiderReserveOverride();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1392,6 +1393,28 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * 라이더 예외 보증금 — 라이더별로 대리점 기본 보증금 대신 쓸 개별 금액(2026-09-01 갑).
+     * NULL = 대리점 기준(withdrawal_config.reserve_amount) 사용. 값이 있으면 그 금액 우선.
+     */
+    private static function migrateRiderReserveOverride(): void
+    {
+        echo "== riders 예외 보증금 ==\n";
+        if (!db_table_exists('riders')) {
+            echo "SKIP  riders 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+        if (in_array('reserve_override', $cols, true)) {
+            echo "SKIP  reserve_override (이미 있음)\n";
+
+            return;
+        }
+        db_execute("ALTER TABLE riders ADD COLUMN reserve_override INT NULL DEFAULT NULL COMMENT '예외 보증금(원) — NULL이면 대리점 기본, 값 있으면 우선'");
+        echo "OK    riders.reserve_override 추가\n";
     }
 
     /**

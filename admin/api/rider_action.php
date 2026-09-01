@@ -140,6 +140,16 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
+    if ($action === 'reserve_override') {
+        // 예외 보증금 — null(키가 없거나 null)이면 대리점 기본을 따르도록 해제, 값이 있으면 그 금액 우선.
+        $raw = $body['reserve'] ?? null;
+        $val = ($raw === null || $raw === '') ? null : max(0, (int) $raw);
+        db_execute('UPDATE riders SET reserve_override = ? WHERE id = ?', [$val, $id]);
+        AuditLog::record('rider.reserve_override', (string) ($rider['rider_code'] ?? $id), $val === null ? '예외 보증금 해제(대리점 기본)' : ('예외 보증금 ' . number_format($val) . '원'));
+        echo json_encode(['ok' => true, 'message' => $val === null ? '예외 보증금을 해제했습니다.' : '예외 보증금을 저장했습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($action === 'daily_settlement') {
         $daily = !empty($body['daily']) ? 1 : 0;
         db_execute('UPDATE riders SET is_daily_settlement = ? WHERE id = ?', [$daily, $id]);

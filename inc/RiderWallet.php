@@ -56,6 +56,30 @@ final class RiderWallet
         )['agency_id'] ?? 0);
     }
 
+    /**
+     * 이 라이더에게 적용할 보증금. 예외 보증금(riders.reserve_override)이 설정돼 있으면 그 금액,
+     * 없으면(NULL) 대리점 기본값($fallback = withdrawal_config.reserve_amount)을 쓴다(2026-09-01 갑).
+     */
+    public static function reserveFor(int $riderId, int $fallback): int
+    {
+        if ($riderId < 1 || !db_table_exists('riders')) {
+            return max(0, $fallback);
+        }
+        static $hasCol = null;
+        if ($hasCol === null) {
+            $hasCol = in_array('reserve_override', array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field'), true);
+        }
+        if (!$hasCol) {
+            return max(0, $fallback);
+        }
+        $row = db_row('SELECT reserve_override FROM riders WHERE id = ? LIMIT 1', [$riderId]);
+        if ($row !== null && $row['reserve_override'] !== null) {
+            return max(0, (int) $row['reserve_override']);
+        }
+
+        return max(0, $fallback);
+    }
+
     public static function ensure(int $riderId): void
     {
         if ($riderId < 1 || !db_table_exists('rider_wallets')) {
@@ -89,7 +113,8 @@ final class RiderWallet
         $cfg      = WithdrawalConfig::get($orgId);
         $balance  = (int) $wallet['balance'];
         $accrued  = (int) $wallet['accrued_days'];
-        $reserve  = (int) $cfg['reserve_amount'];
+        // 보증금 — 라이더 예외 보증금(reserve_override)이 있으면 그 금액 우선, 없으면 대리점 기준.
+        $reserve  = self::reserveFor($riderId, (int) $cfg['reserve_amount']);
 
         // 보증금을 남기고 이번에 소진할 금액(= 실지급액 + 정산수수료)
         $afterReserve = max(0, $balance - $reserve);

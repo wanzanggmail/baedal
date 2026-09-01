@@ -34,13 +34,31 @@ if (!$isTax && !admin_has_role('super')) {
 $adminId = (int) ($_SESSION['admin_id'] ?? 0);
 $method  = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+// 조회/수집 대상 월 — 지정 없으면 미수집이 남은 최신월(없으면 이번 달).
+$resolvePeriod = static function (?string $p): string {
+    if (is_string($p) && preg_match('/^\d{4}-\d{2}$/', $p)) {
+        return $p;
+    }
+    foreach (TaxAgent::months() as $m) {
+        if ((int) $m['uncollected'] > 0) {
+            return (string) $m['period'];
+        }
+    }
+    $all = TaxAgent::months();
+
+    return $all !== [] ? (string) $all[0]['period'] : date('Y-m');
+};
+
 if ($method === 'GET') {
+    $period = $resolvePeriod($_GET['period'] ?? null);
     echo json_encode([
-        'ok'            => true,
-        'agencies'      => TaxAgent::agencySummary(),
-        'collectible'   => TaxAgent::collectibleTotal(),
+        'ok'             => true,
+        'period'         => $period,
+        'months'         => TaxAgent::months(),
+        'agencies'       => TaxAgent::agencySummary($period),
+        'collectible'    => TaxAgent::collectibleForPeriod($period),
         'wallet_balance' => TaxAgent::walletBalance(),
-        'history'       => TaxAgent::history(50),
+        'history'        => TaxAgent::history(50),
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -55,27 +73,32 @@ $body = str_contains($ct, 'application/json') ? (array) json_decode($raw ?: '{}'
 if (trim((string) ($body['action'] ?? '')) !== 'collect') {
     $err('action=collect', 400);
 }
-$period   = trim((string) ($body['period'] ?? date('Y-m')));
+$period   = (string) ($body['period'] ?? '');
+if (!preg_match('/^\d{4}-\d{2}$/', $period)) {
+    $err('수집할 월(YYYY-MM)을 선택하세요.', 400);
+}
 $agencyId = isset($body['agency_id']) && (int) $body['agency_id'] > 0 ? (int) $body['agency_id'] : null;
 
 try {
     $res = TaxAgent::collect($agencyId, $period, $adminId > 0 ? $adminId : null);
     if ($res['count'] < 1) {
-        $err('수집할 예수금이 없습니다.', 422);
+        $err('해당 월에 수집할 예수금이 없습니다.', 422);
     }
     AuditLog::record(
         'tax.insurance_collect',
         $period,
-        sprintf('고용·산재 예수금 수집 %d개 대리점 · %s원(%s)', $res['count'], number_format($res['total']), $period)
+        sprintf('고용·산재 예수금 수집 %d개 대리점 · %s원(%s월분)', $res['count'], number_format($res['total']), $period)
     );
     echo json_encode([
-        'ok'      => true,
-        'message' => sprintf('%d개 대리점에서 %s원을 수집했습니다.', $res['count'], number_format($res['total'])),
-        'result'  => $res,
-        'agencies' => TaxAgent::agencySummary(),
-        'collectible' => TaxAgent::collectibleTotal(),
+        'ok'             => true,
+        'message'        => sprintf('%s월분 %d개 대리점에서 %s원을 수집했습니다.', $period, $res['count'], number_format($res['total'])),
+        'result'         => $res,
+        'period'         => $period,
+        'months'         => TaxAgent::months(),
+        'agencies'       => TaxAgent::agencySummary($period),
+        'collectible'    => TaxAgent::collectibleForPeriod($period),
         'wallet_balance' => TaxAgent::walletBalance(),
-        'history' => TaxAgent::history(50),
+        'history'        => TaxAgent::history(50),
     ], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);
