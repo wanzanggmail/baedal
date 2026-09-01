@@ -369,7 +369,7 @@ $route = $route ?? '';
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'system/orgs', 'system/admins', 'system/permissions', 'system/codes',
 										    'system/audit', 'withdrawal/settings', 'system/pg-fee', 'system/pg-integration', 'system/pg-logs',
-										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust',
+										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust', 'system/messages',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -437,6 +437,12 @@ $route = $route ?? '';
 													<a class="menu-link<?= nav_active('system/manual-adjust') ?>" href="<?= htmlspecialchars(admin_url('system/manual-adjust'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">정산/잔액 수동 조정</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/messages') ?>" href="<?= htmlspecialchars(admin_url('system/messages'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">문자·알림톡</span>
 													</a>
 												</div>
 												<div class="menu-item">

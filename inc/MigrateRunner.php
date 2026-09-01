@@ -78,6 +78,7 @@ final class MigrateRunner
         self::migrateAgencyFeePayer();
         self::migrateTaxAgent();
         self::migrateRiderReserveOverride();
+        self::migrateMessaging();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1393,6 +1394,53 @@ final class MigrateRunner
                  COMMENT '라이더 출금 신청 시 즉시 펌뱅킹 이체(0=관리자 확인 후)'"
         );
         echo "OK    auto_transfer_on_request 추가\n";
+    }
+
+    /**
+     * 문자·알림톡 발송 큐 + 라이더 문자 수신용 전화번호(2026-09-01 갑).
+     */
+    private static function migrateMessaging(): void
+    {
+        echo "== 문자·알림톡 큐 ==\n";
+
+        // 라이더 문자 수신용 번호 — 기본 휴대전화와 별개(문자 전용으로 받고 싶은 번호).
+        if (db_table_exists('riders')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+            if (!in_array('sms_phone', $cols, true)) {
+                db_execute("ALTER TABLE riders ADD COLUMN sms_phone VARCHAR(30) NULL DEFAULT NULL COMMENT '문자 수신용 전화번호(비면 phone 사용)'");
+                echo "OK    riders.sms_phone 추가\n";
+            } else {
+                echo "SKIP  riders.sms_phone (이미 있음)\n";
+            }
+        }
+
+        if (!db_table_exists('message_queue')) {
+            db_execute(
+                "CREATE TABLE message_queue (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    channel ENUM('sms','alimtalk') NOT NULL DEFAULT 'sms',
+                    rider_id INT NULL,
+                    recipient_name VARCHAR(80) NULL,
+                    recipient_phone VARCHAR(30) NOT NULL,
+                    title VARCHAR(120) NULL COMMENT 'SMS 제목/알림톡 템플릿명',
+                    content TEXT NOT NULL,
+                    status ENUM('queued','sending','sent','failed','canceled') NOT NULL DEFAULT 'queued',
+                    provider VARCHAR(40) NULL,
+                    provider_ref VARCHAR(120) NULL,
+                    error VARCHAR(255) NULL,
+                    scheduled_at DATETIME NULL,
+                    sent_at DATETIME NULL,
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_status (status),
+                    INDEX idx_rider (rider_id),
+                    INDEX idx_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            echo "OK    message_queue 생성\n";
+        } else {
+            echo "SKIP  message_queue (이미 있음)\n";
+        }
     }
 
     /**

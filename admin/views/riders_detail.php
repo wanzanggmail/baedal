@@ -524,6 +524,10 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_phone" value="<?= htmlspecialchars((string) ($rider['phone'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="010-1234-5678" maxlength="20" />
 							</div>
 							<div class="mb-4">
+								<label class="form-label fs-7 fw-semibold">문자 수신용 번호 <span class="text-muted fs-9">(선택 · 비우면 휴대전화로 발송)</span></label>
+								<input type="text" class="form-control form-control-sm form-control-solid" id="ed_sms_phone" value="<?= htmlspecialchars((string) ($rider['sms_phone'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="문자 전용 번호" maxlength="20" />
+							</div>
+							<div class="mb-4">
 								<label class="form-label fs-7 fw-semibold">이메일</label>
 								<input type="email" class="form-control form-control-sm form-control-solid" id="ed_email" value="<?= htmlspecialchars((string) ($rider['email'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" maxlength="120" />
 							</div>
@@ -1015,6 +1019,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 				action: 'update_profile',
 				name: val('ed_name'),
 				phone: val('ed_phone'),
+				sms_phone: val('ed_sms_phone'),
 				email: val('ed_email'),
 				birth_date: val('ed_birth'),
 				kyc_status: val('ed_kyc'),

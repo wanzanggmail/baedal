@@ -291,6 +291,8 @@ UNIQUE(`debt_id`,`applied_date`) — 🆕(2026-07-30) **재실행 멱등성**: �
 ### `agency_wallets` — 🆕(2026-07-22) 조직 지갑 잔액
 PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점·세무대리 모두 사용**). `balance`(PG 충전·수수료 수입 잔액) · `withholding_reserve`(원천세 예수금 누적) · 🆕(2026-09-01) `insurance_reserve`(고용·산재 예수금 누적 — 세무대리가 수집. 예전엔 고용·산재가 예수금 아니었으나 전환, 마이그레이션이 기존 fee_items 합으로 1회 백필).
 **대리점 인출가능액 = balance − 라이더 정산금(rider_wallets 합계) − withholding_reserve − insurance_reserve** (`AgencyWallet::withdrawable`). 본사·총판·세무대리는 라이더 정산금·예수금이 보통 0이라 잔액≈인출가능액.
+🆕 **`message_queue`**(2026-09-01) — 문자·알림톡 발송 큐. `channel`(sms/alimtalk)·`rider_id`(nullable)·`recipient_name/phone`·`title`·`content`·`status`(queued/sending/sent/failed/canceled)·`provider/provider_ref/error`·`scheduled_at/sent_at`. `MessageQueue`(enqueue·send·processQueued·cancel), 발송은 mock(`deliver()`가 seam). 화면 `system/messages`(본사 super). 라이더 `sms_phone`(문자 수신용, NULL=phone)와 연동.
+
 🆕 **`tax_insurance_collections`** — 세무대리 예수금 수집 이력(`tax_org_id`·`agency_id`·`period`(YYYY-MM)·`amount`·`collected_at`). `TaxAgent::collect()` 가 대리점 지갑에서 예수금을 빼(balance 차감 + insurance_reserve 0) 세무대리 지갑으로 옮기고(`ins_collect_out`/`ins_collect_in`) 이 표에 기록.
 
 ### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)

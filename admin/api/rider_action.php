@@ -264,6 +264,13 @@ if ($method === 'POST' || $method === 'PATCH') {
             $err('휴대전화 형식이 올바르지 않습니다.');
         }
 
+        // 문자 수신용 번호(선택) — 비면 NULL(기본 휴대전화로 발송).
+        $smsPhone = trim((string) ($body['sms_phone'] ?? ''));
+        if ($smsPhone !== '' && !preg_match('/^[0-9\-]{9,20}$/', $smsPhone)) {
+            $err('문자 수신용 번호 형식이 올바르지 않습니다.');
+        }
+        $smsPhone = $smsPhone !== '' ? $smsPhone : null;
+
         $email = trim((string) ($body['email'] ?? ''));
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $err('이메일 형식이 올바르지 않습니다.');
@@ -311,12 +318,12 @@ if ($method === 'POST' || $method === 'PATCH') {
 
         db_execute(
             'UPDATE riders
-                SET name = ?, phone = ?, email = ?, birth_date = ?,
+                SET name = ?, phone = ?, sms_phone = ?, email = ?, birth_date = ?,
                     vehicle_type = ?, address = ?,
                     bank_code = ?, bank_account = ?, account_holder = ?,
                     kyc_status = ?, updated_at = NOW()
               WHERE id = ?',
-            [$name, $phone, $email, $birthDate,
+            [$name, $phone, $smsPhone, $email, $birthDate,
              $vehicle, $address,
              $bankCode, Crypto::encrypt($bankAccount), $holder,
              $kyc, $id]
