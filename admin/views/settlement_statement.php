@@ -93,8 +93,58 @@ if ($riderId > 0) {
 	<div class="d-flex justify-content-end gap-2 mb-4 st-noprint">
 		<a href="<?= $esc($qs(['orders' => $withOrders ? 0 : 1, 'rider' => $riderId])) ?>" class="btn btn-sm btn-light-primary"><?= $withOrders ? '오더별 상세 숨기기' : '오더별 상세 포함' ?></a>
 		<a href="<?= $esc($qs([])) ?>" class="btn btn-sm btn-light">목록으로</a>
+		<button type="button" class="btn btn-sm btn-light-info" id="st_copy_link"
+			data-rider="<?= (int) $riderId ?>" data-from="<?= $esc($from) ?>" data-to="<?= $esc($to) ?>"
+			data-api="<?= $esc(ADMIN_BASE . '/api/statement_link.php') ?>">
+			<i class="ki-duotone ki-link fs-5"><span class="path1"></span><span class="path2"></span></i> 모바일 링크 복사</button>
 		<button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="ki-duotone ki-printer fs-5"><span class="path1"></span><span class="path2"></span></i> 인쇄</button>
 	</div>
+	<div id="st_link_box" class="alert alert-info d-none align-items-center gap-3 mb-4 st-noprint">
+		<span class="fw-semibold text-nowrap">모바일 링크</span>
+		<input type="text" class="form-control form-control-sm form-control-solid flex-grow-1" id="st_link_url" readonly onclick="this.select()" />
+		<button type="button" class="btn btn-sm btn-light-primary text-nowrap" id="st_link_copy2">복사</button>
+	</div>
+	<script>
+	(function () {
+		var btn = document.getElementById('st_copy_link');
+		if (!btn) return;
+		var box = document.getElementById('st_link_box'), urlInput = document.getElementById('st_link_url');
+		function copy(text) {
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return false; });
+			}
+			try { urlInput.select(); document.execCommand('copy'); return Promise.resolve(true); }
+			catch (e) { return Promise.resolve(false); }
+		}
+		var cachedUrl = '';
+		btn.addEventListener('click', function () {
+			btn.disabled = true;
+			var done = function () { btn.disabled = false; };
+			var finish = function (url) {
+				cachedUrl = url; urlInput.value = url; box.classList.remove('d-none'); box.classList.add('d-flex');
+				copy(url).then(function (ok) {
+					btn.innerHTML = ok ? '✔ 복사됨' : '링크 생성됨';
+					setTimeout(function () { btn.innerHTML = '<i class="ki-duotone ki-link fs-5"><span class="path1"></span><span class="path2"></span></i> 모바일 링크 복사'; }, 2000);
+					done();
+				});
+			};
+			if (cachedUrl) { finish(cachedUrl); return; }
+			fetch(btn.getAttribute('data-api'), {
+				method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+				body: JSON.stringify({ rider_id: Number(btn.getAttribute('data-rider')), from: btn.getAttribute('data-from'), to: btn.getAttribute('data-to') })
+			}).then(function (r) { return r.json(); })
+			.then(function (res) { if (!res.ok) throw new Error(res.message || '실패'); finish(res.url); })
+			.catch(function (e) { alert(e.message || '링크 생성 실패'); done(); });
+		});
+		document.getElementById('st_link_copy2').addEventListener('click', function () {
+			var b = this;
+			copy(cachedUrl || urlInput.value).then(function (ok) {
+				b.textContent = ok ? '✔ 복사됨' : '복사 실패';
+				setTimeout(function () { b.textContent = '복사'; }, 2000);
+			});
+		});
+	})();
+	</script>
 
 	<div class="card card-flush st-statement"><div class="card-body">
 		<!--헤더-->
