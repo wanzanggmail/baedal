@@ -81,6 +81,8 @@ final class MigrateRunner
         self::migrateMessaging();
         self::migrateStatementFlags();
         self::migrateStatementLinks();
+        self::migrateStatementNotified();
+        self::migrateMessagingConfig();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1700,6 +1702,57 @@ final class MigrateRunner
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
         echo "OK    statement_links 생성\n";
+    }
+
+    /**
+     * 일정산 명세서 알림톡 **중복 발송 방지**(2026-09-02) — 정산 사이클에 "명세서 알림톡을 보냈다"
+     * 표시. 재반영(같은 업로드 재적용) 시 이미 보낸 라이더에게 다시 큐에 쌓지 않도록 한다.
+     */
+    private static function migrateStatementNotified(): void
+    {
+        echo "== settlement_rider_cycles 명세서 알림톡 표시 ==\n";
+        if (!db_table_exists('settlement_rider_cycles')) {
+            echo "SKIP  settlement_rider_cycles (테이블 없음)\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field');
+        if (in_array('statement_notified_at', $cols, true)) {
+            echo "SKIP  statement_notified_at (이미 있음)\n";
+
+            return;
+        }
+        db_execute("ALTER TABLE settlement_rider_cycles ADD COLUMN statement_notified_at DATETIME NULL DEFAULT NULL COMMENT '명세서 알림톡 큐 적재 시각(중복 방지)'");
+        echo "OK    settlement_rider_cycles.statement_notified_at 추가\n";
+    }
+
+    /**
+     * 알림톡·문자 발송 설정(2026-09-02 갑) — 발신번호·알림톡 채널·명세서 템플릿·링크 도메인·링크 유효기간.
+     * 전역 단일 행(본사 설정). 발송사 자격증명(id/pw)은 여기 두지 않고 연동 시 암호화 저장한다.
+     */
+    private static function migrateMessagingConfig(): void
+    {
+        echo "== 알림톡·문자 설정 ==\n";
+        if (db_table_exists('messaging_config')) {
+            echo "SKIP  messaging_config (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE messaging_config (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                sender_phone VARCHAR(30) NULL COMMENT '문자·알림톡 발신번호',
+                alimtalk_channel VARCHAR(60) NULL COMMENT '알림톡 발신 프로필/채널 ID(플러스친구)',
+                statement_template VARCHAR(60) NULL COMMENT '명세서 알림톡 템플릿 코드',
+                public_base_url VARCHAR(200) NULL COMMENT '명세서 링크 기본 도메인(예: https://dev.dogebi.kr)',
+                link_ttl_days INT NOT NULL DEFAULT 90 COMMENT '명세서 링크 유효기간(일)',
+                updated_by INT NULL,
+                updated_at DATETIME NULL,
+                created_at DATETIME NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+        db_execute('INSERT INTO messaging_config (link_ttl_days, created_at) VALUES (90, NOW())');
+        echo "OK    messaging_config 생성(기본 링크 유효 90일)\n";
     }
 
     private static function migrateTransferFee(): void

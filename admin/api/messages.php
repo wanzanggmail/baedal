@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/MessageQueue.php';
+require_once INC_PATH . '/MessagingConfig.php';
 require_once INC_PATH . '/AuditLog.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -134,6 +135,12 @@ try {
     if ($action === 'cancel') {
         MessageQueue::cancel((int) ($body['id'] ?? 0));
         echo json_encode(['ok' => true, 'message' => '취소했습니다.'] + $payload(), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($action === 'save_config') {
+        MessagingConfig::save($body, $adminId > 0 ? $adminId : null);
+        AuditLog::record('message.config', '', '알림톡·문자 설정 저장');
+        echo json_encode(['ok' => true, 'message' => '설정을 저장했습니다.', 'config' => MessagingConfig::get()], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $err('알 수 없는 action 입니다.', 400);

@@ -38,6 +38,21 @@ final class RiderStatement
      */
     public static function build(int $riderId, string $from, string $to): array
     {
+        return [
+            'summary'       => self::summary($riderId, $from, $to),
+            'daily'         => self::daily($riderId, $from, $to),
+            'support_rows'  => self::supportRows($riderId, $from, $to),
+            'participation' => self::participation($riderId, $from, $to),
+        ];
+    }
+
+    /**
+     * 주간 정산 요약 블록만 계산(알림톡 요약처럼 요약만 필요할 때 참여인정구간·일자별 쿼리 낭비 방지).
+     *
+     * @return array<string,int>
+     */
+    public static function summary(int $riderId, string $from, string $to): array
+    {
         $fees = self::feesByCode($riderId, $from, $to);
         $get  = static fn (string $c): int => (int) ($fees[$c] ?? 0);
 
@@ -55,7 +70,7 @@ final class RiderStatement
         // net_amount 이 gross−fee 와 안 맞는 구 데이터가 있어 도출값으로 항상 균형을 맞춘다.
         $settleAmount = (int) $cyc['n'] + (int) $cyc['f'] - (int) $cyc['s'];
 
-        $summary = [
+        return [
             'orders'        => (int) $cyc['o'],
             'settle_amount' => $settleAmount,
             'promo'         => $get('promo1'),
@@ -71,13 +86,6 @@ final class RiderStatement
             'fixed'         => $fixed,
             'net'           => (int) $cyc['n'],
         ];
-
-        return [
-            'summary'       => $summary,
-            'daily'         => self::daily($riderId, $from, $to),
-            'support_rows'  => self::supportRows($riderId, $from, $to),
-            'participation' => self::participation($riderId, $from, $to),
-        ];
     }
 
     /**
@@ -86,7 +94,7 @@ final class RiderStatement
      */
     public static function compactText(int $riderId, string $from, string $to, string $riderName = ''): string
     {
-        $s   = self::build($riderId, $from, $to)['summary'];
+        $s   = self::summary($riderId, $from, $to);
         $won = static fn (int $v): string => number_format($v) . '원';
 
         $period = $from === $to ? $from : ($from . ' ~ ' . $to);
@@ -144,13 +152,21 @@ final class RiderStatement
         }
         $out['enabled'] = true;
 
-        // 이번 업로드로 새로 생성된 사이클의 라이더(일일정산 대상)만. 라이더별 정산일 범위로 묶는다.
+        // 이번 업로드의 일일정산 라이더 중 **아직 명세서 알림톡을 안 보낸** 사이클만.
+        // statement_notified_at 으로 재반영(같은 업로드 재적용) 시 중복 발송을 막는다.
+        $notifyCol = in_array(
+            'statement_notified_at',
+            array_column(db_rows('SHOW COLUMNS FROM settlement_rider_cycles'), 'Field'),
+            true
+        );
+        $notNotified = $notifyCol ? ' AND c.statement_notified_at IS NULL' : '';
+
         $rows = db_rows(
             "SELECT c.rider_id, r.name AS rider_name,
                     MIN(c.settlement_date) AS from_d, MAX(c.settlement_date) AS to_d
                FROM settlement_rider_cycles c
                INNER JOIN riders r ON r.id = c.rider_id
-              WHERE c.upload_id = ? AND r.is_daily_settlement = 1
+              WHERE c.upload_id = ? AND r.is_daily_settlement = 1{$notNotified}
               GROUP BY c.rider_id, r.name",
             [$uploadId]
         );
@@ -172,6 +188,15 @@ final class RiderStatement
                 }
                 MessageQueue::enqueueForRider($riderId, 'alimtalk', $text, '정산 명세서', $adminId);
                 $out['queued']++;
+
+                // 큐 적재 성공한 라이더의 사이클만 발송 표시(다음 재반영에서 제외).
+                if ($notifyCol) {
+                    db_execute(
+                        'UPDATE settlement_rider_cycles SET statement_notified_at = NOW()
+                          WHERE upload_id = ? AND rider_id = ? AND statement_notified_at IS NULL',
+                        [$uploadId, $riderId]
+                    );
+                }
             } catch (Throwable $e) {
                 $out['skipped']++;
                 $out['errors'][] = ((string) ($row['rider_name'] ?? $riderId)) . ': ' . $e->getMessage();

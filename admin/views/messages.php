@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/MessageQueue.php';
+require_once INC_PATH . '/MessagingConfig.php';
 
 if (!admin_has_role('super')) {
     require_once INC_PATH . '/app_content_open.php';
@@ -17,6 +18,7 @@ $esc  = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8
 $apiUrl = ADMIN_BASE . '/api/messages.php';
 $counts = $needsMigrate ? [] : MessageQueue::counts();
 $rows   = $needsMigrate ? [] : MessageQueue::listQueue([], 200);
+$mcfg   = MessagingConfig::get();
 $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success', 'failed' => 'danger', 'canceled' => 'secondary'];
 ?>
 <!--begin::Toolbar-->
@@ -42,6 +44,50 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 	<div id="msg_toast" class="alert alert-dismissible d-none mb-6" role="alert"><span id="msg_toast_msg"></span><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
 
 	<div class="alert bg-light-warning fs-8 p-3 mb-6">🧪 <strong>모의(mock) 발송</strong> — 실제 SMS/알림톡 발송사 계약 전까지 「발송」을 눌러도 실제로 나가지 않고 <strong>발송완료로 기록만</strong> 됩니다. 실 연동 시 발송 로직 한 곳만 교체하면 됩니다.</div>
+
+	<!--begin::알림톡·문자 설정-->
+	<div class="card card-flush mb-6">
+		<div class="card-header pt-5" data-bs-toggle="collapse" data-bs-target="#msg_cfg_body" role="button" style="cursor:pointer">
+			<h3 class="card-title fw-bold">알림톡·문자 설정</h3>
+			<div class="card-toolbar"><span class="text-muted fs-8">발신번호·알림톡 채널·명세서 링크</span></div>
+		</div>
+		<div id="msg_cfg_body" class="collapse">
+			<div class="card-body pt-2 fs-7">
+				<div class="row g-4">
+					<div class="col-md-4">
+						<label class="form-label">발신번호</label>
+						<input type="tel" class="form-control form-control-solid" id="cfg_sender_phone" value="<?= $esc($mcfg['sender_phone']) ?>" placeholder="028881234" />
+						<div class="form-text fs-9">문자·알림톡이 발신되는 번호(발송사에 사전 등록 필요).</div>
+					</div>
+					<div class="col-md-4">
+						<label class="form-label">알림톡 발신 프로필/채널</label>
+						<input type="text" class="form-control form-control-solid" id="cfg_alimtalk_channel" value="<?= $esc($mcfg['alimtalk_channel']) ?>" placeholder="@플러스친구ID 또는 발신프로필키" />
+						<div class="form-text fs-9">카카오 알림톡 발신 채널(플러스친구) 식별자.</div>
+					</div>
+					<div class="col-md-4">
+						<label class="form-label">명세서 알림톡 템플릿 코드</label>
+						<input type="text" class="form-control form-control-solid" id="cfg_statement_template" value="<?= $esc($mcfg['statement_template']) ?>" placeholder="예: STMT_001" />
+						<div class="form-text fs-9">정산 명세서 발송에 쓸 사전승인 템플릿 코드.</div>
+					</div>
+					<div class="col-md-8">
+						<label class="form-label">명세서 링크 도메인</label>
+						<input type="url" class="form-control form-control-solid" id="cfg_public_base_url" value="<?= $esc($mcfg['public_base_url']) ?>" placeholder="https://dev.dogebi.kr" />
+						<div class="form-text fs-9">알림톡 명세서 링크의 기본 주소. 비우면 접속 도메인을 자동 사용합니다.</div>
+					</div>
+					<div class="col-md-4">
+						<label class="form-label">명세서 링크 유효기간(일)</label>
+						<input type="number" min="1" max="3650" class="form-control form-control-solid" id="cfg_link_ttl_days" value="<?= (int) $mcfg['link_ttl_days'] ?>" />
+						<div class="form-text fs-9">생성된 링크가 만료되기까지의 일수.</div>
+					</div>
+				</div>
+				<div class="d-flex justify-content-end mt-4">
+					<button type="button" class="btn btn-sm btn-primary" id="cfg_save">설정 저장</button>
+				</div>
+				<div class="alert bg-light-info fs-9 p-3 mt-4 mb-0">ℹ️ 발송사 로그인 자격증명(ID/비밀번호)은 보안상 여기 저장하지 않습니다 — 실 연동 단계에서 암호화해 별도 저장합니다.</div>
+			</div>
+		</div>
+	</div>
+	<!--end::알림톡·문자 설정-->
 
 	<div class="row g-4 g-xl-6">
 		<!--begin::작성-->
@@ -240,6 +286,21 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 				})
 				.catch(function (e) { showToast(e.message || '로그 조회 실패', false); });
 		}
+		// ── 알림톡·문자 설정 저장 ──
+		var cfgSave = document.getElementById('cfg_save');
+		if (cfgSave) {
+			cfgSave.addEventListener('click', function () {
+				post({
+					action: 'save_config',
+					sender_phone: document.getElementById('cfg_sender_phone').value.trim(),
+					alimtalk_channel: document.getElementById('cfg_alimtalk_channel').value.trim(),
+					statement_template: document.getElementById('cfg_statement_template').value.trim(),
+					public_base_url: document.getElementById('cfg_public_base_url').value.trim(),
+					link_ttl_days: Number(document.getElementById('cfg_link_ttl_days').value || 90)
+				}, '설정을 저장했습니다.').catch(function () {});
+			});
+		}
+
 		document.getElementById('lf_apply').addEventListener('click', loadLogs);
 		document.getElementById('lf_q').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadLogs(); });
 		loadLogs(); // 진입 시 최근 로그 자동 로드

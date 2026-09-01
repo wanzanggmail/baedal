@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/MessagingConfig.php';
+
 /**
  * 모바일 명세서 공개 링크(2026-09-01 갑).
  *
@@ -11,7 +13,7 @@ declare(strict_types=1);
  */
 final class StatementLink
 {
-    /** 기본 유효기간(일). */
+    /** 기본 유효기간(일) — 설정(messaging_config)이 없을 때 폴백. */
     public const DEFAULT_TTL_DAYS = 90;
 
     public static function ready(): bool
@@ -21,11 +23,15 @@ final class StatementLink
 
     /**
      * 링크 생성(또는 유효한 기존 링크 재사용).
+     * $ttlDays 를 지정하지 않으면 설정(messaging_config.link_ttl_days)을 따른다.
      *
      * @return array{token:string, url:string}
      */
-    public static function create(int $riderId, string $from, string $to, ?int $adminId = null, int $ttlDays = self::DEFAULT_TTL_DAYS): array
+    public static function create(int $riderId, string $from, string $to, ?int $adminId = null, ?int $ttlDays = null): array
     {
+        if ($ttlDays === null) {
+            $ttlDays = class_exists('MessagingConfig') ? MessagingConfig::linkTtlDays() : self::DEFAULT_TTL_DAYS;
+        }
         if (!self::ready()) {
             throw new RuntimeException('statement_links 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
@@ -93,14 +99,17 @@ final class StatementLink
         }
     }
 
-    /** 토큰 → 절대 URL(알림톡용). 환경변수 PUBLIC_BASE_URL 이 있으면 우선. */
+    /**
+     * 토큰 → 절대 URL(알림톡용). 설정(messaging_config.public_base_url) → env PUBLIC_BASE_URL →
+     * 현재 요청 오리진(web_absolute_url) 순으로 도메인을 정한다.
+     */
     public static function url(string $token): string
     {
         $path = rtrim(RIDER_BASE, '/') . '/p/statement.php?t=' . rawurlencode($token);
 
-        $base = trim((string) (getenv('PUBLIC_BASE_URL') ?: ''));
+        $base = class_exists('MessagingConfig') ? MessagingConfig::publicBaseUrl() : rtrim(trim((string) (getenv('PUBLIC_BASE_URL') ?: '')), '/');
         if ($base !== '') {
-            return rtrim($base, '/') . $path;
+            return $base . $path;
         }
 
         return web_absolute_url($path);
