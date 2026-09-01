@@ -46,6 +46,7 @@ return [
     'system/firm-integration' => ['title' => '펌뱅킹 연동', 'view' => 'firm_integration'],
     'system/integration-mode' => ['title' => '연동 모드', 'view' => 'integration_mode'],
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
+    'system/statistics' => ['title' => '통계', 'view' => 'statistics'],
     // 세무대리 전용 — 고용·산재 예수금 확인·수집(2026-09-01)
     'tax/dashboard' => ['title' => '고용·산재 예수금', 'view' => 'tax_dashboard'],
 ];

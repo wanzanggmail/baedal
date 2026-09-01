@@ -61,6 +61,19 @@ $route = $route ?? '';
 										<?php endif; ?>
 										<!--end:세무대리-->
 
+										<!--begin:통계(본사 전용)-->
+										<?php if (admin_can_access_route('system/statistics')) : ?>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('system/statistics') ?>" href="<?= htmlspecialchars(admin_url('system/statistics'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-chart-line-star fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
+												</span>
+												<span class="menu-title">통계</span>
+											</a>
+										</div>
+										<?php endif; ?>
+										<!--end:통계-->
+
 										<!--begin:정산-->
 										<?php if (admin_can_access_route('settlement/upload')) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
