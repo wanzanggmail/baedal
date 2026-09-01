@@ -1442,6 +1442,37 @@ final class MigrateRunner
         } else {
             echo "SKIP  message_queue (이미 있음)\n";
         }
+
+        // 발송 로그 — **append-only**. 재발송해도 큐 행이 덮이므로 시도마다 1행씩 영구 기록한다
+        // (발송 성공/실패 이력·provider ref·에러를 남겨 조회한다). 큐가 정리돼도 로그는 남는다.
+        if (!db_table_exists('message_send_logs')) {
+            db_execute(
+                "CREATE TABLE message_send_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    message_id INT NULL COMMENT 'message_queue.id (있으면)',
+                    channel ENUM('sms','alimtalk') NOT NULL DEFAULT 'sms',
+                    rider_id INT NULL,
+                    recipient_name VARCHAR(80) NULL,
+                    recipient_phone VARCHAR(30) NOT NULL,
+                    title VARCHAR(120) NULL,
+                    content TEXT NULL,
+                    status ENUM('sent','failed') NOT NULL,
+                    provider VARCHAR(40) NULL,
+                    provider_ref VARCHAR(120) NULL,
+                    error VARCHAR(255) NULL,
+                    attempted_by INT NULL,
+                    attempted_at DATETIME NOT NULL,
+                    INDEX idx_attempted (attempted_at),
+                    INDEX idx_status (status),
+                    INDEX idx_channel (channel),
+                    INDEX idx_phone (recipient_phone),
+                    INDEX idx_message (message_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            echo "OK    message_send_logs 생성\n";
+        } else {
+            echo "SKIP  message_send_logs (이미 있음)\n";
+        }
     }
 
     /**

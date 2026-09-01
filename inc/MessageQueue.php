@@ -152,13 +152,120 @@ final class MessageQueue
                 "UPDATE message_queue SET status='sent', provider=?, provider_ref=?, error=NULL, sent_at=NOW() WHERE id = ?",
                 [$res['provider'], $res['ref'], $id]
             );
+            self::logAttempt($msg, 'sent', $res['provider'], $res['ref'], null, $adminId);
 
             return ['ok' => true, 'id' => $id, 'ref' => $res['ref']];
         } catch (Throwable $e) {
-            db_execute("UPDATE message_queue SET status='failed', error=? WHERE id = ?", [mb_substr($e->getMessage(), 0, 250), $id]);
+            $err = mb_substr($e->getMessage(), 0, 250);
+            db_execute("UPDATE message_queue SET status='failed', error=? WHERE id = ?", [$err, $id]);
+            self::logAttempt($msg, 'failed', null, null, $err, $adminId);
 
             return ['ok' => false, 'id' => $id, 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * 발송 시도 1건을 append-only 로그에 기록(성공·실패 모두). 로그 기록 실패가 발송 처리를 막지 않는다.
+     *
+     * @param array<string,mixed> $msg message_queue 행
+     */
+    private static function logAttempt(array $msg, string $status, ?string $provider, ?string $ref, ?string $error, ?int $adminId): void
+    {
+        if (!db_table_exists('message_send_logs')) {
+            return;
+        }
+        try {
+            db_insert(
+                'INSERT INTO message_send_logs
+                    (message_id, channel, rider_id, recipient_name, recipient_phone, title, content,
+                     status, provider, provider_ref, error, attempted_by, attempted_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+                [
+                    (int) ($msg['id'] ?? 0) ?: null,
+                    (string) ($msg['channel'] ?? 'sms'),
+                    (int) ($msg['rider_id'] ?? 0) ?: null,
+                    ($msg['recipient_name'] ?? null) !== null ? mb_substr((string) $msg['recipient_name'], 0, 80) : null,
+                    (string) ($msg['recipient_phone'] ?? ''),
+                    ($msg['title'] ?? null) !== null ? mb_substr((string) $msg['title'], 0, 120) : null,
+                    mb_substr((string) ($msg['content'] ?? ''), 0, 2000),
+                    $status === 'sent' ? 'sent' : 'failed',
+                    $provider,
+                    $ref,
+                    $error !== null ? mb_substr($error, 0, 250) : null,
+                    ($adminId !== null && $adminId > 0) ? $adminId : null,
+                ]
+            );
+        } catch (Throwable) {
+            // 로그 적재 실패는 무시(발송 자체는 이미 처리됨).
+        }
+    }
+
+    /**
+     * 발송 로그 조회(append-only). 최신순.
+     *
+     * @param array{from?:string, to?:string, channel?:string, status?:string, q?:string} $filters
+     * @return list<array<string,mixed>>
+     */
+    public static function listLogs(array $filters = [], int $limit = 300): array
+    {
+        if (!db_table_exists('message_send_logs')) {
+            return [];
+        }
+        $where  = ['1=1'];
+        $params = [];
+        if (!empty($filters['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $filters['from'])) {
+            $where[]  = 'l.attempted_at >= ?';
+            $params[] = $filters['from'] . ' 00:00:00';
+        }
+        if (!empty($filters['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $filters['to'])) {
+            $where[]  = 'l.attempted_at <= ?';
+            $params[] = $filters['to'] . ' 23:59:59';
+        }
+        if (!empty($filters['channel']) && isset(self::CHANNELS[$filters['channel']])) {
+            $where[]  = 'l.channel = ?';
+            $params[] = $filters['channel'];
+        }
+        if (!empty($filters['status']) && in_array($filters['status'], ['sent', 'failed'], true)) {
+            $where[]  = 'l.status = ?';
+            $params[] = $filters['status'];
+        }
+        if (!empty($filters['q'])) {
+            $where[]  = '(l.recipient_phone LIKE ? OR l.recipient_name LIKE ? OR l.content LIKE ?)';
+            $kw       = '%' . $filters['q'] . '%';
+            $params[] = $kw; $params[] = $kw; $params[] = $kw;
+        }
+        $sql = 'SELECT l.*, a.name AS sender_name
+                  FROM message_send_logs l
+                  LEFT JOIN admins a ON a.id = l.attempted_by
+                 WHERE ' . implode(' AND ', $where)
+             . ' ORDER BY l.id DESC LIMIT ' . max(1, min(2000, $limit));
+
+        return db_rows($sql, $params);
+    }
+
+    /**
+     * 로그 상태별 건수(같은 필터 적용). @return array{sent:int, failed:int, total:int}
+     *
+     * @param array<string,mixed> $filters
+     */
+    public static function logCounts(array $filters = []): array
+    {
+        $out = ['sent' => 0, 'failed' => 0, 'total' => 0];
+        if (!db_table_exists('message_send_logs')) {
+            return $out;
+        }
+        // listLogs 와 동일 필터를 재사용하려 status 는 제외하고 집계
+        $f = $filters;
+        unset($f['status']);
+        foreach (self::listLogs($f, 2000) as $r) {
+            $s = (string) $r['status'];
+            if ($s === 'sent' || $s === 'failed') {
+                $out[$s]++;
+                $out['total']++;
+            }
+        }
+
+        return $out;
     }
 
     /** 대기 중(예약 시각 지난 것 포함) 일괄 발송. */

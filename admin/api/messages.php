@@ -59,6 +59,43 @@ $payload = static function (): array {
     ];
 };
 
+// 발송 로그(append-only) — GET ?logs=1&from=&to=&channel=&status=&q=
+if ($method === 'GET' && !empty($_GET['logs'])) {
+    $filters = [
+        'from'    => (string) ($_GET['from'] ?? ''),
+        'to'      => (string) ($_GET['to'] ?? ''),
+        'channel' => (string) ($_GET['channel'] ?? ''),
+        'status'  => (string) ($_GET['status'] ?? ''),
+        'q'       => (string) ($_GET['q'] ?? ''),
+    ];
+    $logRows = array_map(static function (array $r): array {
+        return [
+            'id'              => (int) $r['id'],
+            'message_id'      => isset($r['message_id']) ? (int) $r['message_id'] : 0,
+            'channel'         => (string) $r['channel'],
+            'channel_label'   => MessageQueue::channelLabel((string) $r['channel']),
+            'recipient_name'  => (string) ($r['recipient_name'] ?? ''),
+            'recipient_phone' => (string) $r['recipient_phone'],
+            'title'           => (string) ($r['title'] ?? ''),
+            'content'         => (string) ($r['content'] ?? ''),
+            'status'          => (string) $r['status'],
+            'status_label'    => ((string) $r['status'] === 'sent') ? '성공' : '실패',
+            'provider'        => (string) ($r['provider'] ?? ''),
+            'provider_ref'    => (string) ($r['provider_ref'] ?? ''),
+            'error'           => (string) ($r['error'] ?? ''),
+            'sender_name'     => (string) ($r['sender_name'] ?? ''),
+            'attempted_at'    => (string) ($r['attempted_at'] ?? ''),
+        ];
+    }, MessageQueue::listLogs($filters, 500));
+
+    echo json_encode([
+        'ok'         => true,
+        'log_rows'   => $logRows,
+        'log_counts' => MessageQueue::logCounts($filters),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if ($method === 'GET') {
     echo json_encode(['ok' => true] + $payload(), JSON_UNESCAPED_UNICODE);
     exit;
