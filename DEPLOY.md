@@ -1,6 +1,45 @@
 # GitHub → 실서버 자동 배포
 
-`main` 또는 `master` 브랜치에 **push** 하면 GitHub Actions가 서버에 **rsync**로 파일을 맞춥니다.
+두 환경으로 분리되어 있습니다 — **테스트 서버**와 **라이브 서버**를 절대 같은 브랜치/시크릿으로 섞지 않습니다.
+
+| | 브랜치 | 워크플로우 | 배포 | 서버 |
+|---|---|---|---|---|
+| 테스트 | `main`/`master` | `deploy-staging.yml` | push하면 **자동** | 기존 Lightsail |
+| 라이브 | `production` | `deploy-production.yml` | push해도 **승인 대기** | AWS EC2(oxpay.kr) |
+
+## 두 환경 최초 설정 (한 번만)
+
+GitHub 저장소 → **Settings → Environments** 에서 환경 2개를 만듭니다.
+
+**`staging` 환경**
+- Environment secrets: `DEPLOY_HOST`(Lightsail 고정 IP)·`DEPLOY_USER`(`ec2-user`)·`DEPLOY_PATH`·`DEPLOY_SSH_KEY`
+- 승인 규칙 없음 — push하면 바로 배포(빠른 반복 확인용)
+
+**`production` 환경**
+- Environment secrets: `DEPLOY_HOST`(AWS EC2 Elastic IP)·`DEPLOY_USER`(`ec2-user`)·`DEPLOY_PATH`(`/var/www/html`)·`DEPLOY_SSH_KEY`(라이브 서버 pem)
+- **"Required reviewers"를 반드시 체크**하고 본인(또는 책임자)을 지정 — 이렇게 해두면 `production` 브랜치에 push해도 GitHub Actions가 **승인 버튼을 누르기 전까지 실행되지 않습니다.** 결제·펌뱅킹이 붙은 실서버라 실수 방지용으로 꼭 필요합니다.
+
+## 평소 작업 흐름
+
+```bash
+# 1) 평소 개발 — main 에 push → 테스트 서버에 즉시 자동 반영
+git push origin main
+
+# 2) 테스트 서버에서 확인 끝나면 → production 브랜치로 승격
+git checkout production
+git merge main
+git push origin production
+# → Actions 탭에 "Deploy to production"이 대기 상태로 뜸 → 승인자가 Review 후 Approve
+#   승인해야만 실제로 라이브 서버에 rsync 된다.
+```
+
+`production` 브랜치가 아직 없으면 최초 1회만:
+```bash
+git checkout -b production
+git push -u origin production
+```
+
+⚠️ **`main`과 `production`의 DB는 완전히 분리**되어 있습니다(각 서버의 `.env`가 서로 다른 DB를 가리킴) — 테스트 서버에서 만든 데이터가 라이브에 영향을 주지 않고, 그 반대도 마찬가지입니다.
 
 ---
 
@@ -26,7 +65,7 @@ Apache DocumentRoot가 **`/var/www/html`** 이면 `DEPLOY_PATH`도 **`/var/www/h
 
 ### 2) GitHub Secrets 등록
 
-저장소 → **Settings** → **Secrets and variables** → **Actions**
+저장소 → **Settings → Environments → `staging`** (위에서 만든 환경) → **Environment secrets**
 
 | Secret | Lightsail 예시 |
 |--------|----------------|
@@ -103,7 +142,11 @@ php seed.php      # 초기 관리자·코드 (최초 1회)
 sudo dnf install -y php-zip || sudo yum install -y php-zip
 sudo systemctl restart httpd
 php -m | grep zip   # "zip" 한 줄 출력되면 OK
-sudo -u apache /usr/bin/python3 -m pip install --user msoffcrypto-tool
+sudo /usr/bin/python3 -m pip install msoffcrypto-tool
+# ⚠️ `sudo -u apache ... --user` 로 하면 실패한다 — apache 시스템 계정은 홈 디렉터리
+#    (/usr/share/httpd) 쓰기 권한이 없어 `~/.local` 생성이 막힌다(Amazon Linux 2023 확인됨).
+#    --user 없이 전역 설치하면 apache 계정에서도 그대로 import 된다.
+#    확인: sudo -u apache /usr/bin/python3 -c "import msoffcrypto; print('ok')"
 ```
 
 ---

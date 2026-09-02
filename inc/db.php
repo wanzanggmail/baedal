@@ -13,6 +13,9 @@ define('DB_NAME',    getenv('DB_NAME')    ?: 'my_web_db');
 define('DB_USER',    getenv('DB_USER')    ?: 'dev_user');
 define('DB_PASS',    getenv('DB_PASS')    ?: 'ehRoql1!');
 define('DB_CHARSET', getenv('DB_CHARSET') ?: 'utf8mb4');
+// RDS 등 require_secure_transport=ON 인 DB용 — CA 번들 경로를 주면 SSL로 접속한다.
+// 값이 없으면(기존 서버) 지금처럼 평문 접속 그대로 — 하위호환 유지.
+define('DB_SSL_CA', getenv('DB_SSL_CA') ?: '');
 
 /**
  * PDO 인스턴스를 싱글턴으로 반환합니다.
@@ -45,6 +48,12 @@ function db(): PDO
         PDO::ATTR_EMULATE_PREPARES   => false,
         $initCmdKey                  => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
     ];
+
+    if (DB_SSL_CA !== '' && is_file(DB_SSL_CA)) {
+        $options[PDO::MYSQL_ATTR_SSL_CA] = DB_SSL_CA;
+        // RDS 엔드포인트는 인증서 CN/SAN이 실제 호스트명과 일치하므로 서버 인증서 검증을 켠다.
+        $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+    }
 
     try {
         $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
