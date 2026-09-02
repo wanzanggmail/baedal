@@ -389,7 +389,7 @@ if (!function_exists('stmt_menu_visible')) {
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'system/orgs', 'system/admins', 'system/permissions', 'system/codes',
 										    'system/audit', 'withdrawal/settings', 'system/pg-fee', 'system/pg-integration', 'system/pg-logs',
-										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust', 'system/messages',
+										    'system/firm-integration', 'system/integration-mode', 'system/manual-adjust', 'system/messages', 'system/deploy',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">
@@ -463,6 +463,12 @@ if (!function_exists('stmt_menu_visible')) {
 													<a class="menu-link<?= nav_active('system/messages') ?>" href="<?= htmlspecialchars(admin_url('system/messages'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">문자·알림톡</span>
+													</a>
+												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('system/deploy') ?>" href="<?= htmlspecialchars(admin_url('system/deploy'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">배포</span>
 													</a>
 												</div>
 												<div class="menu-item">

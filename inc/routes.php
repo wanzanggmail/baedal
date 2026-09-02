@@ -49,6 +49,8 @@ return [
     'system/permissions' => ['title' => '권한 관리', 'view' => 'permissions'],
     'system/statistics' => ['title' => '통계', 'view' => 'statistics'],
     'system/messages' => ['title' => '문자·알림톡', 'view' => 'messages'],
+    // 관리자 패널에서 실행하는 production 배포(git pull) — 2026-09-02
+    'system/deploy' => ['title' => '배포', 'view' => 'deploy'],
     // 세무대리 전용 — 고용·산재 예수금 확인·수집(2026-09-01)
     'tax/dashboard' => ['title' => '고용·산재 예수금', 'view' => 'tax_dashboard'],
 ];

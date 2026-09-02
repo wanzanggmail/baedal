@@ -1,23 +1,66 @@
 # GitHub → 실서버 자동 배포
 
-두 환경으로 분리되어 있습니다 — **테스트 서버**와 **라이브 서버**를 절대 같은 브랜치/시크릿으로 섞지 않습니다.
+두 환경으로 분리되어 있습니다 — **테스트 서버**와 **라이브 서버**를 절대 같은 브랜치/시크릿으로 섞지 않습니다. 배포 "방식"도 서로 다릅니다.
 
-| | 브랜치 | 워크플로우 | 배포 | 서버 |
-|---|---|---|---|---|
-| 테스트 | `main`/`master` | `deploy-staging.yml` | push하면 **자동** | 기존 Lightsail |
-| 라이브 | `production` | `deploy-production.yml` | push해도 **승인 대기** | AWS EC2(oxpay.kr) |
+| | 브랜치 | 배포 방식 | 서버 |
+|---|---|---|---|
+| 테스트 | `main`/`master` | GitHub Actions가 **SSH로 push**(`deploy-staging.yml`), push하면 자동 | 기존 Lightsail |
+| 라이브 | `production` | **관리자 패널에서 pull**(`system/deploy` 메뉴), 버튼을 눌러야 실행 | AWS EC2(oxpay.kr) |
 
-## 두 환경 최초 설정 (한 번만)
+## 왜 라이브만 방식이 다른가
 
-GitHub 저장소 → **Settings → Environments** 에서 환경 2개를 만듭니다.
+AWS EC2의 SSH(22번 포트)는 **본사 고정 IP로만 제한**되어 있습니다(보안). GitHub Actions 러너는 IP가 계속 바뀌는 광범위한 대역이라, 거기서 SSH로 접속하려면 이 제한을 풀어야 해서 보안 원칙이 깨집니다.
 
-**`staging` 환경**
-- Environment secrets: `DEPLOY_HOST`(Lightsail 고정 IP)·`DEPLOY_USER`(`ec2-user`)·`DEPLOY_PATH`·`DEPLOY_SSH_KEY`
-- 승인 규칙 없음 — push하면 바로 배포(빠른 반복 확인용)
+그래서 라이브는 방향을 뒤집었습니다 — **서버가 GitHub에서 코드를 당겨오는(pull) 방식**입니다. SSH를 열 필요가 전혀 없고(아웃바운드로 github.com에 나가는 것뿐), **관리자가 패널에서 버튼을 눌러야만 실행**되므로 그 자체가 승인 절차입니다.
 
-**`production` 환경**
-- Environment secrets: `DEPLOY_HOST`(AWS EC2 Elastic IP)·`DEPLOY_USER`(`ec2-user`)·`DEPLOY_PATH`(`/var/www/html`)·`DEPLOY_SSH_KEY`(라이브 서버 pem)
-- **"Required reviewers"를 반드시 체크**하고 본인(또는 책임자)을 지정 — 이렇게 해두면 `production` 브랜치에 push해도 GitHub Actions가 **승인 버튼을 누르기 전까지 실행되지 않습니다.** 결제·펌뱅킹이 붙은 실서버라 실수 방지용으로 꼭 필요합니다.
+## 라이브 서버 최초 설정 (한 번만)
+
+**① Deploy Key 발급·등록** (서버가 private 저장소를 읽기 전용으로 pull할 수 있게)
+
+서버(EC2)에서:
+```bash
+sudo -u apache ssh-keygen -t ed25519 -C "oxpay-production-deploy" -f /var/www/.ssh/deploy_key -N ""
+sudo cat /var/www/.ssh/deploy_key.pub
+```
+출력된 공개키를 GitHub 저장소 → **Settings → Deploy keys → Add deploy key**에 등록(**"Allow write access"는 체크하지 않음** — 읽기 전용).
+
+apache 계정이 이 키로 git 명령을 쓰게 SSH 설정을 추가:
+```bash
+sudo -u apache tee /var/www/.ssh/config > /dev/null <<'EOF'
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile /var/www/.ssh/deploy_key
+    IdentitiesOnly yes
+EOF
+sudo chmod 600 /var/www/.ssh/config /var/www/.ssh/deploy_key
+sudo -u apache ssh -T git@github.com   # "Hi wanzanggmail/baedal! You've successfully authenticated..." 뜨면 성공(exit code 1 정상)
+```
+
+**② `/var/www/html`을 git clone으로 전환** (기존 rsync로 올라간 파일은 백업 후 교체)
+
+```bash
+sudo systemctl stop httpd
+sudo mkdir -p /var/www/html.bak
+sudo cp -a /var/www/html/.env /var/www/html.bak/ 2>/dev/null
+sudo cp -a /var/www/html/uploads /var/www/html.bak/ 2>/dev/null
+
+sudo mv /var/www/html /var/www/html.old
+sudo -u apache git clone --branch production git@github.com:wanzanggmail/baedal.git /var/www/html
+
+sudo cp -a /var/www/html.bak/.env /var/www/html/ 2>/dev/null
+sudo cp -a /var/www/html.bak/uploads/. /var/www/html/uploads/ 2>/dev/null
+sudo chown -R ec2-user:apache /var/www/html/uploads
+cd /var/www/html && composer install --no-dev --optimize-autoloader --no-interaction
+
+sudo systemctl start httpd
+```
+
+**③ PHP `exec()`가 막혀있지 않은지 확인**
+```bash
+php -i | grep disable_functions
+```
+`exec`가 목록에 있으면 `php.ini`(`/etc/opt/remi/php8.5/...` 또는 `/etc/php.d/`)에서 빼야 관리자 패널의 배포 버튼이 동작합니다.
 
 ## 평소 작업 흐름
 
@@ -29,17 +72,15 @@ git push origin main
 git checkout production
 git merge main
 git push origin production
-# → Actions 탭에 "Deploy to production"이 대기 상태로 뜸 → 승인자가 Review 후 Approve
-#   승인해야만 실제로 라이브 서버에 rsync 된다.
-```
 
-`production` 브랜치가 아직 없으면 최초 1회만:
-```bash
-git checkout -b production
-git push -u origin production
+# 3) 관리자 패널 로그인 → 시스템 관리 → 배포
+#    "최신 상태 확인" → 대기 중인 커밋 확인 → "배포 실행" 클릭
+#    (여기서 fetch → reset --hard origin/production → composer install 이 실행된다)
 ```
 
 ⚠️ **`main`과 `production`의 DB는 완전히 분리**되어 있습니다(각 서버의 `.env`가 서로 다른 DB를 가리킴) — 테스트 서버에서 만든 데이터가 라이브에 영향을 주지 않고, 그 반대도 마찬가지입니다.
+
+⚠️ **`uploads/`, `.env`, `storage/`는 git 관리 대상이 아닙니다** — `.gitignore`에 포함되어 배포(`reset --hard`)해도 지워지지 않지만, 최초 전환(②) 때는 수동으로 옮겨줘야 합니다.
 
 ---
 
