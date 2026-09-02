@@ -86,7 +86,26 @@ sudo systemctl start httpd
 ```bash
 php -i | grep disable_functions
 ```
-`exec`가 목록에 있으면 `php.ini`(`/etc/opt/remi/php8.5/...` 또는 `/etc/php.d/`)에서 빼야 관리자 패널의 배포 버튼이 동작합니다.
+`exec`가 목록에 있으면 `php.ini`(`/etc/php.d/`)에서 빼야 관리자 패널의 배포 버튼이 동작합니다.
+
+## AWS EC2에 서버를 새로 세울 때 — 실제로 걸렸던 함정들
+
+2026-09-02 oxpay.kr 구축에서 겪은 것들. Amazon Linux 2023 기준.
+
+| 증상 | 원인 · 해결 |
+|---|---|
+| `remi-release-9.rpm` 설치 실패<br>(`nothing provides redhat-release >= 9.8`) | **AL2023은 RHEL9 호환이 아니다.** remi 저장소를 쓰지 말 것 — AL2023 기본 저장소에 `php8.5`가 이미 있다: `sudo dnf install php8.5 php8.5-cli php8.5-modphp php8.5-mysqlnd php8.5-mbstring php8.5-xml php8.5-gd php8.5-zip php8.5-intl` |
+| `dnf module list php` → `No matching Modules` | AL2023은 **모듈 스트림 방식을 폐지**했다. 버전별 개별 패키지명(`php8.5-*`)을 쓴다 |
+| `php8.5-opcache` 패키지 없음 | 8.5는 OPcache가 **core에 내장**. 별도 설치 불필요(`php -m \| grep -i opcache`로 확인) |
+| pip `--user` 설치 실패<br>(`Permission denied: '/usr/share/httpd/.local'`) | apache 계정 홈(`/usr/share/httpd`)은 쓰기 불가. **`--user` 없이 전역 설치**: `sudo /usr/bin/python3 -m pip install msoffcrypto-tool` |
+| certbot `ModuleNotFoundError: cryptography` | dnf 버전 certbot의 의존성이 깨져 있다. **독립 venv로 설치**: `sudo python3 -m venv /opt/certbot && sudo /opt/certbot/bin/pip install certbot certbot-apache` + `/usr/local/bin/certbot` 심볼릭 링크. 빌드 도구 필요: `sudo dnf install -y gcc make pkgconfig augeas-devel libxml2-devel python3-devel` |
+| certbot이 `www.` vhost를 못 찾고 충돌 | vhost에 `ServerName`/`ServerAlias`가 없어서. 인증서는 이미 두 도메인 다 포함돼 발급되므로, **기존 SSL vhost에 `ServerAlias www.도메인` 한 줄만 추가**하면 된다 |
+| HTTPS로 접속하면 `/admin/login` → **404** | certbot이 만든 SSL vhost에 `<Directory>` 블록이 안 딸려와 `.htaccess`가 무시된다(AL2023 기본 `AllowOverride None`). **가상호스트 밖 전역 설정**으로 두면 HTTP/HTTPS 양쪽 적용 + certbot 갱신에도 안전:<br>`/etc/httpd/conf.d/zz-oxpay-dir.conf` 에 `<Directory /var/www/html> AllowOverride All / Require all granted </Directory>` |
+| RDS 접속 시 `ERROR 3159 ... require_secure_transport=ON` | RDS가 TLS를 강제한다. CA 번들 받아서 `.env`에 `DB_SSL_CA` 지정:<br>`sudo curl -o /etc/pki/rds/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem` |
+| `mysql --ssl-mode=...` → `unknown variable` | 설치된 게 **MariaDB 클라이언트**라 MySQL8 문법이 없다. `--ssl-ca=경로` 또는 `--ssl-verify-server-cert` 사용 |
+| `ERROR 1045 Access denied` | RDS 마스터 계정은 **원격 접속이 기본 허용**이다(호스트 차단이면 1130이 뜬다). 1045는 순수 비밀번호 불일치 — 콘솔에서 재설정 |
+| composer `vendor does not exist and could not be created` | 저장소가 apache 소유인데 ec2-user로 실행해서. **apache로 실행 + COMPOSER_HOME 지정**:<br>`sudo -u apache env COMPOSER_HOME=/tmp/composer composer install --no-dev` |
+| `git clone` → `Permission denied` | `/var/www`가 root 소유. **빈 디렉터리를 먼저 만들어 apache에 넘긴 뒤** clone |
 
 ## 평소 작업 흐름
 
