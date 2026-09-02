@@ -19,42 +19,63 @@ AWS EC2의 SSH(22번 포트)는 **본사 고정 IP로만 제한**되어 있습�
 
 서버(EC2)에서:
 ```bash
+sudo mkdir -p /var/www/.ssh
+sudo chown apache:apache /var/www/.ssh
+sudo chmod 700 /var/www/.ssh
+
 sudo -u apache ssh-keygen -t ed25519 -C "oxpay-production-deploy" -f /var/www/.ssh/deploy_key -N ""
+
+# github.com 호스트키 미리 등록(첫 접속 확인 프롬프트 방지)
+ssh-keyscan github.com | sudo tee /var/www/.ssh/known_hosts > /dev/null
+sudo chown apache:apache /var/www/.ssh/known_hosts
+sudo chmod 600 /var/www/.ssh/known_hosts /var/www/.ssh/deploy_key
+
 sudo cat /var/www/.ssh/deploy_key.pub
 ```
 출력된 공개키를 GitHub 저장소 → **Settings → Deploy keys → Add deploy key**에 등록(**"Allow write access"는 체크하지 않음** — 읽기 전용).
 
-apache 계정이 이 키로 git 명령을 쓰게 SSH 설정을 추가:
+⚠️ apache 계정의 홈 디렉터리는 `/var/www`가 아니라 **`/usr/share/httpd`** 라서 `~/.ssh/config`에 의존하면 안 된다. 대신 **저장소별 `core.sshCommand`** 로 키를 명시한다(아래 ② 참고).
+
+연결 테스트:
 ```bash
-sudo -u apache tee /var/www/.ssh/config > /dev/null <<'EOF'
-Host github.com
-    HostName github.com
-    User git
-    IdentityFile /var/www/.ssh/deploy_key
-    IdentitiesOnly yes
-EOF
-sudo chmod 600 /var/www/.ssh/config /var/www/.ssh/deploy_key
-sudo -u apache ssh -T git@github.com   # "Hi wanzanggmail/baedal! You've successfully authenticated..." 뜨면 성공(exit code 1 정상)
+sudo -u apache ssh -i /var/www/.ssh/deploy_key -o IdentitiesOnly=yes \
+  -o UserKnownHostsFile=/var/www/.ssh/known_hosts -T git@github.com
+# "Hi wanzanggmail/baedal! You've successfully authenticated..." 뜨면 성공(exit code 1 은 정상)
 ```
 
 **② `/var/www/html`을 git clone으로 전환** (기존 rsync로 올라간 파일은 백업 후 교체)
 
 ```bash
+SSHCMD='ssh -i /var/www/.ssh/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/www/.ssh/known_hosts'
+
 sudo systemctl stop httpd
+
+# 기존 파일 백업(.env·uploads 는 git 관리 대상이 아니라 반드시 따로 챙긴다)
 sudo mkdir -p /var/www/html.bak
 sudo cp -a /var/www/html/.env /var/www/html.bak/ 2>/dev/null
 sudo cp -a /var/www/html/uploads /var/www/html.bak/ 2>/dev/null
 
 sudo mv /var/www/html /var/www/html.old
-sudo -u apache git clone --branch production git@github.com:wanzanggmail/baedal.git /var/www/html
+sudo -u apache env GIT_SSH_COMMAND="$SSHCMD" \
+  git clone --branch production git@github.com:wanzanggmail/baedal.git /var/www/html
 
+# 이후 배포(git fetch)에서도 같은 키를 쓰도록 저장소에 고정
+sudo -u apache git -C /var/www/html config core.sshCommand "$SSHCMD"
+
+# 백업 복원
 sudo cp -a /var/www/html.bak/.env /var/www/html/ 2>/dev/null
+sudo mkdir -p /var/www/html/uploads
 sudo cp -a /var/www/html.bak/uploads/. /var/www/html/uploads/ 2>/dev/null
-sudo chown -R ec2-user:apache /var/www/html/uploads
+sudo chown -R apache:apache /var/www/html/uploads
+sudo chmod -R u+rwX /var/www/html/uploads
+
 cd /var/www/html && composer install --no-dev --optimize-autoloader --no-interaction
 
 sudo systemctl start httpd
 ```
+
+> 저장소를 **apache 소유**로 clone 하는 이유: 배포 버튼이 PHP(apache 권한)에서 `git fetch`·`reset --hard`를 실행하기 때문이다. 소유자가 다르면 git이 `detected dubious ownership` 으로 거부한다.
+> 확인이 끝나면 `/var/www/html.old`, `/var/www/html.bak` 은 삭제해도 된다.
 
 **③ PHP `exec()`가 막혀있지 않은지 확인**
 ```bash
