@@ -2174,6 +2174,28 @@ final class MigrateRunner
             echo "SKIP  pg_config (이미 있음)\n";
         }
 
+        // ⚠️ 신규 설치 보정 — enc_key·enc_iv·noti_allow_ips 는 원래 migratePgWebhook() 에서
+        //    ALTER 로 추가하는데, 그 함수는 호출 순서가 **여기보다 앞**이라 새 DB 에서는
+        //    "pg_config 없음"으로 건너뛴다. 그 결과 테이블이 이 세 컬럼 없이 만들어져
+        //    PG 설정 저장이 `Unknown column 'enc_key'` 로 실패했다(2026-09-02 oxpay.kr 신규 구축에서 발견).
+        //    테이블이 확실히 존재하는 이 시점에서 다시 점검해, 신규 설치도 이미 만들어진 DB 도 복구된다.
+        $pgCols = array_column(db_rows('SHOW COLUMNS FROM pg_config'), 'Field');
+        $lateAdds = [];
+        if (!in_array('enc_key', $pgCols, true)) {
+            $lateAdds[] = "ADD COLUMN enc_key VARCHAR(255) NOT NULL DEFAULT '' COMMENT '외부연동 암호화 KEY(AES)'";
+        }
+        if (!in_array('enc_iv', $pgCols, true)) {
+            $lateAdds[] = "ADD COLUMN enc_iv VARCHAR(64) NOT NULL DEFAULT '' COMMENT '외부연동 Initialization Vector'";
+        }
+        if (!in_array('noti_allow_ips', $pgCols, true)) {
+            $lateAdds[] = "ADD COLUMN noti_allow_ips VARCHAR(255) NOT NULL DEFAULT '221.168.33.227'"
+                . " COMMENT '결제통지 허용 IP(쉼표 구분). 비우면 IP 검사 안 함'";
+        }
+        if ($lateAdds !== []) {
+            db_execute('ALTER TABLE pg_config ' . implode(', ', $lateAdds));
+            echo 'OK    pg_config 누락 컬럼 ' . count($lateAdds) . "개 보정\n";
+        }
+
         // ② pg_payments.ord_num
         if (db_table_exists('pg_payments')) {
             $cols = array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field');
