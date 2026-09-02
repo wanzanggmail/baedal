@@ -79,10 +79,30 @@ final class Deployer
             return ['ok' => false, 'output' => implode("\n\n", $out)];
         }
 
-        [$ok, $o] = self::exec('composer install --no-dev --optimize-autoloader --no-interaction');
+        [$ok, $o] = self::exec(self::composerCmd() . ' install --no-dev --optimize-autoloader --no-interaction');
         $out[] = $o;
 
         return ['ok' => $ok, 'output' => implode("\n\n", $out)];
+    }
+
+    /**
+     * composer 실행 명령. 웹서버(apache) 권한으로 도는 걸 전제로 두 가지를 보정한다.
+     *  - `COMPOSER_HOME`: apache 홈(/usr/share/httpd)은 쓰기 불가라 캐시 디렉터리를 못 만들어 실패한다.
+     *  - 절대 경로: PHP exec 의 PATH 가 로그인 셸과 달라 `composer` 를 못 찾는 경우가 있다.
+     */
+    private static function composerCmd(): string
+    {
+        $bin = 'composer';
+        foreach (['/usr/local/bin/composer', '/usr/bin/composer'] as $candidate) {
+            if (is_file($candidate) && is_executable($candidate)) {
+                $bin = $candidate;
+                break;
+            }
+        }
+
+        $home = sys_get_temp_dir() . '/composer-deploy';
+
+        return 'COMPOSER_HOME=' . escapeshellarg($home) . ' ' . escapeshellarg($bin);
     }
 
     /** 고정 디렉터리(ROOT_PATH)에서 주어진 명령만 실행. @return array{0:bool,1:string} */

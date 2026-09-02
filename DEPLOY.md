@@ -56,6 +56,11 @@ sudo cp -a /var/www/html/.env /var/www/html.bak/ 2>/dev/null
 sudo cp -a /var/www/html/uploads /var/www/html.bak/ 2>/dev/null
 
 sudo mv /var/www/html /var/www/html.old
+
+# /var/www 는 root 소유라 apache 가 html 을 못 만든다 → 빈 디렉터리를 먼저 만들어 넘겨준다
+sudo mkdir -p /var/www/html
+sudo chown apache:apache /var/www/html
+
 sudo -u apache env GIT_SSH_COMMAND="$SSHCMD" \
   git clone --branch production git@github.com:wanzanggmail/baedal.git /var/www/html
 
