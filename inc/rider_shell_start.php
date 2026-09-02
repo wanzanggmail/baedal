@@ -5,7 +5,7 @@ declare(strict_types=1);
 require_once INC_PATH . '/rider_auth.php';
 
 if (!isset($riderPageTitle)) {
-    $riderPageTitle = '도깨비';
+    $riderPageTitle = 'OXPAY';
 }
 if (!isset($riderRoute)) {
     $riderRoute = '';
@@ -13,8 +13,8 @@ if (!isset($riderRoute)) {
 $riderMinimalShell = !empty($riderMinimalShell);
 $riderUser = $riderUser ?? rider_current_user();
 
-$riderHeaderBarTitle = '도깨비 - ' . $riderPageTitle;
-$fullTitle = $riderPageTitle . ' — 도깨비 배달';
+$riderHeaderBarTitle = 'OXPAY - ' . $riderPageTitle;
+$fullTitle = $riderPageTitle . ' — OXPAY 배달정산';
 $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
@@ -23,11 +23,11 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 	<title><?= htmlspecialchars($fullTitle, ENT_QUOTES, 'UTF-8') ?></title>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-	<meta name="description" content="도깨비 배달 앱" />
+	<meta name="description" content="OXPAY 배달정산 앱" />
 	<meta name="theme-color" content="#009ef7" />
-	<meta name="application-name" content="도깨비" />
+	<meta name="application-name" content="OXPAY" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
-	<meta name="apple-mobile-web-app-title" content="도깨비" />
+	<meta name="apple-mobile-web-app-title" content="OXPAY" />
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	<link rel="manifest" href="<?= $manifestHref ?>" />
 	<link rel="shortcut icon" href="<?= htmlspecialchars(web_favicon_shortcut_href(), ENT_QUOTES, 'UTF-8') ?>" />
@@ -72,8 +72,8 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 				<div class="d-flex align-items-center px-6 py-5 border-bottom border-gray-200">
 					<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-small.svg'), ENT_QUOTES, 'UTF-8') ?>" class="h-30px me-3" />
 					<div>
-						<div class="fw-bold text-gray-900">도깨비 배달</div>
-						<div class="fs-8 text-muted"><?= $riderUser ? htmlspecialchars($riderUser['name'], ENT_QUOTES, 'UTF-8') : '도깨비' ?></div>
+						<div class="fw-bold text-gray-900">OXPAY 배달정산</div>
+						<div class="fs-8 text-muted"><?= $riderUser ? htmlspecialchars($riderUser['name'], ENT_QUOTES, 'UTF-8') : 'OXPAY' ?></div>
 					</div>
 				</div>
 				<div class="flex-grow-1 overflow-auto">

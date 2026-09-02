@@ -71,7 +71,7 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 					</div>
 					<div class="col-md-8">
 						<label class="form-label">명세서 링크 도메인</label>
-						<input type="url" class="form-control form-control-solid" id="cfg_public_base_url" value="<?= $esc($mcfg['public_base_url']) ?>" placeholder="https://dev.dogebi.kr" />
+						<input type="url" class="form-control form-control-solid" id="cfg_public_base_url" value="<?= $esc($mcfg['public_base_url']) ?>" placeholder="https://oxpay.kr" />
 						<div class="form-text fs-9">알림톡 명세서 링크의 기본 주소. 비우면 접속 도메인을 자동 사용합니다.</div>
 					</div>
 					<div class="col-md-4">

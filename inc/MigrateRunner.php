@@ -1745,7 +1745,7 @@ final class MigrateRunner
                 sender_phone VARCHAR(30) NULL COMMENT '문자·알림톡 발신번호',
                 alimtalk_channel VARCHAR(60) NULL COMMENT '알림톡 발신 프로필/채널 ID(플러스친구)',
                 statement_template VARCHAR(60) NULL COMMENT '명세서 알림톡 템플릿 코드',
-                public_base_url VARCHAR(200) NULL COMMENT '명세서 링크 기본 도메인(예: https://dev.dogebi.kr)',
+                public_base_url VARCHAR(200) NULL COMMENT '명세서 링크 기본 도메인(예: https://oxpay.kr)',
                 link_ttl_days INT NOT NULL DEFAULT 90 COMMENT '명세서 링크 유효기간(일)',
                 updated_by INT NULL,
                 updated_at DATETIME NULL,
