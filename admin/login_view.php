@@ -5,7 +5,7 @@ declare(strict_types=1);
 /** @var string|null $loginError */
 $loginError     = $loginError     ?? null;
 $loginCsrfToken = $loginCsrfToken ?? '';
-$pageTitle      = '로그인 — 도깨비 배달 관리자';
+$pageTitle      = '로그인 — OXPAY 배달 관리자';
 ?>
 <!DOCTYPE html>
 <html lang="ko">
@@ -29,7 +29,7 @@ $pageTitle      = '로그인 — 도깨비 배달 관리자';
 					<a href="<?= htmlspecialchars(admin_login_url(), ENT_QUOTES, 'UTF-8') ?>" class="mb-7">
 						<img alt="Logo" src="<?= htmlspecialchars(web_asset('media/logos/default-dark.svg'), ENT_QUOTES, 'UTF-8') ?>" />
 					</a>
-					<h2 class="text-white fw-normal m-0">도깨비 배달 관리자</h2>
+					<h2 class="text-white fw-normal m-0">OXPAY 배달 관리자</h2>
 				</div>
 			</div>
 			<div class="d-flex flex-column-fluid flex-lg-row-auto justify-content-center justify-content-lg-end p-12 p-lg-20">

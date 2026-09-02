@@ -1,7 +1,7 @@
 {
-	"name": "도깨비 배달대행",
-	"short_name": "도깨비",
-	"description": "도깨비 배달대행 — 라이더 모집 안내",
+	"name": "OXPAY 배달정산",
+	"short_name": "OXPAY",
+	"description": "OXPAY 배달정산 — 대리점 모집 안내",
 	"start_url": "../../index.html",
 	"scope": "../../",
 	"display": "standalone",

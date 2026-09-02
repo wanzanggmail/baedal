@@ -1,4 +1,4 @@
--- 도깨비 배달 — 핵심 테이블 (php migrate.php)
+-- OXPAY 배달 — 핵심 테이블 (php migrate.php)
 -- admins · riders · 정산 업로드 · 출금 신청 등
 
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;

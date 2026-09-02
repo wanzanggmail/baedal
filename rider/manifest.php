@@ -16,9 +16,9 @@ $icons = array_map(static function (array $icon): array {
 
 echo json_encode(
     [
-        'name' => '도깨비 배달',
-        'short_name' => '도깨비',
-        'description' => '도깨비 배달 라이더 앱 (목업)',
+        'name' => 'OXPAY 배달정산',
+        'short_name' => 'OXPAY',
+        'description' => 'OXPAY 배달정산 라이더 앱 (목업)',
         'start_url' => $start,
         'scope' => $scope,
         'display' => 'standalone',

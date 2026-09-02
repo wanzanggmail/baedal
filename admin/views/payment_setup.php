@@ -196,7 +196,7 @@ if ($agencyId > 0) {
 						<div class="col-md-4">
 							<label class="form-label fs-8 required" for="ps_buyername">카드 명의자</label>
 							<input type="text" class="form-control form-control-sm form-control-solid" id="ps_buyername"
-								maxlength="50" autocomplete="off" value="<?= htmlspecialchars($buyerNameDefault, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: 홍길동 / (주)도깨비" />
+								maxlength="50" autocomplete="off" value="<?= htmlspecialchars($buyerNameDefault, ENT_QUOTES, 'UTF-8') ?>" placeholder="예: 홍길동 / (주)OXPAY" />
 						</div>
 						<div class="col-md-4">
 							<label class="form-label fs-8" for="ps_authnum">생년월일/사업자번호</label>

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 if (!isset($pageTitle)) {
-    $pageTitle = '도깨비 배달 관리자';
+    $pageTitle = 'OXPAY 배달정산 관리자';
 }
 ?>
 <!DOCTYPE html>

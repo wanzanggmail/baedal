@@ -116,7 +116,7 @@ $platformLabels = [
 								<i class="ki-duotone ki-information-5 fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
 								<div class="d-flex flex-column">
 									<span class="fw-bold">플랫폼에서 받은 일간 정산서(.xlsx)를 그대로 올려 주세요.</span>
-									<span class="text-gray-700 fs-7 mt-1">파일명에 날짜가 포함된 경우(예: 팀도깨비_서울_강서남부_<strong>20260225</strong>.xlsx) 귀속일이 자동 추출됩니다.</span>
+									<span class="text-gray-700 fs-7 mt-1">파일명에 날짜가 포함된 경우(예: 팀OXPAY_서울_강서남부_<strong>20260225</strong>.xlsx) 귀속일이 자동 추출됩니다.</span>
 									<span class="text-gray-700 fs-7 mt-1">「차감내역」시트도 함께 파싱됩니다 — 오배달 등 차감 항목이 있으면 자동으로 함께 저장됩니다.</span>
 								</div>
 							</div>
@@ -177,7 +177,7 @@ $platformLabels = [
 								<div class="row g-4 mb-6">
 									<div class="col-md-6">
 										<label class="form-label">팀명 <span class="text-muted fs-7">(파일명에서 자동)</span></label>
-										<input type="text" class="form-control form-control-solid" name="team_name" id="teamNameInput" maxlength="60" placeholder="예: 팀도깨비" />
+										<input type="text" class="form-control form-control-solid" name="team_name" id="teamNameInput" maxlength="60" placeholder="예: 팀OXPAY" />
 									</div>
 									<div class="col-md-6">
 										<label class="form-label">지역명 <span class="text-muted fs-7">(파일명에서 자동)</span></label>

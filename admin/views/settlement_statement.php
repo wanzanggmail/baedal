@@ -287,7 +287,7 @@ if ($riderId > 0) {
 		<div class="text-center text-muted fs-8 py-3 border border-gray-300 rounded mb-3">상단의 <strong>「오더별 상세 포함」</strong>을 누르면 건별 배달 내역이 표시됩니다.</div>
 		<?php endif; ?>
 
-		<div class="text-center text-muted fs-9 mt-4 pt-3 border-top border-gray-300">본 명세서는 도깨비 배달 정산 시스템에서 발행되었습니다.</div>
+		<div class="text-center text-muted fs-9 mt-4 pt-3 border-top border-gray-300">본 명세서는 OXPAY 배달 정산 시스템에서 발행되었습니다.</div>
 	</div></div>
 
 <?php elseif ($riderId > 0 && !$scopeAllowed) : ?>

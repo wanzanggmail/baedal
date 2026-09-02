@@ -41,7 +41,7 @@ function seed_org(string $code, string $level, string $name, ?int $parentId): in
 }
 
 seed_log("\n[0] 조직 트리 Seed");
-$orgRoot   = seed_org('HQ',      'admin',       '도깨비 본사', null);
+$orgRoot   = seed_org('HQ',      'admin',       'OXPAY 본사', null);
 $orgDist   = seed_org('DIST-01', 'distributor', '서울총판',    $orgRoot);
 $orgAgency = seed_org('AG-01',   'agency',      '강남대리점',  $orgDist);
 

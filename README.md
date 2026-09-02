@@ -1,4 +1,4 @@
-# 도깨비 배달 — 관리자·라이더 백오피스
+# OXPAY 배달 — 관리자·라이더 백오피스
 
 Metronic 8.3.3 + PHP + MariaDB/MySQL.  
 **기능·권한·DB 규칙의 기준 문서는 [LOGIC.md](LOGIC.md)** 입니다. 화면/API를 바꿀 때 해당 섹션도 함께 갱신하세요.

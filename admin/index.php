@@ -133,7 +133,7 @@ if (!isset($routes[$route])) {
     exit;
 }
 
-$pageTitle = $routes[$route]['title'] . ' — 도깨비 배달 관리자';
+$pageTitle = $routes[$route]['title'] . ' — OXPAY 배달 관리자';
 $view = $routes[$route]['view'];
 $viewPath = __DIR__ . '/views/' . $view . '.php';
 

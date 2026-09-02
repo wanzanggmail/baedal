@@ -146,7 +146,7 @@ try {
     $detectedKind = (string) $kindDetect['kind'];
 
     // 배민 팀/지역은 파일 안에서 얻는다(위 주석 참고). 사업자명=팀, 협력사명=지역으로 둔다 —
-    // 쿠팡의 `팀도깨비 / 서울_마포중앙`과 같은 자리(조직 / 세부지역)에 대응한다.
+    // 쿠팡의 `팀OXPAY / 서울_마포중앙`과 같은 자리(조직 / 세부지역)에 대응한다.
     if ($platform === 'baemin' && $teamName === '' && $regionName === '') {
         $info = $parser->parseBaeminPartnerInfo();
         if ($info['company'] !== '') {
