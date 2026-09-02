@@ -86,6 +86,40 @@ final class Deployer
     }
 
     /**
+     * DB 스키마 마이그레이션 실행(`php migrate.php`).
+     *
+     * 배포로 코드만 바뀌고 스키마가 안 따라오면 `Unknown column ...` 으로 죽으므로,
+     * 배포 직후 이어서 실행할 수 있게 분리해 둔다. MigrateRunner 는 **멱등**이라
+     * (모든 단계가 존재 여부를 먼저 확인) 반영할 게 없으면 전부 SKIP 으로 끝난다.
+     *
+     * ⚠️ `seed.php`(초기 관리자·코드 생성)는 **일부러 넣지 않는다** — 멱등이 아니라
+     *    재실행하면 초기 계정이 되살아날 수 있다. 최초 1회만 SSH 로 실행할 것.
+     *
+     * @return array{ok:bool, output:string}
+     */
+    public static function migrate(): array
+    {
+        [$ok, $out] = self::exec(self::phpCmd() . ' migrate.php');
+
+        return ['ok' => $ok, 'output' => $out];
+    }
+
+    /**
+     * PHP CLI 실행 파일. `PHP_BINARY` 는 mod_php 환경에서 httpd 를 가리키므로 쓸 수 없다.
+     * exec 의 PATH 가 로그인 셸과 다를 수 있어 절대 경로를 먼저 찾는다.
+     */
+    private static function phpCmd(): string
+    {
+        foreach (['/usr/bin/php', '/usr/local/bin/php'] as $candidate) {
+            if (is_file($candidate) && is_executable($candidate)) {
+                return escapeshellarg($candidate);
+            }
+        }
+
+        return 'php';
+    }
+
+    /**
      * composer 실행 명령. 웹서버(apache) 권한으로 도는 걸 전제로 두 가지를 보정한다.
      *  - `COMPOSER_HOME`: apache 홈(/usr/share/httpd)은 쓰기 불가라 캐시 디렉터리를 못 만들어 실패한다.
      *  - 절대 경로: PHP exec 의 PATH 가 로그인 셸과 달라 `composer` 를 못 찾는 경우가 있다.

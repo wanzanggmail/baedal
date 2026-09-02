@@ -75,6 +75,25 @@ $current  = $ready ? Deployer::currentCommit() : null;
 	</div>
 
 	<div class="card card-flush mt-6">
+		<div class="card-header pt-5 flex-wrap gap-2">
+			<h3 class="card-title fw-bold">DB 마이그레이션</h3>
+			<div class="card-toolbar">
+				<button type="button" class="btn btn-sm btn-light-warning" id="dp_migrate">마이그레이션 실행</button>
+			</div>
+		</div>
+		<div class="card-body pt-2 fs-8">
+			<div class="text-muted">
+				배포로 코드만 바뀌고 스키마가 안 따라오면 <code>Unknown column ...</code> 같은 오류가 납니다.
+				<strong>배포 실행 → 마이그레이션 실행</strong> 순서로 진행하세요.
+				반영할 게 없으면 전부 <code>SKIP</code>으로 끝나므로 여러 번 눌러도 안전합니다.
+			</div>
+			<div class="text-muted mt-2">
+				※ 초기 데이터 생성(<code>seed.php</code>)은 재실행 시 초기 계정이 되살아날 수 있어 여기에 넣지 않았습니다 — 최초 1회만 SSH로 실행하세요.
+			</div>
+		</div>
+	</div>
+
+	<div class="card card-flush mt-6">
 		<div class="card-header pt-5"><h3 class="card-title fw-bold">실행 로그</h3></div>
 		<div class="card-body pt-2">
 			<pre id="dp_output" class="bg-dark text-light rounded p-4 fs-9 mb-0" style="min-height:120px; white-space:pre-wrap; word-break:break-all;">아직 실행 기록이 없습니다.</pre>
@@ -125,6 +144,24 @@ $current  = $ready ? Deployer::currentCommit() : null;
 					runBtn.classList.add('d-none');
 				}
 			}).catch(function () { checkBtn.disabled = false; showToast('확인 요청 실패', false); });
+		});
+
+		var migBtn = document.getElementById('dp_migrate');
+		migBtn.addEventListener('click', function () {
+			if (!confirm('DB 스키마 마이그레이션을 실행합니다.\n(반영할 게 없으면 아무것도 바뀌지 않습니다)\n계속할까요?')) return;
+			migBtn.disabled = true;
+			var label = migBtn.textContent;
+			migBtn.textContent = '실행 중...';
+			post({ action: 'migrate' }).then(function (res) {
+				document.getElementById('dp_output').textContent = res.output || '(출력 없음)';
+				showToast(res.ok ? '마이그레이션 완료' : (res.message || '마이그레이션 실패'), res.ok);
+				migBtn.disabled = false;
+				migBtn.textContent = label;
+			}).catch(function () {
+				migBtn.disabled = false;
+				migBtn.textContent = label;
+				showToast('마이그레이션 요청 실패', false);
+			});
 		});
 
 		runBtn.addEventListener('click', function () {

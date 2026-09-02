@@ -56,4 +56,11 @@ if ($action === 'deploy') {
     exit;
 }
 
+if ($action === 'migrate') {
+    $res = Deployer::migrate();
+    AuditLog::record('deploy.migrate', '', 'DB 마이그레이션 ' . ($res['ok'] ? '성공' : '실패'));
+    echo json_encode(['ok' => $res['ok'], 'output' => $res['output']], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $err('알 수 없는 action 입니다.', 400);
