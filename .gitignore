@@ -22,3 +22,6 @@ inc/*.flag
 # OS
 .DS_Store
 Thumbs.db
+
+# 실수로 중첩 clone 된 별도 저장소 — 이 저장소에 포함하지 않는다(2026-09-03)
+/doggaebi/
