@@ -84,6 +84,7 @@ final class MigrateRunner
         self::migrateStatementNotified();
         self::migrateMessagingConfig();
         self::migrateAlimtalkFallback();
+        self::migrateTaxAgentToWithholding();
         self::migrateMessagingBilling();
         self::migrateAlimtalkTemplates();
 
@@ -1599,6 +1600,96 @@ final class MigrateRunner
             echo "OK    tax_insurance_collections 생성\n";
         } else {
             echo "SKIP  tax_insurance_collections (이미 있음)\n";
+        }
+    }
+
+    /**
+     * 세무대리 재설계(2026-09-04 갑) — 세무대리가 가져가는 건 **원천세**만이고,
+     * **고용·산재는 대리점이 갖는 돈**이다(라이더 공제분을 대리점이 보유, 예수금 아님).
+     *
+     * 되돌리는 것:
+     *  ① 이미 수집된 고용·산재(`tax_insurance_collections`)를 **자동 환원** — 세무대리 지갑에서
+     *     대리점 지갑으로 되돌린다(원장 `ins_collect_rev`). 세무대리 지갑은 비고, 대리점은 회복.
+     *  ② 모든 대리점의 `insurance_reserve`(고용·산재 예수금 잠금)를 **0으로 해제** → 인출가능액에 포함.
+     *  ③ `tax_insurance_collections` → `tax_withholding_collections` 로 **용도 변경**(원천세 수집 기록).
+     *     기존 고용·산재 수집 행은 ①에서 환원했으므로 비운 뒤 이름만 바꾼다.
+     * 멱등: `tax_withholding_collections` 가 이미 있으면 전부 건너뛴다.
+     */
+    private static function migrateTaxAgentToWithholding(): void
+    {
+        echo "== 세무대리 재설계(원천세 수집) ==\n";
+        if (!db_table_exists('organizations') || !db_table_exists('agency_wallets')) {
+            echo "SKIP  조직/지갑 테이블 없음\n";
+
+            return;
+        }
+        if (db_table_exists('tax_withholding_collections')) {
+            echo "SKIP  이미 원천세 수집 구조 (tax_withholding_collections 있음)\n";
+
+            return;
+        }
+
+        require_once __DIR__ . '/AgencyWallet.php';
+        require_once __DIR__ . '/Org.php';
+        $taxId = Org::taxAgentOrgId();
+
+        // ① 기존 고용·산재 수집분 자동 환원 (세무대리 지갑 → 대리점 지갑)
+        if (db_table_exists('tax_insurance_collections')) {
+            $byAgency = db_rows(
+                'SELECT agency_id, COALESCE(SUM(amount),0) AS amt
+                   FROM tax_insurance_collections GROUP BY agency_id HAVING amt <> 0'
+            );
+            $reverted = 0;
+            $totalRev = 0;
+            foreach ($byAgency as $r) {
+                $aid = (int) $r['agency_id'];
+                $amt = (int) $r['amt'];
+                if ($aid < 1 || $amt <= 0) {
+                    continue;
+                }
+                // 대리점 지갑으로 되돌림 + 세무대리 지갑에서 뺌 (원장 기록으로 추적 가능)
+                AgencyWallet::credit($aid, $amt, 'ins_collect_rev', null, '고용·산재 예수금 환원(세무대리 재설계)');
+                if ($taxId > 0) {
+                    AgencyWallet::debit($taxId, $amt, 'ins_collect_rev', $aid, '고용·산재 예수금 환원(대리점으로)');
+                }
+                $reverted++;
+                $totalRev += $amt;
+            }
+            if ($reverted > 0) {
+                echo "OK    고용·산재 수집 {$reverted}개 대리점 환원 (" . number_format($totalRev) . "원 세무대리→대리점)\n";
+            }
+            // 수집 이력 비움(환원 완료 → 원천세 수집용으로 재사용)
+            db_execute('DELETE FROM tax_insurance_collections');
+        }
+
+        // ② insurance_reserve 전액 해제 (고용·산재는 대리점 보유 → 인출가능)
+        $cols = array_column(db_rows('SHOW COLUMNS FROM agency_wallets'), 'Field');
+        if (in_array('insurance_reserve', $cols, true)) {
+            $released = db_row('SELECT COALESCE(SUM(insurance_reserve),0) AS s FROM agency_wallets');
+            db_execute('UPDATE agency_wallets SET insurance_reserve = 0, updated_at = NOW() WHERE insurance_reserve <> 0');
+            echo "OK    insurance_reserve 전액 해제 (" . number_format((int) ($released['s'] ?? 0)) . "원 → 대리점 인출가능)\n";
+        }
+
+        // ③ 수집 테이블을 원천세용으로 용도 변경
+        if (db_table_exists('tax_insurance_collections')) {
+            db_execute('RENAME TABLE tax_insurance_collections TO tax_withholding_collections');
+            echo "OK    tax_insurance_collections → tax_withholding_collections 로 용도 변경\n";
+        } else {
+            db_execute(
+                "CREATE TABLE tax_withholding_collections (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tax_org_id INT NOT NULL,
+                    agency_id INT NOT NULL,
+                    period CHAR(7) NOT NULL COMMENT '정산 귀속월 YYYY-MM',
+                    amount INT NOT NULL,
+                    collected_by INT NULL,
+                    collected_at DATETIME NOT NULL,
+                    note VARCHAR(255) NULL,
+                    INDEX idx_agency (agency_id),
+                    INDEX idx_period (period)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            echo "OK    tax_withholding_collections 생성\n";
         }
     }
 

@@ -2,12 +2,10 @@
 /** tax_dashboard 초기 표 본문 — $agencies, $won, $esc 를 상위 뷰에서 받는다. */
 declare(strict_types=1);
 if (($agencies ?? []) === []) : ?>
-	<tr><td colspan="7" class="text-center text-muted py-6">이 달에 걷힌 고용·산재가 없습니다.</td></tr>
+	<tr><td colspan="5" class="text-center text-muted py-6">이 달에 걷힌 원천세가 없습니다.</td></tr>
 <?php else : foreach ($agencies as $a) : ?>
 	<tr>
 		<td class="fw-semibold"><?= $esc($a['agency_name']) ?> <span class="text-muted fs-8"><?= $esc($a['code']) ?></span></td>
-		<td class="text-end text-gray-600"><?= $won($a['employment']) ?></td>
-		<td class="text-end text-gray-600"><?= $won($a['accident']) ?></td>
 		<td class="text-end fw-semibold"><?= $won($a['accrued']) ?></td>
 		<td class="text-end text-muted"><?= $won($a['collected']) ?></td>
 		<td class="text-end fw-bold<?= (int) $a['uncollected'] > 0 ? ' text-primary' : '' ?>"><?= $won($a['uncollected']) ?></td>

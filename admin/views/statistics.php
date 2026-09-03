@@ -84,8 +84,7 @@ $data = [
 			['본사 수수료 수입', $wonShort($ov['hq_income']) . '원', '기간 · 정산/대행/플랫폼/이체/리스', 'warning', 'ki-dollar'],
 			['대리점 지갑 잔액', $wonShort($bal['agency_balance']) . '원', '현재', 'dark', 'ki-wallet'],
 			['라이더 지갑 잔액', $wonShort($bal['rider_balance']) . '원', '현재(미출금)', 'primary', 'ki-wallet'],
-			['원천세 예수금', $wonShort($bal['withholding_reserve']) . '원', '대리점 보관', 'info', 'ki-shield'],
-			['고용·산재 예수금', $wonShort($bal['insurance_reserve']) . '원', '세무대리 수집 대상', 'danger', 'ki-shield-tick'],
+			['원천세 예수금', $wonShort($bal['withholding_reserve']) . '원', '세무대리 수집 대상', 'info', 'ki-shield-tick'],
 		];
 		foreach ($kpis as $k) : ?>
 		<div class="col-sm-6 col-xl-3">

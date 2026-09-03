@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * 세무대리 — 고용·산재 예수금 수집 API.
+ * 세무대리 — 원천세 예수금 수집 API.
  * GET  — 대리점별 현황 + 세무대리 지갑 + 수집 이력
  * POST { action:'collect', period:'YYYY-MM', agency_id?:N } — 예수금 수집(대리점→세무대리 지갑)
  *
@@ -85,9 +85,9 @@ try {
         $err('해당 월에 수집할 예수금이 없습니다.', 422);
     }
     AuditLog::record(
-        'tax.insurance_collect',
+        'tax.withholding_collect',
         $period,
-        sprintf('고용·산재 예수금 수집 %d개 대리점 · %s원(%s월분)', $res['count'], number_format($res['total']), $period)
+        sprintf('원천세 예수금 수집 %d개 대리점 · %s원(%s월분)', $res['count'], number_format($res['total']), $period)
     );
     echo json_encode([
         'ok'             => true,

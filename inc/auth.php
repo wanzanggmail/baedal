@@ -165,8 +165,13 @@ function admin_can_access_route(string $route): bool
         }
     }
 
-    // 세무대리(tax_agent) — 완전 별도 메뉴. 대시보드·매뉴얼·세무(tax/*) 화면만 접근한다(2026-09-01 갑).
+    // 세무대리(tax_agent) — 완전 별도 메뉴. 대시보드·매뉴얼·세무(tax/*) + **지갑 입출금·자체 인출**(수집한
+    // 원천세를 자기 지갑에서 빼 신고·납입하려면 필요, 2026-09-04 갑)만 접근한다.
     if (admin_org_level() === Org::LEVEL_TAX_AGENT) {
+        $exact = ['withdrawal/wallet-ledger', 'withdrawal/agency-payout'];
+        if (in_array($route, $exact, true)) {
+            return true;
+        }
         foreach (['dashboard', 'docs/manual', 'tax'] as $allowed) {
             if ($route === $allowed || str_starts_with($route, $allowed . '/')) {
                 return true;

@@ -35,6 +35,9 @@ final class AgencyWallet
         'agency_fee_in'     => '대행수수료 수입(본사)',
         'ins_collect_out'   => '고용·산재 예수금 납부(세무대리)',
         'ins_collect_in'    => '고용·산재 예수금 수집',
+        'ins_collect_rev'   => '고용·산재 예수금 환원',
+        'wh_collect_out'    => '원천세 예수금 납부(세무대리)',
+        'wh_collect_in'     => '원천세 예수금 수집',
         'msg_fee_up'        => '메시지 발송 요금',
         'msg_fee_in'        => '메시지 발송 요금 수입(본사)',
     ];
@@ -92,7 +95,10 @@ final class AgencyWallet
     }
 
     /**
-     * 대리점 자체 인출가능액 = balance − 라이더 정산금 − 원천세 예수금 − 고용·산재 예수금 (0 하한).
+     * 대리점 자체 인출가능액 = balance − 라이더 정산금 − 원천세 예수금 (0 하한).
+     *
+     * ⚠️ 고용·산재(insurance_reserve)는 **빼지 않는다** — 대리점이 보유하는 돈이라 인출가능하다
+     *    (2026-09-04 갑 정정). insurance_reserve 는 항상 0으로 유지되지만 호환을 위해 반환은 유지.
      *
      * @return array{balance:int, rider_debt:int, withholding_reserve:int, insurance_reserve:int, withdrawable:int}
      */
@@ -101,14 +107,13 @@ final class AgencyWallet
         $w        = self::get($agencyId);
         $debt     = self::riderDebt($agencyId);
         $reserve  = (int) $w['withholding_reserve'];
-        $insReserve = (int) $w['insurance_reserve'];
-        $avail    = max(0, (int) $w['balance'] - $debt - $reserve - $insReserve);
+        $avail    = max(0, (int) $w['balance'] - $debt - $reserve);
 
         return [
             'balance'             => (int) $w['balance'],
             'rider_debt'          => $debt,
             'withholding_reserve' => $reserve,
-            'insurance_reserve'   => $insReserve,
+            'insurance_reserve'   => (int) $w['insurance_reserve'],
             'withdrawable'        => $avail,
         ];
     }
@@ -130,19 +135,12 @@ final class AgencyWallet
     }
 
     /**
-     * 고용·산재 예수금 누적 (정산 반영 시 고용·산재 공제분). 원천세 예수금과 같은 방식 —
-     * balance 이동이 아니라 별도 accumulator라 원장은 남기지 않는다. 세무대리가 나중에 수집한다.
+     * @deprecated 2026-09-04 — 고용·산재는 예수금이 아니라 대리점 보유금으로 정정됨(갑). 더 이상 호출하지 않는다.
+     *             컬럼·메서드는 하위호환·마이그레이션 참조용으로만 남긴다.
      */
     public static function addInsuranceReserve(int $agencyId, int $amount): void
     {
-        if ($agencyId < 1 || $amount === 0 || !self::tableExists()) {
-            return;
-        }
-        self::ensure($agencyId);
-        db_execute(
-            'UPDATE agency_wallets SET insurance_reserve = insurance_reserve + ?, updated_at = NOW() WHERE agency_id = ?',
-            [$amount, $agencyId]
-        );
+        // no-op — 고용·산재는 대리점이 보유(예수금 아님). 잔재 호출을 무해화한다.
     }
 
     /**

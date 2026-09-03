@@ -309,7 +309,7 @@ PK=`agency_id`(=`organizations.id`, 이름과 달리 **본사·총판·대리점
 
 🆕 **`settlement_rider_cycles.statement_notified_at`**(2026-09-02) — 일정산 명세서 알림톡을 큐에 적재한 시각. **재반영 중복 발송 방지** — `enqueueDailyStatements`가 NULL 인 사이클만 발송하고 적재 후 채운다.
 
-🆕 **`tax_insurance_collections`** — 세무대리 예수금 수집 이력(`tax_org_id`·`agency_id`·`period`(YYYY-MM)·`amount`·`collected_at`). `TaxAgent::collect()` 가 대리점 지갑에서 예수금을 빼(balance 차감 + insurance_reserve 0) 세무대리 지갑으로 옮기고(`ins_collect_out`/`ins_collect_in`) 이 표에 기록.
+🆕 **`tax_withholding_collections`** — 세무대리 예수금 수집 이력(`tax_org_id`·`agency_id`·`period`(YYYY-MM)·`amount`·`collected_at`). `TaxAgent::collect()` 가 대리점 지갑에서 예수금을 빼(balance 차감 + insurance_reserve 0) 세무대리 지갑으로 옮기고(`ins_collect_out`/`ins_collect_in`) 이 표에 기록.
 
 ### `agency_wallet_ledger` — 🆕 조직 지갑 변동 원장(감사용)
 `direction`(credit/debit) · `reason` · `amount`(양수) · `balance_after`(스냅샷) · `ref_id`(연관 레코드) · `note` · `created_by`.
