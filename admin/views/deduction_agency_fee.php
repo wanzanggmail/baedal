@@ -16,6 +16,7 @@ $needsMigrate = !AgencyFeeConfig::tableReady();
 $minReady     = AgencyFeeConfig::minimumReady();
 $minimum      = AgencyFeeConfig::minimums();
 $belowMin     = $isHq && $minReady ? AgencyFeeConfig::agenciesBelowMinimum() : [];
+$rates        = AgencyFeeConfig::rates();   // 공제 요율(원천세·고용·산재) — 본사 전용 전역값
 // 전역 기본값이 하한보다 낮으면 **전용 설정이 없는 대리점이 하한을 우회**한다 → 화면에서 바로 보이게.
 $globalCfg      = $isHq ? $config : AgencyFeeConfig::get(null);
 $globalBelowMin = $isHq && $minReady && (
@@ -169,6 +170,49 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			</div>
 		</div>
 		<?php endif; ?>
+
+		<?php // 공제 요율 — 법정요율이라 대리점이 협상할 값이 아니다(본사 전용, 전역 1벌). ?>
+		<?php if ($isHq) : ?>
+		<div class="col-12">
+			<div class="card card-flush border border-primary">
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold">공제 요율 <span class="badge badge-light-primary ms-2">본사 전용</span></h3>
+				</div>
+				<div class="card-body pt-0 fs-7">
+					<div class="text-gray-700 mb-5">
+						정산 반영 시 라이더 정산금에서 공제하는 요율입니다. <strong>법정요율이라 대리점별로 다를 수 없어 전역 1벌</strong>로 관리하며,
+						저장하면 대리점 전용 설정이 있는 곳도 같은 값으로 맞춥니다.
+						<span class="text-muted">※ 이미 반영된 과거 정산분은 바뀌지 않습니다 — 변경 이후 반영분부터 적용됩니다.</span>
+					</div>
+					<div class="row g-4">
+						<div class="col-md-3">
+							<label class="form-label" for="cfg_rate_withholding">원천세율 (%)</label>
+							<input type="number" step="0.01" min="0" max="100" class="form-control form-control-solid" id="cfg_rate_withholding" value="<?= htmlspecialchars(number_format((float) $rates['withholding_tax_pct'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" <?= $canWrite ? '' : 'readonly' ?> />
+							<div class="form-text fs-9">원천세 대상 라이더만 공제</div>
+						</div>
+						<div class="col-md-3">
+							<label class="form-label" for="cfg_rate_employment">고용보험료율 (%)</label>
+							<input type="number" step="0.01" min="0" max="100" class="form-control form-control-solid" id="cfg_rate_employment" value="<?= htmlspecialchars(number_format((float) $rates['employment_ins_pct'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" <?= $canWrite ? '' : 'readonly' ?> />
+							<div class="form-text fs-9">대리점 예수금으로 누적</div>
+						</div>
+						<div class="col-md-3">
+							<label class="form-label" for="cfg_rate_accident">산재보험료율 (%)</label>
+							<input type="number" step="0.01" min="0" max="100" class="form-control form-control-solid" id="cfg_rate_accident" value="<?= htmlspecialchars(number_format((float) $rates['industrial_accident_ins_pct'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" <?= $canWrite ? '' : 'readonly' ?> />
+							<div class="form-text fs-9">대리점 예수금으로 누적</div>
+						</div>
+						<?php if ($canWrite) : ?>
+						<div class="col-md-3 d-flex align-items-start" style="padding-top:1.9rem">
+							<button type="button" class="btn btn-primary" id="cfg_rates_save_btn">요율 저장</button>
+						</div>
+						<?php endif; ?>
+					</div>
+					<div class="alert bg-light-info fs-8 p-3 mt-5 mb-0">
+						고용·산재 공제분은 대리점 지갑의 <strong>예수금</strong>으로 쌓이고, 세무대리가 <a href="<?= htmlspecialchars(admin_url('tax/dashboard'), ENT_QUOTES, 'UTF-8') ?>">고용·산재 예수금</a> 화면에서 월별로 수집합니다.
+					</div>
+				</div>
+			</div>
+		</div>
+		<?php endif; ?>
 	</div>
 
 	<?php if ($canWrite) : ?>
@@ -209,6 +253,17 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 					document.getElementById('cfg_fee_short').min = res.minimum.fee_per_tx_short;
 					document.getElementById('cfg_fee_long').min = res.minimum.fee_per_tx_long;
 				});
+			});
+		}
+		var ratesBtn = document.getElementById('cfg_rates_save_btn');
+		if (ratesBtn) {
+			ratesBtn.addEventListener('click', function () {
+				send({
+					action: 'save_rates',
+					withholding_tax_pct: parseFloat(document.getElementById('cfg_rate_withholding').value) || 0,
+					employment_ins_pct: parseFloat(document.getElementById('cfg_rate_employment').value) || 0,
+					industrial_accident_ins_pct: parseFloat(document.getElementById('cfg_rate_accident').value) || 0,
+				}, '공제 요율이 저장되었습니다.');
 			});
 		}
 		document.getElementById('cfg_save_btn').addEventListener('click', function () {

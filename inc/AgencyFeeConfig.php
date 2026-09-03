@@ -111,6 +111,86 @@ final class AgencyFeeConfig
     }
 
     /**
+     * 공제 요율(원천세·고용보험·산재보험) — **전역 1벌**(2026-09-03 갑).
+     *
+     * 법정요율이라 대리점이 협상할 값이 아니다. 그래서 대리점별 오버라이드를 열지 않고
+     * 본사가 정한 전역값만 쓴다(`SettlementLedger::deductionRates()` 가 org 행 → 전역 순으로
+     * 폴백하는데, org 행은 대행수수료 저장 때만 만들어지고 요율은 전역값을 그대로 복사한다).
+     *
+     * @return array{withholding_tax_pct:float, employment_ins_pct:float, industrial_accident_ins_pct:float}
+     */
+    public static function rates(): array
+    {
+        $d = ['withholding_tax_pct' => 3.30, 'employment_ins_pct' => 0.80, 'industrial_accident_ins_pct' => 0.88];
+        if (!db_table_exists('deduction_global_config')) {
+            return $d;
+        }
+        $row = db_row(
+            'SELECT withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct
+               FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1'
+        );
+        if ($row === null) {
+            return $d;
+        }
+
+        return [
+            'withholding_tax_pct'         => (float) ($row['withholding_tax_pct'] ?? $d['withholding_tax_pct']),
+            'employment_ins_pct'          => (float) ($row['employment_ins_pct'] ?? $d['employment_ins_pct']),
+            'industrial_accident_ins_pct' => (float) ($row['industrial_accident_ins_pct'] ?? $d['industrial_accident_ins_pct']),
+        ];
+    }
+
+    /**
+     * 공제 요율 저장 — **본사 전용**(호출부에서 권한 확인).
+     *
+     * ⚠️ 대리점 전용 행(org_id NOT NULL)이 있으면 그 행의 요율이 우선 적용되므로
+     *    **전역과 함께 모든 대리점 행도 같은 값으로 맞춘다.** 안 그러면 화면에서 바꿔도
+     *    전용 행이 있는 대리점만 옛 요율로 남아 조용히 어긋난다.
+     *
+     * @param array<string, mixed> $data
+     * @return array{rates:array<string,float>, synced_orgs:int}
+     */
+    public static function saveRates(array $data): array
+    {
+        if (!db_table_exists('deduction_global_config')) {
+            throw new RuntimeException('deduction_global_config 가 없습니다. php migrate.php 를 실행하세요.');
+        }
+
+        $pct = static function ($v, float $def): float {
+            $f = is_numeric($v) ? (float) $v : $def;
+
+            return max(0.0, min(100.0, round($f, 2)));
+        };
+        $d = self::rates();
+
+        $wt  = $pct($data['withholding_tax_pct'] ?? null, $d['withholding_tax_pct']);
+        $emp = $pct($data['employment_ins_pct'] ?? null, $d['employment_ins_pct']);
+        $acc = $pct($data['industrial_accident_ins_pct'] ?? null, $d['industrial_accident_ins_pct']);
+
+        $exists = db_row('SELECT id FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+        if ($exists === null) {
+            throw new RuntimeException('전역 기본 설정 행이 없습니다. php migrate.php 를 실행하세요.');
+        }
+
+        db_execute(
+            'UPDATE deduction_global_config
+                SET withholding_tax_pct = ?, employment_ins_pct = ?, industrial_accident_ins_pct = ?
+              WHERE id = ?',
+            [$wt, $emp, $acc, (int) $exists['id']]
+        );
+
+        // 대리점 전용 행들도 같은 요율로 동기화(요율은 대리점별로 다를 수 없다).
+        $synced = db_execute(
+            'UPDATE deduction_global_config
+                SET withholding_tax_pct = ?, employment_ins_pct = ?, industrial_accident_ins_pct = ?
+              WHERE org_id IS NOT NULL',
+            [$wt, $emp, $acc]
+        );
+
+        return ['rates' => self::rates(), 'synced_orgs' => $synced];
+    }
+
+    /**
      * 현재 하한보다 낮게 설정해둔 대리점 목록(하한을 올린 뒤 확인용).
      *
      * @return list<array<string,mixed>>
