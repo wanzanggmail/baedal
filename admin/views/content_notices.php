@@ -101,7 +101,7 @@ $needsMigrate = $listError !== null
 							<td class="fw-semibold text-gray-800"><?= htmlspecialchars($row['public_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td>
 								<span class="text-gray-900 fw-bold"><?= htmlspecialchars($row['title'], ENT_QUOTES, 'UTF-8') ?></span>
-								<span class="text-muted fs-7 d-block"><?= htmlspecialchars($excerpt, ENT_QUOTES, 'UTF-8') ?></span>
+								<!-- <span class="text-muted fs-7 d-block"><?= htmlspecialchars($excerpt, ENT_QUOTES, 'UTF-8') ?></span> -->
 							</td>
 							<td><span class="badge badge-light-primary"><?= htmlspecialchars($row['category'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td><?= $row['pinned'] ? '<span class="badge badge-light-success">고정</span>' : '<span class="text-muted">—</span>' ?></td>
