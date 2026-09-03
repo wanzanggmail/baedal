@@ -135,9 +135,24 @@ function db_insert(string $sql, array $params = []): int
  * @param callable(): T $callback
  * @return T
  */
+/**
+ * 트랜잭션 실행 — **중첩 안전**(2026-09-04).
+ *
+ * 이미 트랜잭션 안이면 새로 열지 않고 **합류**한다. 안 그러면 PDO 가
+ * "There is already an active transaction" 로 죽어서, 트랜잭션 안에서 도는
+ * 돈 이동 헬퍼(AgencyWallet::move 등)를 원자적으로 감쌀 수 없었다.
+ * 합류 시 내부 예외는 그대로 위로 전파돼 **바깥 트랜잭션이 전체를 롤백**한다
+ * (부분 커밋이 생기지 않는다).
+ */
 function db_transaction(callable $callback): mixed
 {
     $pdo = db();
+
+    // 이미 열린 트랜잭션에 합류 — begin/commit 은 최외곽에서만 한다.
+    if ($pdo->inTransaction()) {
+        return $callback();
+    }
+
     $pdo->beginTransaction();
     try {
         $result = $callback();
@@ -145,7 +160,9 @@ function db_transaction(callable $callback): mixed
 
         return $result;
     } catch (\Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $e;
     }
 }
