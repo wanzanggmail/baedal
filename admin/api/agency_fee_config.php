@@ -113,8 +113,38 @@ if ($action === 'save_min') {
     exit;
 }
 
+// 공제 요율(원천세·고용·산재)도 **본사만** 정한다 — 법정요율이라 대리점이 바꿀 값이 아니다.
+if ($action === 'save_rates') {
+    if (!$isHq) {
+        $err('공제 요율은 본사만 설정할 수 있습니다.', 403);
+    }
+    try {
+        $r = AgencyFeeConfig::saveRates($body);
+        AuditLog::record(
+            'deduction.rates',
+            'deduction_global_config',
+            sprintf(
+                '공제 요율 — 원천세 %.2f%% / 고용 %.2f%% / 산재 %.2f%%',
+                $r['rates']['withholding_tax_pct'],
+                $r['rates']['employment_ins_pct'],
+                $r['rates']['industrial_accident_ins_pct']
+            )
+        );
+        $msg = '공제 요율이 저장되었습니다.';
+        if ($r['synced_orgs'] > 0) {
+            $msg .= sprintf(' (대리점 전용 설정 %d건도 같은 요율로 맞췄습니다)', $r['synced_orgs']);
+        }
+        echo json_encode(['ok' => true, 'message' => $msg, 'rates' => $r['rates']], JSON_UNESCAPED_UNICODE);
+    } catch (InvalidArgumentException $e) {
+        $err($e->getMessage(), 422);
+    } catch (Throwable $e) {
+        $err('저장 실패: ' . $e->getMessage(), 500);
+    }
+    exit;
+}
+
 if ($action !== 'save') {
-    $err('action=save 또는 save_min', 400);
+    $err('action=save 또는 save_min, save_rates', 400);
 }
 
 try {
