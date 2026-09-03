@@ -8,6 +8,7 @@ $needsMigrate = !TaxAgent::ready();
 $won   = static fn ($n): string => number_format((int) $n) . '원';
 $esc   = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 $apiUrl = ADMIN_BASE . '/api/tax_collect.php';
+$exportUrl = ADMIN_BASE . '/api/tax_export.php';
 
 $months = $needsMigrate ? [] : TaxAgent::months();
 // 기본 선택월 — 미수집 남은 최신월, 없으면 최신월.
@@ -88,7 +89,7 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 	<!--end::KPI-->
 
 	<div class="card card-flush mb-8">
-		<div class="card-header pt-5"><h3 class="card-title fw-bold">대리점별 원천세 (<span id="tax_period_label"><?= $esc($period) ?></span>월분)</h3></div>
+		<div class="card-header pt-5 flex-wrap gap-2"><h3 class="card-title fw-bold">대리점별 원천세 (<span id="tax_period_label"><?= $esc($period) ?></span>월분)</h3><div class="card-toolbar"><a href="#" id="tax_export_btn" class="btn btn-sm btn-light-success" data-base="<?= $esc($exportUrl) ?>"><i class="ki-duotone ki-file-down fs-5"><span class="path1"></span><span class="path2"></span></i> 엑셀 다운로드</a></div></div>
 		<div class="card-body pt-0">
 			<div class="table-responsive">
 				<table class="table table-row-bordered align-middle fs-7 gy-3">
@@ -195,6 +196,10 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 		}
 
 		document.getElementById('tax_period').addEventListener('change', function () { load(); });
+		document.getElementById('tax_export_btn').addEventListener('click', function (ev) {
+			ev.preventDefault();
+			window.location = this.getAttribute('data-base') + '?period=' + encodeURIComponent(period());
+		});
 		document.getElementById('tax_collect_all').addEventListener('click', function () { collect(null, '전체 대리점'); });
 		document.getElementById('tax_tbody').addEventListener('click', function (ev) {
 			var b = ev.target.closest('.tax-collect-one');
