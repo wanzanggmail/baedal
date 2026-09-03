@@ -60,8 +60,8 @@ if (!function_exists('stmt_menu_visible')) {
 										</div>
 										<!--end:매뉴얼-->
 
-										<!--begin:세무대리(원천세 예수금 + 지갑) — 세무대리 계정 전용 별도 메뉴-->
-										<?php if (admin_org_level() === Org::LEVEL_TAX_AGENT && admin_can_access_route('tax/dashboard')) : ?>
+										<!--begin:세무대리(원천세 예수금) — 세무대리 + 본사(점검) 노출-->
+										<?php if (admin_can_access_route('tax/dashboard')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('tax/dashboard') ?>" href="<?= htmlspecialchars(admin_url('tax/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
@@ -70,6 +70,9 @@ if (!function_exists('stmt_menu_visible')) {
 												<span class="menu-title">원천세 예수금</span>
 											</a>
 										</div>
+										<?php endif; ?>
+										<?php // 지갑 입출금·자체 인출은 세무대리 계정만 여기서 노출(본사는 지급·출금 그룹에 이미 있음).
+										if (admin_org_level() === Org::LEVEL_TAX_AGENT) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('withdrawal/wallet-ledger') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/wallet-ledger'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
