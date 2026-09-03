@@ -182,31 +182,38 @@ final class AgencyWallet
         }
         self::ensure($agencyId);
 
-        if ($direction === 'debit') {
-            db_execute('UPDATE agency_wallets SET balance = balance - ?, updated_at = NOW() WHERE agency_id = ?', [$amount, $agencyId]);
-        } else {
-            db_execute('UPDATE agency_wallets SET balance = balance + ?, updated_at = NOW() WHERE agency_id = ?', [$amount, $agencyId]);
-        }
+        // ⚠️ 잔액 변경과 원장 기록은 **반드시 한 트랜잭션**이어야 한다.
+        //    예전엔 UPDATE 와 INSERT 가 따로 돌아서, 사이에서 실패하면 잔액만 바뀌고 원장이
+        //    안 남았다(2026-09-04 감사에서 원장 69행 누락·3개 조직 잔액 불일치로 확인).
+        //    원장이 감사 근거인 시스템에서 이 둘이 갈라지면 대사가 불가능해진다.
+        //    db_transaction 은 중첩 안전이라 이미 트랜잭션 안에서 호출돼도 합류만 한다.
+        db_transaction(static function () use ($agencyId, $direction, $amount, $reason, $refId, $note, $adminId): void {
+            if ($direction === 'debit') {
+                db_execute('UPDATE agency_wallets SET balance = balance - ?, updated_at = NOW() WHERE agency_id = ?', [$amount, $agencyId]);
+            } else {
+                db_execute('UPDATE agency_wallets SET balance = balance + ?, updated_at = NOW() WHERE agency_id = ?', [$amount, $agencyId]);
+            }
 
-        $balanceAfter = self::get($agencyId)['balance'];
+            $balanceAfter = (int) (db_row('SELECT balance FROM agency_wallets WHERE agency_id = ? LIMIT 1', [$agencyId])['balance'] ?? 0);
 
-        if (db_table_exists('agency_wallet_ledger')) {
-            db_insert(
-                'INSERT INTO agency_wallet_ledger
-                    (agency_id, direction, reason, amount, balance_after, ref_id, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    $agencyId,
-                    $direction,
-                    mb_substr($reason, 0, 40),
-                    $amount,
-                    $balanceAfter,
-                    ($refId !== null && $refId > 0) ? $refId : null,
-                    mb_substr($note, 0, 300),
-                    ($adminId !== null && $adminId > 0) ? $adminId : null,
-                ]
-            );
-        }
+            if (db_table_exists('agency_wallet_ledger')) {
+                db_insert(
+                    'INSERT INTO agency_wallet_ledger
+                        (agency_id, direction, reason, amount, balance_after, ref_id, note, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                        $agencyId,
+                        $direction,
+                        mb_substr($reason, 0, 40),
+                        $amount,
+                        $balanceAfter,
+                        ($refId !== null && $refId > 0) ? $refId : null,
+                        mb_substr($note, 0, 300),
+                        ($adminId !== null && $adminId > 0) ? $adminId : null,
+                    ]
+                );
+            }
+        });
     }
 
     /**
