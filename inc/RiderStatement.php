@@ -6,6 +6,7 @@ require_once __DIR__ . '/RiderDebt.php';
 require_once __DIR__ . '/MessageQueue.php';
 require_once __DIR__ . '/Org.php';
 require_once __DIR__ . '/StatementLink.php';
+require_once __DIR__ . '/AlimtalkTemplate.php';
 
 /**
  * 주급 명세서(라이더 정산명세서) 데이터 — **우리가 가진 데이터만** 사용해 실제 명세서 레이아웃을 재현.
@@ -192,17 +193,39 @@ final class RiderStatement
             $from    = (string) $row['from_d'];
             $to      = (string) $row['to_d'];
             try {
-                $text = self::compactText($riderId, $from, $to, (string) ($row['rider_name'] ?? ''));
+                $riderName = (string) ($row['rider_name'] ?? '');
+                $text      = self::compactText($riderId, $from, $to, $riderName);
+
                 // 모바일 명세서 링크 — 파일 대신 링크로 상세 명세서를 열 수 있게 첨부.
+                $linkUrl = '';
                 if (StatementLink::ready()) {
                     try {
-                        $link = StatementLink::create($riderId, $from, $to, $adminId);
-                        $text .= "\n\n▶ 상세 명세서 보기\n" . $link['url'];
+                        $link    = StatementLink::create($riderId, $from, $to, $adminId);
+                        $linkUrl = $link['url'];
+                        $text   .= "\n\n▶ 상세 명세서 보기\n" . $linkUrl;
                     } catch (Throwable) {
                         // 링크 생성 실패는 발송 자체를 막지 않는다(텍스트만 발송).
                     }
                 }
-                MessageQueue::enqueueForRider($riderId, 'alimtalk', $text, '정산 명세서', $adminId);
+
+                // 승인 템플릿이 설정돼 있으면 그걸로(알림톡), 없으면 위 문구 그대로 문자로 나간다.
+                $sum  = self::summary($riderId, $from, $to);
+                $plan = AlimtalkTemplate::plan('settlement_statement', [
+                    'name'   => $riderName,
+                    'period' => $from === $to ? $from : ($from . ' ~ ' . $to),
+                    'orders' => number_format((int) $sum['orders']),
+                    'amount' => number_format((int) $sum['net']) . '원',
+                    'link'   => $linkUrl,
+                ], $text);
+
+                MessageQueue::enqueueForRider(
+                    $riderId,
+                    $plan['channel'],
+                    $plan['content'],
+                    $plan['title'] ?? '정산 명세서',
+                    $adminId,
+                    $plan['template_code']
+                );
                 $out['queued']++;
 
                 // 큐 적재 성공한 라이더의 사이클만 발송 표시(다음 재반영에서 제외).

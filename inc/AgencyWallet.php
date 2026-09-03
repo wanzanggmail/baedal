@@ -35,6 +35,8 @@ final class AgencyWallet
         'agency_fee_in'     => '대행수수료 수입(본사)',
         'ins_collect_out'   => '고용·산재 예수금 납부(세무대리)',
         'ins_collect_in'    => '고용·산재 예수금 수집',
+        'msg_fee_up'        => '메시지 발송 요금',
+        'msg_fee_in'        => '메시지 발송 요금 수입(본사)',
     ];
 
     public static function tableExists(): bool

@@ -79,6 +79,27 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 						<input type="number" min="1" max="3650" class="form-control form-control-solid" id="cfg_link_ttl_days" value="<?= (int) $mcfg['link_ttl_days'] ?>" />
 						<div class="form-text fs-9">생성된 링크가 만료되기까지의 일수.</div>
 					</div>
+					<div class="col-12"><div class="separator separator-dashed my-2"></div></div>
+					<div class="col-md-3">
+						<label class="form-label">알림톡 단가(원)</label>
+						<input type="number" min="0" class="form-control form-control-solid" id="cfg_price_alimtalk" value="<?= (int) ($mcfg['price_alimtalk'] ?? 10) ?>" />
+					</div>
+					<div class="col-md-3">
+						<label class="form-label">SMS 단가(원)</label>
+						<input type="number" min="0" class="form-control form-control-solid" id="cfg_price_sms" value="<?= (int) ($mcfg['price_sms'] ?? 10) ?>" />
+					</div>
+					<div class="col-md-3">
+						<label class="form-label">LMS 단가(원)</label>
+						<input type="number" min="0" class="form-control form-control-solid" id="cfg_price_lms" value="<?= (int) ($mcfg['price_lms'] ?? 50) ?>" />
+					</div>
+					<div class="col-md-3">
+						<label class="form-label">SMS 최대 바이트</label>
+						<input type="number" min="1" max="2000" class="form-control form-control-solid" id="cfg_sms_max_bytes" value="<?= (int) ($mcfg['sms_max_bytes'] ?? 90) ?>" />
+						<div class="form-text fs-9">초과하면 자동으로 LMS 발송(EUC-KR 기준).</div>
+					</div>
+					<div class="col-12">
+						<div class="alert bg-light-warning fs-9 p-3 mb-0">💰 발송 1건마다 이 금액이 <strong>대리점 지갑 → 본사</strong>로 이체됩니다(지갑 원장 「메시지 발송 요금」). <strong>발송 실패 건은 과금하지 않습니다.</strong> 상황별 템플릿은 <a href="<?= $esc(admin_url('system/alimtalk-templates')) ?>">알림톡 템플릿</a>에서 관리합니다.</div>
+					</div>
 					<div class="col-12">
 						<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
 							<input class="form-check-input me-3 mt-1" type="checkbox" id="cfg_alimtalk_fallback_sms" <?= (int) ($mcfg['alimtalk_fallback_sms'] ?? 1) === 1 ? 'checked' : '' ?> />
@@ -308,7 +329,11 @@ $statusBadge = ['queued' => 'warning', 'sending' => 'info', 'sent' => 'success',
 					statement_template: document.getElementById('cfg_statement_template').value.trim(),
 					public_base_url: document.getElementById('cfg_public_base_url').value.trim(),
 					link_ttl_days: Number(document.getElementById('cfg_link_ttl_days').value || 90),
-					alimtalk_fallback_sms: document.getElementById('cfg_alimtalk_fallback_sms').checked ? 1 : 0
+					alimtalk_fallback_sms: document.getElementById('cfg_alimtalk_fallback_sms').checked ? 1 : 0,
+					price_alimtalk: Number(document.getElementById('cfg_price_alimtalk').value || 0),
+					price_sms: Number(document.getElementById('cfg_price_sms').value || 0),
+					price_lms: Number(document.getElementById('cfg_price_lms').value || 0),
+					sms_max_bytes: Number(document.getElementById('cfg_sms_max_bytes').value || 90)
 				}, '설정을 저장했습니다.').catch(function () {});
 			});
 		}

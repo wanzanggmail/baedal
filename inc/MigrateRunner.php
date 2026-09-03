@@ -84,6 +84,8 @@ final class MigrateRunner
         self::migrateStatementNotified();
         self::migrateMessagingConfig();
         self::migrateAlimtalkFallback();
+        self::migrateMessagingBilling();
+        self::migrateAlimtalkTemplates();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -1792,6 +1794,115 @@ final class MigrateRunner
                 echo "SKIP  messaging_config.alimtalk_fallback_sms (이미 있음)\n";
             }
         }
+    }
+
+    /**
+     * 메시지 발송 과금(2026-09-03 갑) — 발송 1건당 **대리점 지갑 → 본사**로 요금을 옮긴다.
+     * 단가는 messaging_config 에서 설정(기본 알림톡 10 / SMS 10 / LMS 50원).
+     * SMS 는 EUC-KR 90바이트를 넘으면 LMS 로 자동 전환하므로 channel enum 에 lms 를 추가한다.
+     */
+    private static function migrateMessagingBilling(): void
+    {
+        echo "== 메시지 발송 과금 ==\n";
+
+        if (db_table_exists('messaging_config')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM messaging_config'), 'Field');
+            $adds = [];
+            if (!in_array('price_alimtalk', $cols, true)) {
+                $adds[] = "ADD COLUMN price_alimtalk INT NOT NULL DEFAULT 10 COMMENT '알림톡 1건 단가(원)'";
+            }
+            if (!in_array('price_sms', $cols, true)) {
+                $adds[] = "ADD COLUMN price_sms INT NOT NULL DEFAULT 10 COMMENT 'SMS 1건 단가(원)'";
+            }
+            if (!in_array('price_lms', $cols, true)) {
+                $adds[] = "ADD COLUMN price_lms INT NOT NULL DEFAULT 50 COMMENT 'LMS 1건 단가(원)'";
+            }
+            if (!in_array('sms_max_bytes', $cols, true)) {
+                $adds[] = "ADD COLUMN sms_max_bytes INT NOT NULL DEFAULT 90 COMMENT 'SMS 최대 바이트(EUC-KR). 초과하면 LMS'";
+            }
+            if ($adds !== []) {
+                db_execute('ALTER TABLE messaging_config ' . implode(', ', $adds));
+                echo 'OK    messaging_config 과금 컬럼 ' . count($adds) . "개 추가\n";
+            } else {
+                echo "SKIP  messaging_config 과금 컬럼 (이미 있음)\n";
+            }
+        }
+
+        if (db_table_exists('message_queue')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM message_queue'), 'Field');
+
+            // channel 에 lms 추가 (enum 확장은 컬럼 정의를 통째로 다시 쓴다)
+            $ch = db_row("SHOW COLUMNS FROM message_queue LIKE 'channel'");
+            if ($ch !== null && !str_contains((string) $ch['Type'], "'lms'")) {
+                db_execute("ALTER TABLE message_queue MODIFY COLUMN channel ENUM('sms','lms','alimtalk') NOT NULL DEFAULT 'sms'");
+                echo "OK    message_queue.channel 에 lms 추가\n";
+            } else {
+                echo "SKIP  message_queue.channel lms (이미 있음)\n";
+            }
+
+            $adds = [];
+            if (!in_array('agency_id', $cols, true)) {
+                $adds[] = "ADD COLUMN agency_id INT NULL DEFAULT NULL COMMENT '과금 대상 대리점(라이더 소속). NULL이면 과금 안 함'";
+            }
+            if (!in_array('charged_amount', $cols, true)) {
+                $adds[] = "ADD COLUMN charged_amount INT NOT NULL DEFAULT 0 COMMENT '실제 과금액(원). 발송 성공 시 기록'";
+            }
+            if (!in_array('template_code', $cols, true)) {
+                $adds[] = "ADD COLUMN template_code VARCHAR(60) NULL DEFAULT NULL COMMENT '알림톡 템플릿 코드'";
+            }
+            if ($adds !== []) {
+                db_execute('ALTER TABLE message_queue ' . implode(', ', $adds));
+                echo 'OK    message_queue 과금 컬럼 ' . count($adds) . "개 추가\n";
+            } else {
+                echo "SKIP  message_queue 과금 컬럼 (이미 있음)\n";
+            }
+        }
+
+        if (db_table_exists('message_send_logs')) {
+            $lcols = array_column(db_rows('SHOW COLUMNS FROM message_send_logs'), 'Field');
+            $lch = db_row("SHOW COLUMNS FROM message_send_logs LIKE 'channel'");
+            if ($lch !== null && !str_contains((string) $lch['Type'], "'lms'")) {
+                db_execute("ALTER TABLE message_send_logs MODIFY COLUMN channel ENUM('sms','lms','alimtalk') NOT NULL DEFAULT 'sms'");
+                echo "OK    message_send_logs.channel 에 lms 추가\n";
+            }
+            if (!in_array('charged_amount', $lcols, true)) {
+                db_execute("ALTER TABLE message_send_logs ADD COLUMN charged_amount INT NOT NULL DEFAULT 0 COMMENT '과금액(원)'");
+                echo "OK    message_send_logs.charged_amount 추가\n";
+            }
+        }
+    }
+
+    /**
+     * 알림톡 템플릿 관리(2026-09-03 갑) — 어떤 상황(event_key)에 어떤 템플릿을 쓸지,
+     * 치환변수는 무엇인지, 실패 시 SMS 대체를 할지를 화면에서 관리한다.
+     */
+    private static function migrateAlimtalkTemplates(): void
+    {
+        echo "== 알림톡 템플릿 ==\n";
+        if (db_table_exists('alimtalk_templates')) {
+            echo "SKIP  alimtalk_templates (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE alimtalk_templates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                event_key VARCHAR(40) NOT NULL COMMENT '발송 상황 키(settlement_statement 등)',
+                name VARCHAR(80) NOT NULL COMMENT '관리용 이름',
+                template_code VARCHAR(60) NOT NULL DEFAULT '' COMMENT '카카오 승인 템플릿 코드',
+                title VARCHAR(120) NULL COMMENT '알림톡 강조표기/제목',
+                content TEXT NOT NULL COMMENT '템플릿 본문(치환변수 #{키})',
+                variables VARCHAR(500) NOT NULL DEFAULT '' COMMENT '치환변수 목록(쉼표 구분, 안내용)',
+                channel_policy ENUM('alimtalk_first','sms_only') NOT NULL DEFAULT 'alimtalk_first'
+                    COMMENT 'alimtalk_first=알림톡 우선(실패 시 SMS 대체) / sms_only=문자만',
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                updated_by INT NULL,
+                updated_at DATETIME NULL,
+                created_at DATETIME NOT NULL,
+                UNIQUE KEY uq_event (event_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+        echo "OK    alimtalk_templates 생성\n";
     }
 
     private static function migrateTransferFee(): void

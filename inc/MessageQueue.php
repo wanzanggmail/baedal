@@ -18,7 +18,7 @@ require_once __DIR__ . '/MessagingConfig.php';
  */
 final class MessageQueue
 {
-    public const CHANNELS = ['sms' => '문자(SMS)', 'alimtalk' => '알림톡'];
+    public const CHANNELS = ['sms' => '문자(SMS)', 'lms' => '문자(LMS)', 'alimtalk' => '알림톡'];
     public const STATUSES = [
         'queued'   => '대기',
         'sending'  => '발송중',
@@ -77,26 +77,59 @@ final class MessageQueue
             $scheduled = str_replace('T', ' ', substr((string) $data['scheduled_at'], 0, 16)) . ':00';
         }
 
-        // fallback_from 컬럼이 있을 때만 채운다(마이그레이션 이전 호환).
-        $hasFallbackCol = self::hasColumn('fallback_from');
-        $cols = 'channel, rider_id, recipient_name, recipient_phone, title, content, status, scheduled_at, created_by, created_at'
-              . ($hasFallbackCol ? ', fallback_from' : '');
-        $ph   = '?, ?, ?, ?, ?, ?, \'queued\', ?, ?, NOW()' . ($hasFallbackCol ? ', ?' : '');
-        $params = [
+        // 문자로 보내는데 채널이 명시되지 않았으면 길이로 SMS/LMS 판정(90바이트 초과 → LMS).
+        if ($channel !== 'alimtalk' && empty($data['keep_channel'])) {
+            $channel = MessagingConfig::smsChannelFor($content);
+        }
+
+        $riderId = (int) ($data['rider_id'] ?? 0) ?: null;
+
+        // 과금 대상 대리점 — 명시값 우선, 없으면 라이더 소속에서 찾는다.
+        $agencyId = (int) ($data['agency_id'] ?? 0);
+        if ($agencyId < 1 && $riderId !== null) {
+            $agencyId = self::agencyOfRider($riderId);
+        }
+
+        $optCols = '';
+        $optPh   = '';
+        $optVals = [];
+        foreach ([
+            'fallback_from' => ($fallbackFrom !== null && $fallbackFrom > 0) ? $fallbackFrom : null,
+            'agency_id'     => $agencyId > 0 ? $agencyId : null,
+            'template_code' => mb_substr(trim((string) ($data['template_code'] ?? '')), 0, 60) ?: null,
+        ] as $col => $val) {
+            if (self::hasColumn($col)) {
+                $optCols .= ", {$col}";
+                $optPh   .= ', ?';
+                $optVals[] = $val;
+            }
+        }
+
+        $cols = 'channel, rider_id, recipient_name, recipient_phone, title, content, status, scheduled_at, created_by, created_at' . $optCols;
+        $ph   = '?, ?, ?, ?, ?, ?, \'queued\', ?, ?, NOW()' . $optPh;
+        $params = array_merge([
             $channel,
-            (int) ($data['rider_id'] ?? 0) ?: null,
+            $riderId,
             mb_substr(trim((string) ($data['recipient_name'] ?? '')), 0, 80) ?: null,
             $phone,
             mb_substr(trim((string) ($data['title'] ?? '')), 0, 120) ?: null,
             mb_substr($content, 0, 2000),
             $scheduled,
             ($adminId !== null && $adminId > 0) ? $adminId : null,
-        ];
-        if ($hasFallbackCol) {
-            $params[] = ($fallbackFrom !== null && $fallbackFrom > 0) ? $fallbackFrom : null;
-        }
+        ], $optVals);
 
         return db_insert("INSERT INTO message_queue ({$cols}) VALUES ({$ph})", $params);
+    }
+
+    /** 라이더 소속 대리점(과금 대상). 없으면 0. */
+    private static function agencyOfRider(int $riderId): int
+    {
+        if ($riderId < 1 || !db_table_exists('riders')) {
+            return 0;
+        }
+        $r = db_row('SELECT agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId]);
+
+        return (int) ($r['agency_id'] ?? 0);
     }
 
     /** 컬럼 존재 여부 캐시(마이그레이션 이전 호환). */
@@ -112,9 +145,15 @@ final class MessageQueue
     }
 
     /** 라이더에게 보낼 때 — 문자 수신용 번호(sms_phone) 우선, 없으면 기본 phone. */
-    public static function enqueueForRider(int $riderId, string $channel, string $content, ?string $title = null, ?int $adminId = null): int
-    {
-        $r = db_row('SELECT id, name, phone, sms_phone FROM riders WHERE id = ? LIMIT 1', [$riderId]);
+    public static function enqueueForRider(
+        int $riderId,
+        string $channel,
+        string $content,
+        ?string $title = null,
+        ?int $adminId = null,
+        ?string $templateCode = null
+    ): int {
+        $r = db_row('SELECT id, name, phone, sms_phone, agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId]);
         if ($r === null) {
             throw new InvalidArgumentException('라이더를 찾을 수 없습니다.');
         }
@@ -122,11 +161,15 @@ final class MessageQueue
 
         return self::enqueue([
             'channel'         => $channel,
+            // 알림톡은 승인 템플릿 본문이라 길이로 채널을 다시 판정하면 안 된다.
+            'keep_channel'    => $channel === 'alimtalk',
             'rider_id'        => $riderId,
+            'agency_id'       => (int) ($r['agency_id'] ?? 0),
             'recipient_name'  => (string) $r['name'],
             'recipient_phone' => $phone,
             'title'           => $title ?? '',
             'content'         => $content,
+            'template_code'   => $templateCode ?? '',
         ], $adminId);
     }
 
@@ -195,9 +238,15 @@ final class MessageQueue
                 "UPDATE message_queue SET status='sent', provider=?, provider_ref=?, error=NULL, sent_at=NOW() WHERE id = ?",
                 [$res['provider'], $res['ref'], $id]
             );
+            // 과금 — 발송이 실제로 성공했을 때만 대리점 지갑 → 본사로 옮긴다.
+            $charged = self::chargeSend($msg, $adminId);
+            if ($charged > 0 && self::hasColumn('charged_amount')) {
+                db_execute('UPDATE message_queue SET charged_amount = ? WHERE id = ?', [$charged, $id]);
+                $msg['charged_amount'] = $charged;
+            }
             self::logAttempt($msg, 'sent', $res['provider'], $res['ref'], null, null, $adminId);
 
-            return ['ok' => true, 'id' => $id, 'ref' => $res['ref']];
+            return ['ok' => true, 'id' => $id, 'ref' => $res['ref'], 'charged' => $charged];
         } catch (Throwable $e) {
             $reason   = $e instanceof MessageDeliveryException ? $e->reasonCode : '';
             $eligible = $e instanceof MessageDeliveryException && $e->fallbackEligible;
@@ -210,6 +259,51 @@ final class MessageQueue
 
             return ['ok' => false, 'id' => $id, 'error' => $e->getMessage(), 'reason' => $reason, 'fallback_id' => $fallbackId];
         }
+    }
+
+    /**
+     * 발송 1건 과금 — **대리점 지갑 → 본사**로 채널별 단가만큼 옮긴다(2026-09-03 갑).
+     *
+     * 실제로 발송이 성공한 뒤에만 호출한다(실패 건은 과금하지 않는다). 대리점이 없는
+     * 메시지(관리자가 임의 번호로 보낸 것 등)는 청구 대상이 없으므로 0.
+     * 대체발송(알림톡 실패 → SMS)은 발송사도 두 건으로 치므로 각각 과금된다.
+     *
+     * @param array<string,mixed> $msg
+     * @return int 과금액(원)
+     */
+    private static function chargeSend(array $msg, ?int $adminId): int
+    {
+        $agencyId = (int) ($msg['agency_id'] ?? 0);
+        if ($agencyId < 1) {
+            return 0;
+        }
+        $price = MessagingConfig::priceFor((string) ($msg['channel'] ?? 'sms'));
+        if ($price <= 0) {
+            return 0;
+        }
+
+        require_once __DIR__ . '/AgencyWallet.php';
+        require_once __DIR__ . '/Org.php';
+        if (!AgencyWallet::tableExists()) {
+            return 0;
+        }
+        $hqId = (int) (Org::chainForAgency($agencyId)['hq'] ?? 0);
+        if ($hqId < 1 || $hqId === $agencyId) {
+            return 0;
+        }
+
+        $label = self::channelLabel((string) ($msg['channel'] ?? 'sms'));
+        $note  = sprintf('%s 발송 요금', $label);
+        $refId = (int) ($msg['id'] ?? 0);
+
+        try {
+            AgencyWallet::debit($agencyId, $price, 'msg_fee_up', $refId, $note, $adminId);
+            AgencyWallet::credit($hqId, $price, 'msg_fee_in', $refId, $note . ' · 본사 귀속', $adminId);
+        } catch (Throwable) {
+            return 0; // 과금 실패가 발송 처리를 되돌리지는 않는다(발송은 이미 나갔다).
+        }
+
+        return $price;
     }
 
     /**
@@ -242,8 +336,10 @@ final class MessageQueue
 
         try {
             $smsId = self::enqueue([
+                // 채널은 지정하지 않는다 — 본문 길이로 SMS/LMS 가 자동 판정된다.
                 'channel'         => 'sms',
                 'rider_id'        => (int) ($msg['rider_id'] ?? 0),
+                'agency_id'       => (int) ($msg['agency_id'] ?? 0), // 과금 대상 승계
                 'recipient_name'  => (string) ($msg['recipient_name'] ?? ''),
                 'recipient_phone' => (string) ($msg['recipient_phone'] ?? ''),
                 'title'           => (string) ($msg['title'] ?? ''),
@@ -269,11 +365,13 @@ final class MessageQueue
         if (!db_table_exists('message_send_logs')) {
             return;
         }
-        $hasReason = in_array('reason_code', array_column(db_rows('SHOW COLUMNS FROM message_send_logs'), 'Field'), true);
+        $logCols   = array_column(db_rows('SHOW COLUMNS FROM message_send_logs'), 'Field');
+        $hasReason = in_array('reason_code', $logCols, true);
+        $hasCharge = in_array('charged_amount', $logCols, true);
         try {
             $cols = 'message_id, channel, rider_id, recipient_name, recipient_phone, title, content, status, provider, provider_ref, error, attempted_by, attempted_at'
-                  . ($hasReason ? ', reason_code' : '');
-            $ph   = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()' . ($hasReason ? ', ?' : '');
+                  . ($hasReason ? ', reason_code' : '') . ($hasCharge ? ', charged_amount' : '');
+            $ph   = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()' . ($hasReason ? ', ?' : '') . ($hasCharge ? ', ?' : '');
             $params = [
                 (int) ($msg['id'] ?? 0) ?: null,
                 (string) ($msg['channel'] ?? 'sms'),
@@ -290,6 +388,9 @@ final class MessageQueue
             ];
             if ($hasReason) {
                 $params[] = $reasonCode !== null ? mb_substr($reasonCode, 0, 40) : null;
+            }
+            if ($hasCharge) {
+                $params[] = (int) ($msg['charged_amount'] ?? 0);
             }
             db_insert("INSERT INTO message_send_logs ({$cols}) VALUES ({$ph})", $params);
         } catch (Throwable) {
