@@ -40,34 +40,76 @@ final class TaxAgent
     }
 
     /**
+     * 걷힌 원천세를 (귀속월, 대리점)별로 집계 — **정산분 + 프로모션분** 합산.
+     *
+     * 정산: `settlement_fee_items`(withholding, 사이클 정산일 월).
+     * 프로모션: `promotion_entries.withholding_amount`(지급완료, 배치 지급일 월) — 프로모션 원천세도
+     *          대리점 예수금(withholding_reserve)에 적립되므로 반드시 함께 세야 수집이 어긋나지 않는다
+     *          (2026-09-04 갑: "프로모션 금액도 원천세는 적용해야").
+     *
+     * @return list<array{ym:string, aid:int, amt:int}>
+     */
+    private static function withholdingRows(?string $period = null): array
+    {
+        $rows = [];
+        $mFilter = ($period !== null && preg_match('/^\d{4}-\d{2}$/', $period)) ? $period : null;
+
+        // ── 정산분 ──
+        if (db_table_exists('settlement_fee_items') && db_table_exists('settlement_rider_cycles')) {
+            $where  = "fi.fee_code = ? AND r.agency_id IS NOT NULL";
+            $params = [self::FEE_CODE];
+            if ($mFilter !== null) {
+                $where   .= " AND DATE_FORMAT(c.settlement_date,'%Y-%m') = ?";
+                $params[] = $mFilter;
+            }
+            foreach (db_rows(
+                "SELECT DATE_FORMAT(c.settlement_date,'%Y-%m') AS ym, r.agency_id AS aid, COALESCE(SUM(fi.amount),0) AS amt
+                   FROM settlement_fee_items fi
+                   JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+                   JOIN riders r ON r.id = c.rider_id
+                  WHERE {$where}
+                  GROUP BY ym, aid",
+                $params
+            ) as $r) {
+                $rows[] = ['ym' => (string) $r['ym'], 'aid' => (int) $r['aid'], 'amt' => (int) $r['amt']];
+            }
+        }
+
+        // ── 프로모션분 ──
+        if (db_table_exists('promotion_entries') && db_table_exists('promotion_batches')) {
+            $where  = "pe.status = 'paid' AND pe.withholding_amount > 0 AND b.agency_id IS NOT NULL";
+            $params = [];
+            if ($mFilter !== null) {
+                $where   .= " AND DATE_FORMAT(b.pay_date,'%Y-%m') = ?";
+                $params[] = $mFilter;
+            }
+            foreach (db_rows(
+                "SELECT DATE_FORMAT(b.pay_date,'%Y-%m') AS ym, b.agency_id AS aid, COALESCE(SUM(pe.withholding_amount),0) AS amt
+                   FROM promotion_entries pe
+                   JOIN promotion_batches b ON b.id = pe.batch_id
+                  WHERE {$where}
+                  GROUP BY ym, aid",
+                $params
+            ) as $r) {
+                $rows[] = ['ym' => (string) $r['ym'], 'aid' => (int) $r['aid'], 'amt' => (int) $r['amt']];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * 정산 귀속월별 걷힌 원천세 합(대리점 무관 전체). 최신월 우선.
      *
      * @return array<string,int>  'YYYY-MM' => 합
      */
     private static function accruedByMonth(?string $period = null): array
     {
-        if (!db_table_exists('settlement_fee_items') || !db_table_exists('settlement_rider_cycles')) {
-            return [];
-        }
-        $where  = "fi.fee_code = ? AND r.agency_id IS NOT NULL";
-        $params = [self::FEE_CODE];
-        if ($period !== null && preg_match('/^\d{4}-\d{2}$/', $period)) {
-            $where   .= " AND DATE_FORMAT(c.settlement_date,'%Y-%m') = ?";
-            $params[] = $period;
-        }
         $out = [];
-        foreach (db_rows(
-            "SELECT DATE_FORMAT(c.settlement_date,'%Y-%m') AS ym, COALESCE(SUM(fi.amount),0) AS amt
-               FROM settlement_fee_items fi
-               JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
-               JOIN riders r ON r.id = c.rider_id
-              WHERE {$where}
-              GROUP BY ym
-              ORDER BY ym DESC",
-            $params
-        ) as $r) {
-            $out[(string) $r['ym']] = (int) $r['amt'];
+        foreach (self::withholdingRows($period) as $r) {
+            $out[$r['ym']] = ($out[$r['ym']] ?? 0) + $r['amt'];
         }
+        krsort($out); // 최신월 우선
 
         return $out;
     }
@@ -133,20 +175,10 @@ final class TaxAgent
             return [];
         }
 
-        // 이 달의 대리점별 걷힌 원천세
+        // 이 달의 대리점별 걷힌 원천세 (정산분 + 프로모션분)
         $accrued = [];
-        foreach (db_rows(
-            "SELECT r.agency_id AS aid, COALESCE(SUM(fi.amount),0) AS amt
-               FROM settlement_fee_items fi
-               JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
-               JOIN riders r ON r.id = c.rider_id
-              WHERE fi.fee_code = ?
-                AND r.agency_id IS NOT NULL
-                AND DATE_FORMAT(c.settlement_date,'%Y-%m') = ?
-              GROUP BY r.agency_id",
-            [self::FEE_CODE, $period]
-        ) as $r) {
-            $accrued[(int) $r['aid']] = (int) $r['amt'];
+        foreach (self::withholdingRows($period) as $r) {
+            $accrued[$r['aid']] = ($accrued[$r['aid']] ?? 0) + $r['amt'];
         }
 
         $collected = self::collectedMap($period);
