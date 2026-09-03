@@ -40,6 +40,8 @@ final class AgencyWallet
         'wh_collect_in'     => '원천세 예수금 수집',
         'msg_fee_up'        => '메시지 발송 요금',
         'msg_fee_in'        => '메시지 발송 요금 수입(본사)',
+        // 과거 move() 비원자성으로 원장이 누락된 구간을 사후 기록한 보정분(잔액은 불변).
+        'ledger_fix'        => '원장 보정(과거 누락분)',
     ];
 
     public static function tableExists(): bool
