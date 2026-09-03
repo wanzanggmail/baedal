@@ -60,14 +60,30 @@ if (!function_exists('stmt_menu_visible')) {
 										</div>
 										<!--end:매뉴얼-->
 
-										<!--begin:세무대리(고용·산재 예수금) — 세무대리 계정 전용 별도 메뉴-->
-										<?php if (admin_can_access_route('tax/dashboard')) : ?>
+										<!--begin:세무대리(원천세 예수금 + 지갑) — 세무대리 계정 전용 별도 메뉴-->
+										<?php if (admin_org_level() === Org::LEVEL_TAX_AGENT && admin_can_access_route('tax/dashboard')) : ?>
 										<div class="menu-item">
 											<a class="menu-link<?= nav_active('tax/dashboard') ?>" href="<?= htmlspecialchars(admin_url('tax/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
 												<span class="menu-icon">
 													<i class="ki-duotone ki-shield-tick fs-2"><span class="path1"></span><span class="path2"></span></i>
 												</span>
-												<span class="menu-title">고용·산재 예수금</span>
+												<span class="menu-title">원천세 예수금</span>
+											</a>
+										</div>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('withdrawal/wallet-ledger') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/wallet-ledger'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-wallet fs-2"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
+												</span>
+												<span class="menu-title">지갑 입출금</span>
+											</a>
+										</div>
+										<div class="menu-item">
+											<a class="menu-link<?= nav_active('withdrawal/agency-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/agency-payout'), ENT_QUOTES, 'UTF-8') ?>">
+												<span class="menu-icon">
+													<i class="ki-duotone ki-bank fs-2"><span class="path1"></span><span class="path2"></span></i>
+												</span>
+												<span class="menu-title">자체 인출</span>
 											</a>
 										</div>
 										<?php endif; ?>
@@ -193,7 +209,9 @@ if (!function_exists('stmt_menu_visible')) {
 										<!--end:수수료·채권-->
 
 										<!--begin:지급·출금-->
-										<?php if (admin_can_access_route('withdrawal/list') || admin_can_access_route('withdrawal/wallet-ledger') || admin_can_access_route('withdrawal/agency-payout')) : ?>
+										<?php // 세무대리는 위 전용 블록에서 지갑·자체인출을 이미 노출하므로 이 그룹은 건너뛴다(중복 방지).
+										if (admin_org_level() !== Org::LEVEL_TAX_AGENT
+										    && (admin_can_access_route('withdrawal/list') || admin_can_access_route('withdrawal/wallet-ledger') || admin_can_access_route('withdrawal/agency-payout'))) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'withdrawal/list', 'withdrawal/proxy', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
 										    'withdrawal/wallet-ledger', 'withdrawal/download', 'withdrawal/complete',

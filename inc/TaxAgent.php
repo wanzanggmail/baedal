@@ -6,22 +6,27 @@ require_once __DIR__ . '/AgencyWallet.php';
 require_once __DIR__ . '/Org.php';
 
 /**
- * 세무대리 — 대리점의 고용·산재 예수금을 **월(정산 귀속월) 단위**로 확인하고 수집한다.
+ * 세무대리 — 대리점의 **원천세 예수금**을 **월(정산 귀속월) 단위**로 확인하고 수집한다(2026-09-04 갑 정정).
  *
- * 고용·산재 공제분은 정산 반영 시 대리점 지갑 `insurance_reserve`(예수금)로 누적되고
- * (원천세와 같은 방식), 세무대리는 **특정 월에 걷힌 것만** 가져와 그 월로 신고·납입한다.
- *  - 월별 걷힌 금액 = `settlement_fee_items`(고용·산재) 중 사이클 정산일이 그 달인 것의 합.
- *  - 이미 수집한 금액 = `tax_insurance_collections`(대리점·월) 합.
+ * 원천세 공제분은 정산 반영 시 대리점 지갑 `withholding_reserve`(예수금)로 누적되고,
+ * 세무대리는 **특정 월에 걷힌 것만** 가져와 그 월로 신고·납입한다.
+ *  - 월별 걷힌 금액 = `settlement_fee_items`(원천세) 중 사이클 정산일이 그 달인 것의 합.
+ *  - 이미 수집한 금액 = `tax_withholding_collections`(대리점·월) 합.
  *  - 이번에 수집할 금액 = 걷힌 − 이미 수집(미수집분).
- * insurance_reserve 는 전체 미수집 합과 같게 유지되어(반영 시 +, 수집 시 −) 대리점 인출가능액에서 빠진다.
+ * withholding_reserve 는 전체 미수집 합과 같게 유지되어(반영 시 +, 수집 시 −) 대리점 인출가능액에서 빠진다.
+ *
+ * ⚠️ 고용·산재는 세무대리 대상이 아니다 — 라이더 공제분을 **대리점이 보유**한다(예수금 아님).
  */
 final class TaxAgent
 {
+    private const FEE_CODE = 'withholding';
+    private const TABLE    = 'tax_withholding_collections';
+
     public static function ready(): bool
     {
         return db_table_exists('organizations')
             && db_table_exists('agency_wallets')
-            && db_table_exists('tax_insurance_collections')
+            && db_table_exists(self::TABLE)
             && db_table_exists('settlement_fee_items')
             && db_table_exists('settlement_rider_cycles');
     }
@@ -35,26 +40,24 @@ final class TaxAgent
     }
 
     /**
-     * 정산 귀속월별 걷힌 고용·산재 합(대리점 무관 전체). 최신월 우선.
+     * 정산 귀속월별 걷힌 원천세 합(대리점 무관 전체). 최신월 우선.
      *
-     * @return array<string,array{emp:int,acc:int,total:int}>  'YYYY-MM' => 합
+     * @return array<string,int>  'YYYY-MM' => 합
      */
     private static function accruedByMonth(?string $period = null): array
     {
         if (!db_table_exists('settlement_fee_items') || !db_table_exists('settlement_rider_cycles')) {
             return [];
         }
-        $where  = "fi.fee_code IN ('employment_ins','accident_ins') AND r.agency_id IS NOT NULL";
-        $params = [];
+        $where  = "fi.fee_code = ? AND r.agency_id IS NOT NULL";
+        $params = [self::FEE_CODE];
         if ($period !== null && preg_match('/^\d{4}-\d{2}$/', $period)) {
             $where   .= " AND DATE_FORMAT(c.settlement_date,'%Y-%m') = ?";
             $params[] = $period;
         }
         $out = [];
         foreach (db_rows(
-            "SELECT DATE_FORMAT(c.settlement_date,'%Y-%m') AS ym,
-                    SUM(CASE WHEN fi.fee_code='employment_ins' THEN fi.amount ELSE 0 END) AS emp,
-                    SUM(CASE WHEN fi.fee_code='accident_ins'   THEN fi.amount ELSE 0 END) AS acc
+            "SELECT DATE_FORMAT(c.settlement_date,'%Y-%m') AS ym, COALESCE(SUM(fi.amount),0) AS amt
                FROM settlement_fee_items fi
                JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
                JOIN riders r ON r.id = c.rider_id
@@ -63,7 +66,7 @@ final class TaxAgent
               ORDER BY ym DESC",
             $params
         ) as $r) {
-            $out[(string) $r['ym']] = ['emp' => (int) $r['emp'], 'acc' => (int) $r['acc'], 'total' => (int) $r['emp'] + (int) $r['acc']];
+            $out[(string) $r['ym']] = (int) $r['amt'];
         }
 
         return $out;
@@ -72,10 +75,10 @@ final class TaxAgent
     /** 이미 수집한 금액 (대리점·월). key 'agencyId|period' => amount */
     private static function collectedMap(?string $period = null): array
     {
-        if (!db_table_exists('tax_insurance_collections')) {
+        if (!db_table_exists(self::TABLE)) {
             return [];
         }
-        $sql    = 'SELECT agency_id, period, COALESCE(SUM(amount),0) AS amt FROM tax_insurance_collections';
+        $sql    = 'SELECT agency_id, period, COALESCE(SUM(amount),0) AS amt FROM ' . self::TABLE;
         $params = [];
         if ($period !== null && preg_match('/^\d{4}-\d{2}$/', $period)) {
             $sql     .= ' WHERE period = ?';
@@ -91,7 +94,7 @@ final class TaxAgent
     }
 
     /**
-     * 수집할 수 있는(고용·산재 걷힌) 월 목록 + 월별 미수집 합. 최신월 우선.
+     * 수집할 수 있는(원천세 걷힌) 월 목록 + 월별 미수집 합. 최신월 우선.
      *
      * @return list<array{period:string, accrued:int, collected:int, uncollected:int}>
      */
@@ -100,7 +103,6 @@ final class TaxAgent
         $accrued   = self::accruedByMonth();
         $collected = self::collectedMap();
 
-        // 대리점 무관 월별 수집합
         $collByMonth = [];
         foreach ($collected as $key => $amt) {
             $period = explode('|', $key)[1] ?? '';
@@ -108,19 +110,19 @@ final class TaxAgent
         }
 
         $out = [];
-        foreach ($accrued as $ym => $a) {
+        foreach ($accrued as $ym => $amt) {
             $c = (int) ($collByMonth[$ym] ?? 0);
-            $out[] = ['period' => $ym, 'accrued' => $a['total'], 'collected' => $c, 'uncollected' => max(0, $a['total'] - $c)];
+            $out[] = ['period' => $ym, 'accrued' => $amt, 'collected' => $c, 'uncollected' => max(0, $amt - $c)];
         }
 
         return $out;
     }
 
     /**
-     * 특정 월의 대리점별 고용·산재 현황(걷힘·수집·미수집).
+     * 특정 월의 대리점별 원천세 현황(걷힘·수집·미수집).
      *
      * @return list<array{agency_id:int, agency_name:string, code:string,
-     *                     employment:int, accident:int, accrued:int, collected:int, uncollected:int}>
+     *                     accrued:int, collected:int, uncollected:int}>
      */
     public static function agencySummary(string $period): array
     {
@@ -131,22 +133,20 @@ final class TaxAgent
             return [];
         }
 
-        // 이 달의 대리점별 걷힌 고용·산재
+        // 이 달의 대리점별 걷힌 원천세
         $accrued = [];
         foreach (db_rows(
-            "SELECT r.agency_id AS aid,
-                    SUM(CASE WHEN fi.fee_code='employment_ins' THEN fi.amount ELSE 0 END) AS emp,
-                    SUM(CASE WHEN fi.fee_code='accident_ins'   THEN fi.amount ELSE 0 END) AS acc
+            "SELECT r.agency_id AS aid, COALESCE(SUM(fi.amount),0) AS amt
                FROM settlement_fee_items fi
                JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
                JOIN riders r ON r.id = c.rider_id
-              WHERE fi.fee_code IN ('employment_ins','accident_ins')
+              WHERE fi.fee_code = ?
                 AND r.agency_id IS NOT NULL
                 AND DATE_FORMAT(c.settlement_date,'%Y-%m') = ?
               GROUP BY r.agency_id",
-            [$period]
+            [self::FEE_CODE, $period]
         ) as $r) {
-            $accrued[(int) $r['aid']] = ['emp' => (int) $r['emp'], 'acc' => (int) $r['acc']];
+            $accrued[(int) $r['aid']] = (int) $r['amt'];
         }
 
         $collected = self::collectedMap($period);
@@ -155,8 +155,7 @@ final class TaxAgent
         $out  = [];
         foreach ($rows as $r) {
             $aid = (int) $r['id'];
-            $a   = $accrued[$aid] ?? ['emp' => 0, 'acc' => 0];
-            $acc = $a['emp'] + $a['acc'];
+            $acc = (int) ($accrued[$aid] ?? 0);
             if ($acc === 0) {
                 continue; // 이 달 걷힌 게 없는 대리점은 표에서 생략
             }
@@ -165,8 +164,6 @@ final class TaxAgent
                 'agency_id'   => $aid,
                 'agency_name' => (string) $r['name'],
                 'code'        => (string) $r['code'],
-                'employment'  => $a['emp'],
-                'accident'    => $a['acc'],
                 'accrued'     => $acc,
                 'collected'   => $col,
                 'uncollected' => max(0, $acc - $col),
@@ -188,7 +185,7 @@ final class TaxAgent
     }
 
     /**
-     * 특정 월의 예수금 수집 — 그 달 미수집분만 대리점 지갑에서 세무대리 지갑으로 이동.
+     * 특정 월의 원천세 예수금 수집 — 그 달 미수집분만 대리점 지갑에서 세무대리 지갑으로 이동.
      *
      * @param int|null $agencyId 특정 대리점만. null이면 그 달 미수집이 있는 전체 대리점.
      * @param string   $period   정산 귀속월(YYYY-MM).
@@ -229,14 +226,14 @@ final class TaxAgent
                 if ($amount <= 0) {
                     continue;
                 }
-                $note = sprintf('%s %s월 고용·산재 예수금 수집', (string) $t['agency_name'], $period);
+                $note = sprintf('%s %s월 원천세 예수금 수집', (string) $t['agency_name'], $period);
 
-                AgencyWallet::debit($aid, $amount, 'ins_collect_out', null, $note, $adminId);
-                db_execute('UPDATE agency_wallets SET insurance_reserve = GREATEST(0, insurance_reserve - ?), updated_at = NOW() WHERE agency_id = ?', [$amount, $aid]);
-                AgencyWallet::credit($taxId, $amount, 'ins_collect_in', $aid, $note, $adminId);
+                AgencyWallet::debit($aid, $amount, 'wh_collect_out', null, $note, $adminId);
+                db_execute('UPDATE agency_wallets SET withholding_reserve = GREATEST(0, withholding_reserve - ?), updated_at = NOW() WHERE agency_id = ?', [$amount, $aid]);
+                AgencyWallet::credit($taxId, $amount, 'wh_collect_in', $aid, $note, $adminId);
 
                 db_insert(
-                    'INSERT INTO tax_insurance_collections (tax_org_id, agency_id, period, amount, collected_by, collected_at)
+                    'INSERT INTO ' . self::TABLE . ' (tax_org_id, agency_id, period, amount, collected_by, collected_at)
                      VALUES (?, ?, ?, ?, ?, NOW())',
                     [$taxId, $aid, $period, $amount, ($adminId !== null && $adminId > 0) ? $adminId : null]
                 );
@@ -256,14 +253,14 @@ final class TaxAgent
      */
     public static function history(int $limit = 100): array
     {
-        if (!db_table_exists('tax_insurance_collections')) {
+        if (!db_table_exists(self::TABLE)) {
             return [];
         }
 
         return db_rows(
             "SELECT tc.id, tc.agency_id, o.name AS agency_name, tc.period, tc.amount,
                     DATE_FORMAT(tc.collected_at, '%Y-%m-%d %H:%i') AS collected_at
-               FROM tax_insurance_collections tc
+               FROM " . self::TABLE . " tc
                LEFT JOIN organizations o ON o.id = tc.agency_id
               ORDER BY tc.id DESC
               LIMIT ?",

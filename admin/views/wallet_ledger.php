@@ -28,7 +28,8 @@ if ($filterReason !== '' && !isset(AgencyWallet::REASON_LABELS[$filterReason])) 
 }
 
 $level = admin_org_level();
-$isAgencyLevel = $level === Org::LEVEL_AGENCY;
+// 대리점·세무대리는 자기 지갑만 본다(단일 조직 뷰).
+$isAgencyLevel = $level === Org::LEVEL_AGENCY || $level === Org::LEVEL_TAX_AGENT;
 if ($isAgencyLevel) {
     $filterOrg = admin_org_id();
 }

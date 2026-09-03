@@ -27,7 +27,7 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
 	<div id="kt_app_toolbar_container" class="app-container container-xxl d-flex flex-stack">
 		<div class="page-title d-flex flex-column justify-content-center flex-wrap me-3">
-			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">고용·산재 예수금</h1>
+			<h1 class="page-heading d-flex text-gray-900 fw-bold fs-3 flex-column justify-content-center my-0">원천세 예수금</h1>
 			<ul class="breadcrumb breadcrumb-separatorless fw-semibold fs-7 my-0 pt-1">
 				<li class="breadcrumb-item text-muted">세무대리</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
@@ -51,7 +51,7 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 	<div class="alert bg-light-primary d-flex align-items-center p-5 mb-8">
 		<i class="ki-duotone ki-shield-tick fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			각 대리점이 라이더 정산에서 걷은 고용·산재 예수금을 <strong>정산 귀속월 단위</strong>로 세무대리 지갑으로 가져와 그 달로 신고·납입합니다.
+			각 대리점이 라이더 정산에서 걷은 원천세 예수금을 <strong>정산 귀속월 단위</strong>로 세무대리 지갑으로 가져와 그 달로 신고·납입합니다.
 			「수집」하면 대리점 지갑에서 그 달 미수집분만 빠져 세무대리 지갑으로 들어옵니다.
 		</div>
 	</div>
@@ -88,15 +88,13 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 	<!--end::KPI-->
 
 	<div class="card card-flush mb-8">
-		<div class="card-header pt-5"><h3 class="card-title fw-bold">대리점별 고용·산재 (<span id="tax_period_label"><?= $esc($period) ?></span>월분)</h3></div>
+		<div class="card-header pt-5"><h3 class="card-title fw-bold">대리점별 원천세 (<span id="tax_period_label"><?= $esc($period) ?></span>월분)</h3></div>
 		<div class="card-body pt-0">
 			<div class="table-responsive">
 				<table class="table table-row-bordered align-middle fs-7 gy-3">
 					<thead>
 						<tr class="fw-bold text-muted">
 							<th>대리점</th>
-							<th class="text-end">고용</th>
-							<th class="text-end">산재</th>
 							<th class="text-end">걷힌 합계</th>
 							<th class="text-end">이미 수집</th>
 							<th class="text-end">미수집</th>
@@ -148,7 +146,7 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 		function renderRows(agencies) {
 			var tb = document.getElementById('tax_tbody');
 			if (!agencies || agencies.length === 0) {
-				tb.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-6">이 달에 걷힌 고용·산재가 없습니다.</td></tr>';
+				tb.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-6">이 달에 걷힌 원천세가 없습니다.</td></tr>';
 				return;
 			}
 			tb.innerHTML = agencies.map(function (a) {
@@ -156,8 +154,6 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 					? '<button type="button" class="btn btn-sm btn-light-primary tax-collect-one" data-agency="' + a.agency_id + '" data-name="' + String(a.agency_name).replace(/"/g, '&quot;') + '">수집</button>'
 					: '<span class="badge badge-light-success fs-8">완료</span>';
 				return '<tr><td class="fw-semibold">' + a.agency_name + ' <span class="text-muted fs-8">' + a.code + '</span></td>' +
-					'<td class="text-end text-gray-600">' + won(a.employment) + '</td>' +
-					'<td class="text-end text-gray-600">' + won(a.accident) + '</td>' +
 					'<td class="text-end fw-semibold">' + won(a.accrued) + '</td>' +
 					'<td class="text-end text-muted">' + won(a.collected) + '</td>' +
 					'<td class="text-end fw-bold' + (a.uncollected > 0 ? ' text-primary' : '') + '">' + won(a.uncollected) + '</td>' +

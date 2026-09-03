@@ -682,24 +682,21 @@ final class SettlementLedger
             RiderWallet::credit($riderId, $net, true);
         }
 
-        // #15 원천세 예수금 누적 — 원천세 대상 라이더 공제분을 대리점 지갑 reserve에 적립.
-        //     고용·산재도 같은 방식으로 insurance_reserve 에 적립한다(2026-09-01 갑 — 세무대리가 수집).
+        // #15 원천세 예수금 누적 — 원천세 대상 라이더 공제분을 대리점 지갑 reserve에 적립한다.
+        //     세무대리가 나중에 이 예수금을 월별로 수집한다(2026-09-04 갑).
+        //
+        // ⚠️ 고용·산재는 **예수금이 아니다** — 라이더에게서 공제만 하고 그 돈은 **대리점이 보유**한다
+        //    (2026-09-04 갑 정정: 예전엔 insurance_reserve 로 잠가 세무대리가 수집했으나 철회).
+        //    fee_items 에는 여전히 고용·산재가 남아 라이더 net 에서 빠지지만, 대리점 잠금은 안 한다.
         if ($orgId !== null && $orgId > 0) {
-            $withheld  = 0;
-            $insurance = 0;
+            $withheld = 0;
             foreach ($fees as $f) {
-                $code = (string) ($f['fee_code'] ?? '');
-                if ($code === 'withholding') {
+                if ((string) ($f['fee_code'] ?? '') === 'withholding') {
                     $withheld += (int) $f['amount'];
-                } elseif ($code === 'employment_ins' || $code === 'accident_ins') {
-                    $insurance += (int) $f['amount'];
                 }
             }
             if ($withheld > 0) {
                 AgencyWallet::addWithholdingReserve($orgId, $withheld);
-            }
-            if ($insurance > 0) {
-                AgencyWallet::addInsuranceReserve($orgId, $insurance);
             }
         }
 
