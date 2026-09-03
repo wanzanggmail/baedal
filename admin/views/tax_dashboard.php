@@ -52,7 +52,7 @@ $history     = $needsMigrate ? [] : TaxAgent::history(50);
 	<div class="alert bg-light-primary d-flex align-items-center p-5 mb-8">
 		<i class="ki-duotone ki-shield-tick fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			각 대리점이 라이더 정산에서 걷은 원천세 예수금을 <strong>정산 귀속월 단위</strong>로 세무대리 지갑으로 가져와 그 달로 신고·납입합니다.
+			각 대리점이 라이더 <strong>정산·프로모션</strong>에서 걷은 원천세 예수금을 <strong>정산 귀속월 단위</strong>로 세무대리 지갑으로 가져와 그 달로 신고·납입합니다.
 			「수집」하면 대리점 지갑에서 그 달 미수집분만 빠져 세무대리 지갑으로 들어옵니다.
 		</div>
 	</div>
