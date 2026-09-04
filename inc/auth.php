@@ -137,6 +137,15 @@ function admin_can_access_route(string $route): bool
     if ($user === null) {
         return false;
     }
+    // ⚠️ super 단축경로보다 **먼저** 판정한다.
+    // 대표·서브계정 관리(system/team)는 총판·대리점이 자기 조직 서브계정을 직접 관리하는
+    // 화면이라 본사에는 해당이 없다(본사는 system/admins 로 전체 계정을 관리한다).
+    // 아래 super 단축경로가 먼저 걸리면 본사 최고관리자에게 메뉴·화면은 열리는데
+    // API(admin_can_manage_team)는 403 을 내는 상태가 된다 — 실제로 그렇게 동작했다.
+    if (str_starts_with($route, 'system/team')) {
+        return admin_can_manage_team();
+    }
+
     if ($user['role'] === 'super') {
         return true;
     }
@@ -189,11 +198,6 @@ function admin_can_access_route(string $route): bool
     // 멀티테넌시: 조직 관리 — 본사(admin 레벨) 최고관리자만
     if (str_starts_with($route, 'system/orgs')) {
         return admin_can_manage_orgs();
-    }
-
-    // 대표·서브계정 관리 — 조직 대표계정만 (시스템관리 메뉴가 아닌 별도 자기조직 관리 기능)
-    if (str_starts_with($route, 'system/team')) {
-        return admin_can_manage_team();
     }
 
     // 리스 수수료 배분 — 본사 전용(2026-08-12 갑 확정: "수수료 배분 기능은 본사에서만 한다.
