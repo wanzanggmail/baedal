@@ -6,7 +6,7 @@ declare(strict_types=1);
  * DB 스키마 마이그레이션 (통합)
  * 실행: php migrate.php
  *
- * sql/*.sql 적용 (base_schema → 확장 테이블) + 기존 DB용 ALTER. 초기 관리자·코드는 php seed.php
+ * sql/*.sql 적용 (base_schema → 확장 테이블) + 기존 DB용 ALTER. 시스템 코드·차감 기본값도 함께 만든다.
  */
 
 require_once __DIR__ . '/inc/bootstrap.php';

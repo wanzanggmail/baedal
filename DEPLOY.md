@@ -222,8 +222,7 @@ cp .env.example .env    # 이미 .env 있으면 생략
 #    새로 만들 때만:  php tools/gen_enc_key.php
 mkdir -p uploads/banners
 chmod -R u+rwX uploads
-php migrate.php   # 스키마 (멱등, base_schema.sql 포함)
-php seed.php      # 초기 관리자·코드 (최초 1회)
+php migrate.php   # 스키마 + 시스템 코드·차감 기본값 (멱등)
 
 # 정산 xlsx 업로드·암호 해제 (필수)
 sudo dnf install -y php-zip || sudo yum install -y php-zip
@@ -241,25 +240,13 @@ sudo /usr/bin/python3 -m pip install msoffcrypto-tool
 ## DB 데이터가 비었을 때 (복구)
 
 1. MySQL/RDS에서 **새 DB·계정** 생성 후 서버 `.env` 갱신 (유출된 비밀번호는 즉시 폐기)
-2. `DEPLOY_PATH`에서 `php migrate.php` → `php seed.php`
-3. 관리자 로그인 (`admin` / `Admin1234!`) → **시스템 관리 → 정산 엑셀 암호** 재등록
-4. 라이더·정산 엑셀 **재업로드** (백업 없으면 수동 재입력)
-5. `seed.php` 실행 후 **파일 삭제**
+2. `DEPLOY_PATH`에서 `php migrate.php` (시스템 코드·차감 기본값까지 함께 만들어진다)
+3. 관리자 로그인 — `migrate.php` 가 본사 조직·최고관리자(`admin`)를 함께 만든다.
+   비밀번호는 `ADMIN_INIT_PASSWORD` 환경변수 값, 없으면 `Admin1234!` (**로그인 후 즉시 변경**)
+4. **시스템 관리 → 정산 엑셀 암호** 재등록
+5. 라이더·정산 엑셀 **재업로드** (백업 없으면 수동 재입력)
 
-**미매칭 정산 행 → 더미 라이더 (로컬·1회성)**
 
-```bash
-# 대상 확인만
-php scripts/seed_riders_from_settlement.php --upload-id=3 --dry-run
-
-# DB에 더미 라이더 생성 + settlement_daily_riders 연결
-php scripts/seed_riders_from_settlement.php --upload-id=3
-
-# SQL 파일로 뽑기 (다른 DB에 수동 실행)
-php scripts/seed_riders_from_settlement.php --upload-id=3 --sql-only > seed_riders.sql
-```
-
-`upload-id`는 `settlement_uploads.id`. 기본 비밀번호 `Rider1234!` (`--password=` 로 변경).
 
 ---
 

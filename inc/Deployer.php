@@ -92,9 +92,6 @@ final class Deployer
      * 배포 직후 이어서 실행할 수 있게 분리해 둔다. MigrateRunner 는 **멱등**이라
      * (모든 단계가 존재 여부를 먼저 확인) 반영할 게 없으면 전부 SKIP 으로 끝난다.
      *
-     * ⚠️ `seed.php`(초기 관리자·코드 생성)는 **일부러 넣지 않는다** — 멱등이 아니라
-     *    재실행하면 초기 계정이 되살아날 수 있다. 최초 1회만 SSH 로 실행할 것.
-     *
      * @return array{ok:bool, output:string}
      */
     public static function migrate(): array

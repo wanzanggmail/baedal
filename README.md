@@ -23,8 +23,8 @@ Metronic 8.3.3 + PHP + MariaDB/MySQL.
 ```bash
 # 프로젝트 루트
 cp .env.example .env          # 필요 시 DB 접속 정보 입력 (없으면 inc/db.php 기본값)
-php migrate.php               # sql/base_schema.sql → 확장 테이블 (멱등)
-php seed.php                  # 관리자·system_codes·차감 기본값 (최초 1회)
+php migrate.php               # 스키마 + 본사 조직·최고관리자·시스템 코드·차감 기본값 (멱등)
+# 최고관리자 admin / ADMIN_INIT_PASSWORD 없으면 Admin1234! → 로그인 후 즉시 변경
 ```
 
 - 개발 로그인: `admin` / `Admin1234!` (seed 후 비밀번호 변경 권장)
@@ -38,7 +38,7 @@ php seed.php                  # 관리자·system_codes·차감 기본값 (최�
 `main` / `master` push 시 GitHub Actions가 rsync로 동기화.  
 SSH 시크릿·경로·`.env` 유지: **[DEPLOY.md](DEPLOY.md)**
 
-배포 시 **제외**: `.env`, `uploads/`, `migrate.php`, `seed.php` (서버에만 둠)
+배포 시 **제외**: `.env`, `uploads/`, `migrate.php` (서버에만 둠)
 
 ---
 
@@ -51,7 +51,7 @@ SSH 시크릿·경로·`.env` 유지: **[DEPLOY.md](DEPLOY.md)**
 | `inc/` | bootstrap, auth, 도메인 클래스, `MigrateRunner.php` |
 | `sql/` | `base_schema.sql` + 기능별 DDL |
 | `scripts/` | rsync, `decrypt_xlsx.py` |
-| `migrate.php` / `seed.php` | CLI 스키마·초기 데이터 |
+| `migrate.php` | CLI 스키마·기본 데이터 |
 | `index.html` | 공개 랜딩 (Metronic 데모 HTML 폴더는 **제거됨**) |
 | `assets/` | Metronic **빌드 결과물** + `custom/landing.js`, `typedjs` |
 

@@ -128,11 +128,13 @@
 
 ### 차감 기본값
 
-`seed.php`의 일부 차감 기본값과 `MigrateRunner`의 최신 분리값이 다를 수 있습니다. 신규 설치는 반드시 `migrate.php` 후 `seed.php` 순서로 실행하고 실제 DB 값을 확인합니다.
+차감 기본값은 `MigrateRunner`가 만듭니다(`deduction_global_config`). 신규 설치 후 실제 DB 값을 확인합니다.
 
-### 레거시 seed.sql
+### 초기 관리자 계정
 
-`seed.sql`은 최신 조직·멀티테넌시 구조를 모두 반영하지 않습니다. 신규 설치에서는 `seed.php`를 사용합니다.
+2026-09-05에 `seed.php`·`seed.sql`을 제거하고, 필요한 초기 데이터를 `MigrateRunner::migrateBootstrapDefaults()`로 옮겼습니다. `migrate.php`가 본사 조직·최고관리자(`admin`)·시스템 코드·차감 기본값을 모두 만듭니다(전부 "없을 때만" 생성하므로 재실행해도 되살아나지 않습니다).
+
+최고관리자 비밀번호는 `ADMIN_INIT_PASSWORD` 환경변수를 쓰고, 없으면 `Admin1234!`가 됩니다. **알려진 기본값이므로 첫 로그인 후 반드시 변경합니다.** 샘플 총판·대리점은 만들지 않습니다.
 
 ### 상태값
 
@@ -141,7 +143,7 @@
 ## 12. 배포 제약
 
 - GitHub Actions는 DB 마이그레이션을 자동 실행하지 않음
-- `migrate.php`, `seed.php`, `vendor/`는 rsync 제외
+- `migrate.php`, `vendor/`는 rsync 제외
 - 스키마 변경과 Composer 변경은 서버에서 별도 처리
 - `--delete`로 Git에서 삭제된 일반 파일은 서버에서도 삭제
 - `.env`, uploads, storage는 배포로 갱신되지 않음
@@ -162,7 +164,6 @@
 
 - `.env`가 없을 때 `inc/db.php`의 기본 DB 값으로 접속을 시도할 수 있음
 - `.env.example` 값은 운영에 재사용하지 않아야 함
-- `seed.php`는 웹 접근이 가능할 수 있으므로 운영에서 차단 필요
 - Mock 금융 결과가 실제 처리처럼 화면에 보일 수 있음
 - FK가 없는 일부 조직 참조는 앱 로직으로 정합성을 보장함
 

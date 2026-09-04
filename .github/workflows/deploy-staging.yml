@@ -71,8 +71,6 @@ jobs:
             --exclude 'Thumbs.db' \
             --exclude '*.log' \
             --exclude 'migrate.php' \
-            --exclude 'seed.php' \
-            --exclude 'seed.sql' \
             ./ "$DEST"
 
       - name: Install composer dependencies on server
