@@ -386,7 +386,7 @@ final class RiderDebt
      *
      * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}
      */
-    public static function applyRepayment(int $debtId, string $appliedDate, int $days, ?int $amount, string $memo = ''): array
+    public static function applyRepayment(int $debtId, string $appliedDate, int $days, ?int $amount, string $memo = '', ?string $coveredThrough = null): array
     {
         $debt = self::find($debtId);
         if ($debt === null) {
@@ -443,10 +443,16 @@ final class RiderDebt
             }
         }
 
+        // 차감 귀속일(applied_date)과 **부과가 커버한 마지막 날**은 다를 수 있다.
+        // 부분 부과(여유분이 모자라 일부 일수만 걷을 때) 시 귀속일은 반드시 **정산일**이어야
+        // buildFeeItems(applied_date = settlement_date 로 조회)가 그 차감을 실제로 소비한다.
+        // 반면 due_updated_on 은 커버한 날까지만 밀려야 나머지가 다음 정산에서 다시 잡힌다.
+        $covered = self::normDate($coveredThrough) ?? $appliedDate;
+
         $chain = $kind === 'lease' ? self::orgChainForRider((int) $debt['rider_id']) : ['agency' => 0, 'distributor' => 0, 'hq' => 0];
 
         return db_transaction(static function () use (
-            $debtId, $debt, $appliedDate, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
+            $debtId, $debt, $appliedDate, $covered, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
         ): array {
             // 1) 정산 반영이 소비할 deduction_entries
             $dedId = db_insert(
@@ -470,10 +476,10 @@ final class RiderDebt
                 $newStatus = $balanceAfter <= 0 ? 'closed' : (string) $debt['status'];
                 db_execute(
                     'UPDATE rider_debts SET balance_amount = ?, due_updated_on = ?, status = ?, closed_on = ? WHERE id = ?',
-                    [$balanceAfter, $appliedDate, $newStatus, $newStatus === 'closed' ? $appliedDate : $debt['closed_on'], $debtId]
+                    [$balanceAfter, $covered, $newStatus, $newStatus === 'closed' ? $appliedDate : $debt['closed_on'], $debtId]
                 );
             } else {
-                db_execute('UPDATE rider_debts SET due_updated_on = ? WHERE id = ?', [$appliedDate, $debtId]);
+                db_execute('UPDATE rider_debts SET due_updated_on = ? WHERE id = ?', [$covered, $debtId]);
             }
 
             // 4) 리스 수수료 상위 배분 — 대리점 지갑 → 본사·총판 지갑(같은 트랜잭션)
@@ -573,7 +579,7 @@ final class RiderDebt
      *
      * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}|null
      */
-    public static function applyDailyAccrualForPeriod(int $debtId, string $periodEnd): ?array
+    public static function applyDailyAccrualForPeriod(int $debtId, string $periodEnd, ?int $headroom = null): ?array
     {
         $debt = self::find($debtId);
         if ($debt === null || (string) $debt['status'] !== 'active') {
@@ -615,6 +621,21 @@ final class RiderDebt
         }
 
         $days   = (int) (new DateTime($chargeStart))->diff(new DateTime($chargeEnd))->days + 1;
+
+        // 그날 걷을 수 있는 여유분($headroom)이 주어지면 **걷을 수 있는 일수만큼만** 부과한다.
+        // 나머지 날짜는 due_updated_on 이 안 밀리므로 다음 정산에서 자동으로 다시 잡힌다(이월).
+        // 라이더 실수령이 0으로 잘리면서 차감액이 증발하는 걸 막는 장치다(2026-09-04 갑).
+        if ($headroom !== null) {
+            if ($headroom < $daily) {
+                return null; // 하루치도 못 걷음 → 전부 이월
+            }
+            $affordable = intdiv($headroom, $daily);
+            if ($affordable < $days) {
+                $days      = $affordable;
+                $chargeEnd = self::addDays($chargeStart, $days - 1);
+            }
+        }
+
         $amount = $days * $daily;
         if ($amount <= 0) {
             return null;
@@ -623,10 +644,11 @@ final class RiderDebt
         try {
             return self::applyRepayment(
                 $debtId,
-                $chargeEnd,
+                $pe,          // 귀속일 = 정산일 — 이 사이클이 소비해야 한다
                 $days,
                 $amount,
-                sprintf('자동계산: %s~%s %d일(달력일)', $chargeStart, $chargeEnd, $days)
+                sprintf('자동계산: %s~%s %d일(달력일)', $chargeStart, $chargeEnd, $days),
+                $chargeEnd    // 커버한 마지막 날 — 나머지는 다음 정산으로 이월
             );
         } catch (Throwable $e) {
             // (debt_id, applied_date) UNIQUE 위반 = 이미 이 귀속일로 처리됨 → 재실행 시 조용히 skip

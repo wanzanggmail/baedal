@@ -89,7 +89,7 @@ final class SettlementLedger
         //
         // 트랜잭션 밖인 것은 유지 — 개별 리스 데이터 이상이 정산 반영 전체를 막지 않게 하기 위함이며,
         // 재실행 시 이중 차감은 rider_debt_entries UNIQUE(debt_id, applied_date)가 막는다.
-        self::applyActiveDebtsForUpload($rows);
+        self::applyActiveDebtsForUpload($rows, $cfg, $orgId);
 
         db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, $teamRegion, &$applied, &$skipped, &$errors): void {
             foreach ($rows as $row) {
@@ -142,7 +142,7 @@ final class SettlementLedger
      *
      * @param list<array<string, mixed>> $rows settlement_daily_riders 행 목록(applyUpload에서 조회한 것)
      */
-    private static function applyActiveDebtsForUpload(array $rows): void
+    private static function applyActiveDebtsForUpload(array $rows, array $cfg, ?int $orgId = null): void
     {
         if (!class_exists('RiderDebt')) {
             require_once __DIR__ . '/RiderDebt.php';
@@ -162,12 +162,43 @@ final class SettlementLedger
             $rows
         )));
 
+        // 라이더별 "그날 걷을 수 있는 여유분" — 미수금 차감을 넣기 **전** 상태의 실지급 예상액.
+        // previewFromDailyRow 가 법정공제·시간제보험·엑셀차감·대행수수료·기존 이월분을 모두
+        // 반영한 net 을 주므로, 그게 곧 미수금에 쓸 수 있는 한도다.
+        $headroom = [];
+        foreach ($rows as $row) {
+            $rid = (int) ($row['rider_id'] ?? 0);
+            if ($rid < 1) {
+                continue;
+            }
+            try {
+                $headroom[$rid] = ($headroom[$rid] ?? 0) + (int) self::previewFromDailyRow($row, $orgId)['net'];
+            } catch (Throwable) {
+                $headroom[$rid] = $headroom[$rid] ?? 0;
+            }
+        }
+
         foreach ($riderIds as $riderId) {
-            foreach (RiderDebt::forRider($riderId, true) as $debt) {
+            $left = (int) ($headroom[$riderId] ?? 0);
+
+            // 리스 먼저 — 계약 종료일이 있어 부과 창이 닫히고, 걷은 리스료는 상위 조직에
+            // 배분할 의무가 붙는다. 그 다음은 오래된 채권부터.
+            $debts = RiderDebt::forRider($riderId, true);
+            usort($debts, static function (array $a, array $b): int {
+                $rank = static fn (array $d): int => (string) $d['kind'] === 'lease' ? 0 : 1;
+
+                return [$rank($a), (string) ($a['opened_on'] ?? ''), (int) $a['id']]
+                   <=> [$rank($b), (string) ($b['opened_on'] ?? ''), (int) $b['id']];
+            });
+
+            foreach ($debts as $debt) {
                 try {
-                    RiderDebt::applyDailyAccrualForPeriod((int) $debt['id'], (string) $periodEnd);
+                    $r = RiderDebt::applyDailyAccrualForPeriod((int) $debt['id'], (string) $periodEnd, $left);
+                    if ($r !== null) {
+                        $left = max(0, $left - (int) $r['amount']);
+                    }
                 } catch (Throwable) {
-                    // 개별 미수금 자동계산 실패가 정산 반영 자체를 막지 않는다.
+                    // 개별 미수금 자동계산 실패가 정산 반영 전체를 막지 않는다.
                     continue;
                 }
             }
@@ -514,6 +545,100 @@ final class SettlementLedger
     }
 
     /**
+     * 이월 우선순위 — **앞쪽일수록 먼저 이월**(=나중에 걷음)된다.
+     *
+     * 법정공제(원천세·고용·산재)는 정산액 비례라 base 가 작으면 자동으로 작아지므로
+     * 마지막까지 지킨다. 실제로 밀리는 건 정산서에서 온 정액 차감이다.
+     * 미수금(loan/lease/advance/rental)은 부과 단계에서 이미 걷을 수 있는 일수만큼만
+     * 만들어지므로 여기까지 오는 일이 거의 없다 — 안전망으로만 둔다.
+     */
+    private const DEFER_PRIORITY = [
+        'excel_deduction', 'manual', 'vat',
+        'carry_forward',
+        'loan', 'lease', 'rental', 'advance',
+        'hourly_ins',
+        'agency_fee',
+        'withholding', 'employment_ins', 'accident_ins',
+    ];
+
+    /**
+     * 공제 합이 정산액을 넘으면 **초과분을 잘라 이월 대상으로 넘기고**, 남는 여유가 있으면
+     * 지난 이월분을 끌어와 걷는다(2026-09-04 갑: "받아야 할 금액은 최대한 받아내고
+     * 놓히는 법이 없도록").
+     *
+     * 예전에는 `net = max(0, base - totalFee)` 로 초과분이 **증발**했다 — 장부에는
+     * 걷었다고 남고 현금은 안 들어오는 상태(실측 9건 135,034원).
+     *
+     * 이 메서드는 **DB를 건드리지 않는다** — 미리보기와 실제 반영이 같은 값을 내야 하므로
+     * 계산만 하고, 실제 이월 등록·회수는 createCycleFromDailyRow 가 한다.
+     *
+     * @param list<array{fee_code:string, label:string, amount:int}> $fees
+     * @return array{fees: list<array{fee_code:string, label:string, amount:int}>,
+     *               deferred: list<array{fee_code:string, label:string, amount:int}>,
+     *               carry_applied: int}
+     */
+    private static function settleFeesAgainstBase(int $base, array $fees, int $riderId): array
+    {
+        $total = 0;
+        foreach ($fees as $f) {
+            $total += (int) $f['amount'];
+        }
+
+        $deferred = [];
+        $need     = $total - $base;
+
+        if ($need > 0) {
+            // 우선순위 앞쪽부터 깎아 초과분을 없앤다. 같은 코드가 여러 건이면 뒤에 들어온 것부터.
+            foreach (self::DEFER_PRIORITY as $code) {
+                if ($need <= 0) {
+                    break;
+                }
+                for ($i = count($fees) - 1; $i >= 0 && $need > 0; $i--) {
+                    if ((string) $fees[$i]['fee_code'] !== $code) {
+                        continue;
+                    }
+                    $amt = (int) $fees[$i]['amount'];
+                    if ($amt <= 0) {
+                        continue;
+                    }
+                    $cut = min($amt, $need);
+                    $fees[$i]['amount'] = $amt - $cut;
+                    $need -= $cut;
+                    $deferred[] = [
+                        'fee_code' => $code,
+                        'label'    => (string) $fees[$i]['label'],
+                        'amount'   => $cut,
+                    ];
+                }
+            }
+            // 0원이 된 항목은 명세서에서 뺀다(공제 안 했으므로).
+            $fees = array_values(array_filter($fees, static fn (array $f): bool => (int) $f['amount'] > 0));
+        }
+
+        // 여유가 남으면 지난 이월분을 걷는다.
+        $carry = 0;
+        if ($need <= 0 && $riderId > 0) {
+            $used = 0;
+            foreach ($fees as $f) {
+                $used += (int) $f['amount'];
+            }
+            $headroom = $base - $used;
+            if ($headroom > 0) {
+                if (!class_exists('RiderCarryForward')) {
+                    require_once __DIR__ . '/RiderCarryForward.php';
+                }
+                if (RiderCarryForward::tableReady()) {
+                    $carry = min(RiderCarryForward::outstanding($riderId), $headroom);
+                    if ($carry > 0) {
+                        $fees[] = ['fee_code' => 'carry_forward', 'label' => '이월 차감', 'amount' => $carry];
+                    }
+                }
+            }
+        }
+
+        return ['fees' => $fees, 'deferred' => $deferred, 'carry_applied' => $carry];
+    }
+    /**
      * 정산 반영·미리보기 공통 산식.
      *
      * base = 부가세 제외 정산액 + 지원금. 보수액·부가세는 쓰지 않는다.
@@ -572,7 +697,16 @@ final class SettlementLedger
             }
         }
 
-        return ['base' => $base, 'fees' => $fees, 'agency_fee' => $agencyFee, 'agency_fee_payer' => $agencyPayer];
+        $settled = self::settleFeesAgainstBase($base, $fees, $riderId);
+
+        return [
+            'base'             => $base,
+            'fees'             => $settled['fees'],
+            'deferred'         => $settled['deferred'],
+            'carry_applied'    => $settled['carry_applied'],
+            'agency_fee'       => $agencyFee,
+            'agency_fee_payer' => $agencyPayer,
+        ];
     }
 
     /**
@@ -679,6 +813,29 @@ final class SettlementLedger
 
         if ($net > 0) {
             RiderWallet::credit($riderId, $net, true);
+        }
+
+        // ── 차감 이월 처리(2026-09-04) ─────────────────────────────────────────
+        // 정산액이 정액 차감보다 적어 못 걷은 금액은 **증발시키지 않고** 이월 원장에 남겨
+        // 다음 정산에서 걷는다. 반대로 이번에 여유가 있어 지난 이월분을 끌어 썼으면
+        // 그만큼 원장에서 회수 처리한다(fee_items 의 carry_forward 금액과 정확히 일치).
+        if (!class_exists('RiderCarryForward')) {
+            require_once __DIR__ . '/RiderCarryForward.php';
+        }
+        if (RiderCarryForward::tableReady()) {
+            $carry = (int) ($composed['carry_applied'] ?? 0);
+            if ($carry > 0) {
+                RiderCarryForward::consume($riderId, $carry, $cycleId);
+            }
+            foreach (($composed['deferred'] ?? []) as $d) {
+                RiderCarryForward::add(
+                    $riderId,
+                    (int) $d['amount'],
+                    (string) $d['fee_code'],
+                    (string) $d['label'],
+                    $cycleId
+                );
+            }
         }
 
         // #15 원천세 예수금 누적 — 원천세 대상 라이더 공제분을 대리점 지갑 reserve에 적립한다.

@@ -88,6 +88,7 @@ final class MigrateRunner
         self::migrateMessagingBilling();
         self::migrateAlimtalkTemplates();
         self::migrateDebtAccrualBaseline();
+        self::migrateCarryForward();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -3051,5 +3052,39 @@ final class MigrateRunner
         );
 
         echo "OK    기준일 = " . date('Y-m-d') . " · 대상 {$n}건 (과거분 청구 안 함)\n";
+    }
+
+    /**
+     * 라이더 차감 이월 원장 — 그날 정산액이 정액 차감보다 적을 때 못 걷은 금액을 담는다.
+     * 이전에는 net = max(0, base - fee) 로 초과분이 증발했다(실측 9건 135,034원).
+     */
+    private static function migrateCarryForward(): void
+    {
+        echo "== 라이더 차감 이월 원장 ==\n";
+
+        if (db_table_exists('rider_carry_forward')) {
+            echo "SKIP  rider_carry_forward (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE rider_carry_forward (
+                id                 INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                rider_id           INT UNSIGNED NOT NULL,
+                origin_cycle_id    INT UNSIGNED NULL COMMENT '이월이 발생한 정산 사이클',
+                collected_cycle_id INT UNSIGNED NULL COMMENT '회수가 시작된 정산 사이클',
+                fee_code           VARCHAR(40)  NOT NULL COMMENT '원래 차감 코드(excel_deduction 등)',
+                label              VARCHAR(100) NOT NULL DEFAULT '',
+                amount             INT NOT NULL COMMENT '최초 이월액',
+                remaining_amount   INT NOT NULL COMMENT '아직 못 걷은 금액',
+                closed_at          DATETIME NULL,
+                updated_at         DATETIME NULL,
+                created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_rcf_rider (rider_id, remaining_amount),
+                KEY idx_rcf_origin (origin_cycle_id)
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+               COMMENT='라이더 차감 이월(정산액 부족으로 못 걷은 정액 차감)'"
+        );
+        echo "OK    rider_carry_forward 생성\n";
     }
 }
