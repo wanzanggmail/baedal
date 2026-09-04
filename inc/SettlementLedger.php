@@ -89,7 +89,7 @@ final class SettlementLedger
         //
         // 트랜잭션 밖인 것은 유지 — 개별 리스 데이터 이상이 정산 반영 전체를 막지 않게 하기 위함이며,
         // 재실행 시 이중 차감은 rider_debt_entries UNIQUE(debt_id, applied_date)가 막는다.
-        self::applyActiveLeasesForUpload($rows);
+        self::applyActiveDebtsForUpload($rows);
 
         db_transaction(static function () use ($rows, $upload, $uploadId, $cfg, $adminId, $orgId, $teamRegion, &$applied, &$skipped, &$errors): void {
             foreach ($rows as $row) {
@@ -133,12 +133,16 @@ final class SettlementLedger
     }
 
     /**
-     * 업로드에 매칭된 라이더들의 정산기간(min~max settlement_date)을 구해
-     * 각 라이더의 활성 리스에 자동 일수계산을 1회씩 적용한다(§7 격차, RiderDebt::applyLeaseForPeriod).
+     * 업로드에 매칭된 라이더들의 활성 미수금(대여금·리스·선지급금)에 **일납 자동 부과**를
+     * 1회씩 적용한다 — RiderDebt::applyDailyAccrualForPeriod().
+     *
+     * 2026-09-04 갑 확정으로 **리스 전용에서 세 종류 전부로 확대**됐고, 계산 기준도
+     * "업로드 기간 ∩ 계약기간"에서 "마지막 반영일 다음날 ~ 정산기간 끝"으로 바뀌었다.
+     * 라이더가 쉬어서 파일에 안 나온 날도 달력일로 부과되어야 하기 때문이다.
      *
      * @param list<array<string, mixed>> $rows settlement_daily_riders 행 목록(applyUpload에서 조회한 것)
      */
-    private static function applyActiveLeasesForUpload(array $rows): void
+    private static function applyActiveDebtsForUpload(array $rows): void
     {
         if (!class_exists('RiderDebt')) {
             require_once __DIR__ . '/RiderDebt.php';
@@ -151,8 +155,7 @@ final class SettlementLedger
         if ($dates === []) {
             return;
         }
-        $periodStart = min($dates);
-        $periodEnd   = max($dates);
+        $periodEnd = max($dates);
 
         $riderIds = array_unique(array_filter(array_map(
             static fn ($r) => (int) ($r['rider_id'] ?? 0),
@@ -160,15 +163,11 @@ final class SettlementLedger
         )));
 
         foreach ($riderIds as $riderId) {
-            $leases = array_filter(
-                RiderDebt::forRider($riderId, true),
-                static fn (array $d): bool => (string) $d['kind'] === 'lease'
-            );
-            foreach ($leases as $debt) {
+            foreach (RiderDebt::forRider($riderId, true) as $debt) {
                 try {
-                    RiderDebt::applyLeaseForPeriod((int) $debt['id'], (string) $periodStart, (string) $periodEnd);
+                    RiderDebt::applyDailyAccrualForPeriod((int) $debt['id'], (string) $periodEnd);
                 } catch (Throwable) {
-                    // 리스 자동계산 실패가 정산 반영 자체를 막지 않는다(개별 미수금 데이터 이상 등).
+                    // 개별 미수금 자동계산 실패가 정산 반영 자체를 막지 않는다.
                     continue;
                 }
             }

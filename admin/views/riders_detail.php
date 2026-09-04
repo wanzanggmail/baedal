@@ -406,7 +406,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $fmtWon($d['daily_amount']) : '—' ?></td>
 							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-600 fs-8">
-								<?php $gap = $dk === 'lease' ? RiderDebt::leaseAccrualGap($d) : null; ?>
+								<?php $gap = RiderDebt::accrualGap($d); ?>
 								<?php if ($dk === 'lease' && (string) ($d['opened_on'] ?? '') !== '' && (string) ($d['planned_end_on'] ?? '') !== ''): ?>
 								<?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?>
 								<?php if ($gap !== null && $gap['overdue']): ?>

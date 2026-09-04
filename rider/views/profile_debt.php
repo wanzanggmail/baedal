@@ -57,7 +57,7 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 					<span>계약기간 <?= htmlspecialchars((string) $d['opened_on'], ENT_QUOTES, 'UTF-8') ?> ~ <?= htmlspecialchars((string) $d['planned_end_on'], ENT_QUOTES, 'UTF-8') ?></span>
 					<?php endif; ?>
 				</div>
-				<?php $gap = $dk === 'lease' ? RiderDebt::leaseAccrualGap($d) : null; ?>
+				<?php $gap = RiderDebt::accrualGap($d); ?>
 				<?php if ($gap !== null && $gap['overdue']) : ?>
 				<div class="fs-8 text-warning mt-1">
 					<i class="ki-duotone ki-information-5 fs-7 me-1"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>

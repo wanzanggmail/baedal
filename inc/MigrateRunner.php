@@ -87,6 +87,7 @@ final class MigrateRunner
         self::migrateTaxAgentToWithholding();
         self::migrateMessagingBilling();
         self::migrateAlimtalkTemplates();
+        self::migrateDebtAccrualBaseline();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -3000,4 +3001,55 @@ final class MigrateRunner
         }
     }
 
+
+    /**
+     * 미수금 일납 자동부과 **기준일 세팅** — DB당 딱 한 번만 실행된다(2026-09-04).
+     *
+     * 이날 대여금·선지급금까지 자동부과 대상이 되고 계산도 달력일 기준으로 바뀌면서,
+     * 그동안 부과되지 않았던 과거 구간이 다음 정산 반영 때 한꺼번에 청구될 수 있었다
+     * (개발 DB 실측 6,837,000원 / 24건). 갑 지시는 **"소급은 안해도되"** 이므로,
+     * 기존 미수금의 마지막 반영일을 오늘로 당겨 **과거분을 청구하지 않고** 오늘 이후만 쌓이게 한다.
+     *
+     * 마커 테이블 존재 여부로 1회성을 보장한다 — 두 번째 실행부터는 아무것도 하지 않는다
+     * (매번 돌면 기준일이 계속 밀려 정상 부과분까지 사라진다).
+     */
+    private static function migrateDebtAccrualBaseline(): void
+    {
+        echo "== 미수금 자동부과 기준일 세팅 ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts 없음\n";
+
+            return;
+        }
+        if (db_table_exists('rider_debt_accrual_baseline')) {
+            echo "SKIP  이미 기준일이 잡혀 있음(1회성)\n";
+
+            return;
+        }
+
+        $n = db_execute(
+            "UPDATE rider_debts
+                SET due_updated_on = CURDATE()
+              WHERE status = 'active' AND daily_amount > 0
+                AND (due_updated_on IS NULL OR due_updated_on < CURDATE())"
+        );
+
+        db_execute(
+            "CREATE TABLE rider_debt_accrual_baseline (
+                id         TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
+                applied_on DATE NOT NULL,
+                rows_set   INT  NOT NULL DEFAULT 0,
+                note       VARCHAR(255) NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+               COMMENT='미수금 일납 자동부과 기준일(1회성 마커)'"
+        );
+        db_insert(
+            'INSERT INTO rider_debt_accrual_baseline (id, applied_on, rows_set, note) VALUES (1, CURDATE(), ?, ?)',
+            [$n, '2026-09-04 갑 지시 "소급은 안해도되" — 과거 미부과분 청구하지 않음']
+        );
+
+        echo "OK    기준일 = " . date('Y-m-d') . " · 대상 {$n}건 (과거분 청구 안 함)\n";
+    }
 }

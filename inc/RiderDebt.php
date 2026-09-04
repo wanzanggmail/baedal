@@ -550,32 +550,71 @@ final class RiderDebt
      */
     public static function applyLeaseForPeriod(int $debtId, string $periodStart, string $periodEnd): ?array
     {
+        return self::applyDailyAccrualForPeriod($debtId, $periodEnd);
+    }
+
+    /**
+     * 일납 자동 부과 — **대여금·리스·선지급금 공통**(2026-09-04 갑 확정).
+     *
+     * 갑 원문: *"일하지 않는 날에도 차감이 생겨야해. 대여금 선지급금도 자동으로 되어야해"*
+     *
+     * ⚠️ **근무일이 아니라 달력일 기준**이다. 그래서 정산 반영이 뜸했던 구간(업로드가
+     * 없어서 건너뛴 날들)도 이번 호출에서 **한꺼번에 메운다**. 이전 구현
+     * (applyLeaseForPeriod)은 업로드의 정산기간(min~max)과 계약기간이 겹치는 날만
+     * 셌기 때문에, 라이더가 쉬어서 파일에 안 나온 날은 영영 차감되지 않았다.
+     *
+     * 부과 구간 = (마지막 반영일+1) ~ min(정산기간 끝, 종료예정일)
+     *   - 마지막 반영일: `due_updated_on`, 없으면 `opened_on - 1일`(= 개시일부터 전부)
+     *   - `planned_end_on` 이 없으면(대여금·선지급금) 종료 상한 없이 정산기간 끝까지.
+     *     대신 상각형이라 **잔액이 바닥나면 자동 완납(closed)** 되어 더 부과되지 않는다.
+     *
+     * 멱등성: 귀속일이 같으면 (debt_id, applied_date) UNIQUE 에 걸려 조용히 null 을
+     * 반환한다(같은 업로드 재반영 시 이중 차감 없음).
+     *
+     * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}|null
+     */
+    public static function applyDailyAccrualForPeriod(int $debtId, string $periodEnd): ?array
+    {
         $debt = self::find($debtId);
-        if ($debt === null || (string) $debt['kind'] !== 'lease' || (string) $debt['status'] !== 'active') {
+        if ($debt === null || (string) $debt['status'] !== 'active') {
             return null;
         }
 
-        $daily = (int) $debt['daily_amount'];
+        $daily  = (int) $debt['daily_amount'];
         $opened = self::normDate($debt['opened_on'] ?? null);
-        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
-        // 계약기간(출고일~종료예정일)이 설정 안 된 리스는 자동계산 불가 — 수동 차감(applyRepayment)으로 처리해야 함.
-        if ($daily <= 0 || $opened === null || $plannedEnd === null) {
+        // 일납이 없거나 개시일이 없으면 자동계산 불가 — 수동 차감(applyRepayment)으로 처리한다.
+        if ($daily <= 0 || $opened === null) {
             return null;
         }
 
-        $ps = self::normDate($periodStart);
         $pe = self::normDate($periodEnd);
-        if ($ps === null || $pe === null) {
+        if ($pe === null) {
             throw new InvalidArgumentException('정산기간 형식이 올바르지 않습니다. (YYYY-MM-DD)');
         }
 
-        $overlapStart = max($ps, $opened);
-        $overlapEnd   = min($pe, $plannedEnd);
-        if ($overlapStart > $overlapEnd) {
-            return null; // 계약기간과 정산기간이 겹치지 않음
+        // 상각형(대여금·선지급금)은 잔액이 남아 있어야 부과한다.
+        $isAmortizing = in_array((string) $debt['kind'], self::AMORTIZING, true);
+        $balance      = (int) $debt['balance_amount'];
+        if ($isAmortizing && $balance <= 0) {
+            return null;
         }
 
-        $days = (int) (new DateTime($overlapStart))->diff(new DateTime($overlapEnd))->days + 1;
+        // 부과 시작 = 마지막 반영 다음날(없으면 개시일)
+        $lastCovered = self::normDate($debt['due_updated_on'] ?? null);
+        $chargeStart = $lastCovered !== null ? self::addDays($lastCovered, 1) : $opened;
+        if ($chargeStart < $opened) {
+            $chargeStart = $opened;
+        }
+
+        // 부과 끝 = 정산기간 끝, 종료예정일이 있으면 그보다 늦지 않게
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        $chargeEnd  = ($plannedEnd !== null && $plannedEnd < $pe) ? $plannedEnd : $pe;
+
+        if ($chargeStart > $chargeEnd) {
+            return null; // 이미 반영됐거나 계약 시작 전 / 종료 후
+        }
+
+        $days   = (int) (new DateTime($chargeStart))->diff(new DateTime($chargeEnd))->days + 1;
         $amount = $days * $daily;
         if ($amount <= 0) {
             return null;
@@ -584,20 +623,19 @@ final class RiderDebt
         try {
             return self::applyRepayment(
                 $debtId,
-                $pe,
+                $chargeEnd,
                 $days,
                 $amount,
-                sprintf('자동계산: 계약기간∩정산기간(%s~%s) %d일', $overlapStart, $overlapEnd, $days)
+                sprintf('자동계산: %s~%s %d일(달력일)', $chargeStart, $chargeEnd, $days)
             );
         } catch (Throwable $e) {
-            // (debt_id, applied_date) UNIQUE 위반 = 이미 이 정산기간으로 처리됨 → 재실행 시 조용히 skip
+            // (debt_id, applied_date) UNIQUE 위반 = 이미 이 귀속일로 처리됨 → 재실행 시 조용히 skip
             if (str_contains($e->getMessage(), 'uq_rde_debt_applied') || str_contains($e->getMessage(), 'Duplicate entry')) {
                 return null;
             }
             throw $e;
         }
     }
-
     /**
      * 리스 수수료 배분 리포트 — 기간 내 실제로 배분된 금액을 조직별로 집계.
      * 현재 로그인 계정의 스코프(본사=전체 / 총판=하위 / 대리점=자기)를 자동 적용한다.
@@ -698,32 +736,50 @@ final class RiderDebt
         return [implode(' AND ', $conds), $params];
     }
 
-    /**
-     * 리스 차감 공백 상태 — 계약기간은 흐르는데 정산 반영이 뜸해서 차감이 밀린 경우를
-     * 관리자·라이더 화면에 동일하게 보여주기 위한 공용 계산. 실제 차감은 여전히
-     * applyLeaseForPeriod()(정산 반영 시점)에서만 일어나며, 이 메서드는 판단만 한다.
-     *
-     * @param array<string,mixed> $debt rider_debts 행(kind 무관하게 넘겨도 안전)
-     * @return array{missing_end_date: bool, overdue: bool, gap_days: int}|null
-     *         active 상태의 리스가 아니면 null(대여금/선지급/비활성/완료는 해당 없음)
-     */
+    /** @deprecated accrualGap() 을 쓸 것 — 리스만 보던 시절의 이름. */
     public static function leaseAccrualGap(array $debt, ?string $today = null): ?array
     {
-        if ((string) ($debt['kind'] ?? '') !== 'lease' || (string) ($debt['status'] ?? '') !== 'active') {
+        return (string) ($debt['kind'] ?? '') === 'lease' ? self::accrualGap($debt, $today) : null;
+    }
+
+    /**
+     * 차감 공백 상태 — **대여금·리스·선지급금 공통**. 달력일은 흐르는데 정산 반영이
+     * 뜸해서 차감이 밀린 일수를 관리자·라이더 화면에 동일하게 보여주기 위한 계산.
+     * 판단만 하고 실제 차감은 applyDailyAccrualForPeriod()(정산 반영 시점)가 한다.
+     *
+     * 다음 정산 반영 때 여기 gap_days 만큼이 **한꺼번에 부과**된다.
+     *
+     * @param array<string,mixed> $debt rider_debts 행
+     * @return array{missing_end_date: bool, overdue: bool, gap_days: int}|null
+     *         active 가 아니거나 일납·개시일이 없으면 null
+     */
+    public static function accrualGap(array $debt, ?string $today = null): ?array
+    {
+        if ((string) ($debt['status'] ?? '') !== 'active') {
             return null;
         }
-        $today      = self::normDate($today) ?? date('Y-m-d');
-        $opened     = self::normDate($debt['opened_on'] ?? null);
-        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        $today  = self::normDate($today) ?? date('Y-m-d');
+        $opened = self::normDate($debt['opened_on'] ?? null);
+        $kind   = (string) ($debt['kind'] ?? '');
 
-        if ($opened === null || $plannedEnd === null) {
+        // 리스는 계약 종료일이 있어야 자동계산이 성립한다(반복 부과라 잔액 상한이 없음).
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        if ($kind === 'lease' && ($opened === null || $plannedEnd === null)) {
             return ['missing_end_date' => true, 'overdue' => false, 'gap_days' => 0];
         }
+        if ($opened === null || (int) ($debt['daily_amount'] ?? 0) <= 0) {
+            return null; // 일납/개시일 없는 건은 수동 차감 대상
+        }
+        // 상각형은 잔액이 없으면 더 부과되지 않으므로 공백도 없다.
+        if (in_array($kind, self::AMORTIZING, true) && (int) ($debt['balance_amount'] ?? 0) <= 0) {
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0];
+        }
         if ($opened > $today) {
-            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0]; // 계약 시작 전
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0]; // 개시 전
         }
 
-        $coverageEnd = min($today, $plannedEnd); // 오늘 또는 계약 종료일 중 이른 쪽까지는 반영돼 있어야 함
+        // 오늘(또는 종료예정일 중 이른 쪽)까지는 반영돼 있어야 한다.
+        $coverageEnd = ($plannedEnd !== null && $plannedEnd < $today) ? $plannedEnd : $today;
         $lastCovered = self::normDate($debt['due_updated_on'] ?? null) ?? self::addDays($opened, -1);
         if ($lastCovered >= $coverageEnd) {
             return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0];
@@ -737,7 +793,6 @@ final class RiderDebt
             'gap_days'         => $gapDays,
         ];
     }
-
     private static function addDays(string $date, int $days): string
     {
         return (new DateTime($date))->modify(($days >= 0 ? '+' : '') . $days . ' days')->format('Y-m-d');
