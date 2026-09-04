@@ -394,7 +394,7 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 					<tbody>
 						<?php foreach ($debts as $d):
 							$dk = (string) $d['kind'];
-							$isAmort = in_array($dk, ['loan', 'advance'], true);
+							$isAmort = in_array($dk, ['loan', 'advance', 'lease'], true);
 						?>
 						<tr>
 							<td>

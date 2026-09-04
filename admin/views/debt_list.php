@@ -94,7 +94,7 @@ if (!$needsMigrate) {
     $k = db_row(
         "SELECT
             SUM(CASE WHEN d.status = 'active' THEN 1 ELSE 0 END) AS active_cnt,
-            SUM(CASE WHEN d.status = 'active' AND d.kind IN ('loan','advance') THEN d.balance_amount ELSE 0 END) AS balance_sum,
+            SUM(CASE WHEN d.status = 'active' THEN d.balance_amount ELSE 0 END) AS balance_sum,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' THEN d.daily_amount ELSE 0 END) AS lease_daily,
             SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND (d.opened_on IS NULL OR d.planned_end_on IS NULL) THEN 1 ELSE 0 END) AS lease_no_end,
@@ -368,7 +368,7 @@ $currentUrl = admin_url('deduction/debts');
 					<tbody>
 						<?php foreach ($rows as $d):
 							$dk = (string) $d['kind'];
-							$isAmort = in_array($dk, ['loan', 'advance'], true);
+							$isAmort = in_array($dk, ['loan', 'advance', 'lease'], true);
 						?>
 						<tr>
 							<td>

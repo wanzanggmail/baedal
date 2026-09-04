@@ -89,6 +89,7 @@ final class MigrateRunner
         self::migrateAlimtalkTemplates();
         self::migrateDebtAccrualBaseline();
         self::migrateCarryForward();
+        self::migrateLeaseBalance();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -3086,5 +3087,72 @@ final class MigrateRunner
                COMMENT='라이더 차감 이월(정산액 부족으로 못 걷은 정액 차감)'"
         );
         echo "OK    rider_carry_forward 생성\n";
+    }
+
+    /**
+     * 리스를 상각(잔액) 모델로 전환 — 총액·잔액 백필 (2026-09-04 갑 확정).
+     *
+     * 예전엔 리스에 잔액을 두지 않아(항상 0) 잔여 리스료가 미수금 집계에 안 잡혔다
+     * (실측 15,030,000원). 리스 계약서 제5조가 "일일 리스료 × 365일 = 예정 총액"을
+     * 명시하는 구조이므로 대여금과 같은 상각 모델로 통일한다.
+     *
+     *   총액 = 일납 × 계약일수(개시일~종료예정일, 양끝 포함)
+     *   잔액 = 총액 − 이미 걷은 금액(rider_debt_entries 합)
+     *
+     * 멱등: principal_amount 가 이미 채워진 리스는 건너뛴다.
+     */
+    private static function normDateOrNull(mixed $v): ?string
+    {
+        $x = trim((string) ($v ?? ''));
+        if ($x === '') { return null; }
+        $d = DateTime::createFromFormat('Y-m-d', substr($x, 0, 10));
+
+        return ($d && $d->format('Y-m-d') === substr($x, 0, 10)) ? substr($x, 0, 10) : null;
+    }
+
+    private static function migrateLeaseBalance(): void
+    {
+        echo "== 리스 상각 모델 전환(총액·잔액 백필) ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts 없음\n";
+
+            return;
+        }
+        $rows = db_rows(
+            "SELECT id, daily_amount, opened_on, planned_end_on, due_updated_on
+               FROM rider_debts
+              WHERE kind = 'lease' AND principal_amount = 0
+                AND daily_amount > 0 AND opened_on IS NOT NULL AND planned_end_on IS NOT NULL"
+        );
+        if ($rows === []) {
+            echo "SKIP  전환할 리스 없음\n";
+
+            return;
+        }
+
+        $done = 0;
+        $sum  = 0;
+        foreach ($rows as $r) {
+            $id    = (int) $r['id'];
+            $daily = (int) $r['daily_amount'];
+            $days  = (int) ((new DateTime((string) $r['opened_on']))
+                        ->diff(new DateTime((string) $r['planned_end_on']))->days) + 1;
+            $principal = $daily * $days;
+            // 잔액은 **앞으로 실제로 부과될 금액**으로 잡는다 — 마지막 반영일 다음날부터 종료예정일까지.
+            // 총액(principal)은 계약서 그대로 두고, 그 차이는 2026-09-04 "소급은 안해도되" 결정으로
+            // 청구하지 않기로 한 과거분이다. 이렇게 해야 계약 만료 시 잔액이 0이 되어 정상 완납된다.
+            $from    = self::normDateOrNull($r['due_updated_on'] ?? null)
+                       ?? (new DateTime((string) $r['opened_on']))->modify('-1 day')->format('Y-m-d');
+            $remain  = (int) ((new DateTime($from))->diff(new DateTime((string) $r['planned_end_on']))->days);
+            $balance = $from >= (string) $r['planned_end_on'] ? 0 : max(0, $remain * $daily);
+            db_execute(
+                'UPDATE rider_debts SET principal_amount = ?, balance_amount = ? WHERE id = ?',
+                [$principal, $balance, $id]
+            );
+            $done++;
+            $sum += $balance;
+        }
+        echo "OK    리스 {$done}건 전환 · 잔여 리스료 합 " . number_format($sum) . "원\n";
     }
 }

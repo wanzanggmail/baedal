@@ -29,8 +29,16 @@ final class RiderDebt
         'advance' => 'advance',
     ];
 
-    /** 잔액이 상각(감소)되는 종류. 리스는 반복 부과라 잔액이 줄지 않음 */
-    private const AMORTIZING = ['loan', 'advance'];
+    /**
+     * 잔액이 상각(감소)되는 종류 — **2026-09-04 부터 리스 포함**(갑 확정).
+     *
+     * 예전엔 리스를 "반복 부과"로 보고 잔액을 두지 않았다. 그 결과 리스 계약의
+     * 잔여 리스료(실측 15,030,000원)가 미수금 집계 어디에도 안 잡혔다.
+     * 리스도 `일납 × 계약일수` 로 총액이 정해지므로 대여금과 같은 상각 모델로 통일한다.
+     *
+     * ⚠️ 리스료(일납)를 바꾸면 총액·잔액을 다시 계산해야 한다 — update() 가 자동으로 한다.
+     */
+    private const AMORTIZING = ['loan', 'advance', 'lease'];
 
     /**
      * 리스 제공 주체 → 걷은 리스료를 나눠 갖는 조직들(2026-08-08 갑 확정).
@@ -260,11 +268,16 @@ final class RiderDebt
         }
         $principal = max(0, (int) ($in['principal_amount'] ?? 0));
         $daily     = max(0, (int) ($in['daily_amount'] ?? 0));
-        // 리스는 원금 개념이 없어 잔액 0에서 시작, 대여금/선지급은 잔액=원금
-        $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
 
-        $openedOn  = self::normDate($in['opened_on'] ?? null);
+        $openedOn   = self::normDate($in['opened_on'] ?? null);
         $plannedEnd = $kind === 'lease' ? self::normDate($in['planned_end_on'] ?? null) : null;
+
+        // 리스 총액은 입력받지 않고 **계약에서 계산**한다 — 일납 × 계약일수.
+        // 오타로 과다·과소 징수가 나는 걸 막고, 계약 정보와 항상 일치시킨다.
+        if ($kind === 'lease') {
+            $principal = self::leasePrincipal($daily, $openedOn, $plannedEnd);
+        }
+        $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
         if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
             throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
         }
@@ -361,6 +374,31 @@ final class RiderDebt
             $sets[]   = 'closed_on = ?';
             $params[] = $status === 'closed' ? date('Y-m-d') : null;
         }
+        // 리스 계약이 바뀌면 총액·잔액을 다시 계산한다 — 총액 = 일납 × 계약일수.
+        // 리스 계약서(제5조)가 "365일 기준 예정 총액"을 명시하는 구조라 계약과 총액이
+        // 어긋나면 안 된다. 잔액은 이미 걷은 만큼을 빼서 유지한다.
+        if ((string) $debt['kind'] === 'lease'
+            && (array_key_exists('daily_amount', $in)
+                || array_key_exists('opened_on', $in)
+                || array_key_exists('planned_end_on', $in))
+            && !array_key_exists('balance_amount', $in)
+        ) {
+            $newDaily = array_key_exists('daily_amount', $in) ? max(0, (int) $in['daily_amount']) : (int) $debt['daily_amount'];
+            $newOpen  = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
+            $newEnd   = array_key_exists('planned_end_on', $in) ? self::normDate($in['planned_end_on']) : self::normDate($debt['planned_end_on'] ?? null);
+            $newPrincipal = self::leasePrincipal($newDaily, $newOpen, $newEnd);
+            if ($newPrincipal > 0) {
+                $collected = (int) (db_row(
+                    'SELECT COALESCE(SUM(amount), 0) AS s FROM rider_debt_entries WHERE debt_id = ?',
+                    [$id]
+                )['s'] ?? 0);
+                $sets[]   = 'principal_amount = ?';
+                $params[] = $newPrincipal;
+                $sets[]   = 'balance_amount = ?';
+                $params[] = max(0, $newPrincipal - $collected);
+            }
+        }
+
         // 잔액 수동 보정(상각형만)
         if (array_key_exists('balance_amount', $in) && in_array((string) $debt['kind'], self::AMORTIZING, true)) {
             $sets[]   = 'balance_amount = ?';
@@ -814,6 +852,19 @@ final class RiderDebt
             'overdue'          => $gapDays >= self::GAP_WARNING_DAYS,
             'gap_days'         => $gapDays,
         ];
+    }
+    /**
+     * 리스 총액 = 일납 × 계약일수(개시일~종료예정일, 양끝 포함).
+     * 계약 정보가 모자라면 0 — 자동계산이 안 되므로 수동 차감으로 처리해야 한다.
+     */
+    private static function leasePrincipal(int $daily, ?string $openedOn, ?string $plannedEnd): int
+    {
+        if ($daily <= 0 || $openedOn === null || $plannedEnd === null || $plannedEnd < $openedOn) {
+            return 0;
+        }
+        $days = (int) (new DateTime($openedOn))->diff(new DateTime($plannedEnd))->days + 1;
+
+        return $daily * $days;
     }
     private static function addDays(string $date, int $days): string
     {
