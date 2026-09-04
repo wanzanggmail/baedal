@@ -88,7 +88,7 @@ $current  = $ready ? Deployer::currentCommit() : null;
 				반영할 게 없으면 전부 <code>SKIP</code>으로 끝나므로 여러 번 눌러도 안전합니다.
 			</div>
 			<div class="text-muted mt-2">
-				※ 시스템 코드·차감 기본값은 마이그레이션이 함께 만듭니다. 별도 초기 데이터 스크립트는 없습니다(2026-09-05 seed.php 제거).
+				※ 본사 조직·최고관리자·시스템 코드·차감 기본값은 마이그레이션이 함께 만듭니다(없을 때만 생성). 별도 초기 데이터 스크립트는 없습니다.
 			</div>
 		</div>
 	</div>

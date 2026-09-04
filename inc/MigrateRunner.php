@@ -32,6 +32,7 @@ final class MigrateRunner
         self::migrateWithdrawalWalletExtras();
         self::migrateAuditLogs();
         self::migrateOrgColumns();
+        self::migrateBootstrapDefaults();
         self::migrateTenantConfig();
         self::migrateWithdrawalRedesign();
         self::migrateDeductionSplit();
@@ -3154,5 +3155,135 @@ final class MigrateRunner
             $sum += $balance;
         }
         echo "OK    리스 {$done}건 전환 · 잔여 리스료 합 " . number_format($sum) . "원\n";
+    }
+
+    /**
+     * 신규 설치 기본 데이터 — 본사 조직 · 최고관리자 · 시스템 코드 (2026-09-05).
+     *
+     * seed.php 를 제거하면서(갑 지시) 그 안에 있던 것 중 **시스템이 돌아가는 데 꼭 필요한 것만**
+     * 여기로 옮겼다. 샘플 총판·대리점은 옮기지 않는다 — 갑: "기본적인 총판 대리점은 필요없고".
+     *
+     * 특히 **본사 조직이 없으면 Org::hqId() 가 실패**해 대행수수료 본사 귀속 같은 지갑 이동이
+     * 통째로 깨진다. 계정보다 이쪽이 더 치명적이라 반드시 함께 만든다.
+     *
+     * 전부 "없을 때만" 만들므로 재실행해도 되살아나지 않는다 — seed.php 가 멱등하지 않아
+     * 배포 버튼에 못 넣었던 문제가 여기서는 생기지 않는다.
+     */
+    private static function migrateBootstrapDefaults(): void
+    {
+        echo "== 신규 설치 기본 데이터 ==\n";
+
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations 없음\n";
+
+            return;
+        }
+
+        // ── 1) 본사 조직 ──────────────────────────────────────────────
+        $hq = db_row("SELECT id FROM organizations WHERE level = 'admin' ORDER BY id ASC LIMIT 1");
+        if ($hq === null) {
+            // `code` 에 UNIQUE(uq_org_code)가 걸려 있다. 'HQ' 가 이미 다른 조직에 쓰였으면
+            // 그대로 INSERT 하다 1062 로 죽어 **마이그레이션 전체가 중단**된다 — 다른 코드를 쓴다.
+            $code = db_row("SELECT id FROM organizations WHERE code = 'HQ' LIMIT 1") === null
+                ? 'HQ'
+                : 'HQ-' . date('ymdHis');
+            $hqId = db_insert(
+                "INSERT INTO organizations (parent_id, level, code, name, is_active, created_at)
+                 VALUES (NULL, 'admin', ?, 'OXPAY 본사', 1, NOW())",
+                [$code]
+            );
+            echo "OK    본사 조직 생성(id={$hqId}, code={$code})\n";
+        } else {
+            $hqId = (int) $hq['id'];
+            echo "SKIP  본사 조직 (이미 있음, id={$hqId})\n";
+        }
+
+        // ── 2) 최고관리자 계정 ────────────────────────────────────────
+        // 비밀번호는 환경변수 ADMIN_INIT_PASSWORD 를 우선 쓴다. 없으면 기본값을 쓰되
+        // **즉시 바꾸라고 크게 알린다** — 알려진 비밀번호가 운영에 남는 건 위험하다.
+        if (db_table_exists('admins')) {
+            $cols   = array_column(db_rows('SHOW COLUMNS FROM admins'), 'Field');
+            $hasOrg = in_array('org_id', $cols, true);
+            $super  = db_row("SELECT id FROM admins WHERE role = 'super' LIMIT 1");
+            if ($super !== null) {
+                echo "SKIP  최고관리자 (이미 있음)\n";
+            } elseif (!$hasOrg) {
+                echo "SKIP  최고관리자 (admins.org_id 아직 없음)\n";
+            } else {
+                $env   = (string) (getenv('ADMIN_INIT_PASSWORD') ?: '');
+                $isEnv = $env !== '';
+                $pw    = $isEnv ? $env : 'Admin1234!';
+                db_insert(
+                    "INSERT INTO admins (login_id, password_hash, name, role, org_id, is_active)
+                     VALUES ('admin', ?, '최고관리자', 'super', ?, 1)",
+                    [password_hash($pw, PASSWORD_BCRYPT, ['cost' => 12]), $hqId]
+                );
+                echo "OK    최고관리자 계정 생성(admin)\n";
+                echo $isEnv
+                    ? "      비밀번호: ADMIN_INIT_PASSWORD 환경변수 값\n"
+                    : "      ⚠️ 비밀번호가 기본값(Admin1234!)입니다 — 로그인 후 즉시 변경하세요.\n";
+            }
+        }
+
+        // ── 3) 시스템 코드 ────────────────────────────────────────────
+        if (!db_table_exists('system_codes')) {
+            echo "SKIP  system_codes 없음\n";
+
+            return;
+        }
+        $codes = [
+            ['bank', '004', '국민은행', 10],    ['bank', '088', '신한은행', 20],
+            ['bank', '020', '우리은행', 30],    ['bank', '090', '카카오뱅크', 40],
+            ['bank', '081', '하나은행', 50],    ['bank', '011', '농협', 60],
+            ['bank', '003', 'IBK기업은행', 70], ['bank', '092', '토스뱅크', 80],
+            ['bank', '023', 'SC제일은행', 90],  ['bank', '032', '부산은행', 100],
+            ['bank', '039', '경남은행', 110],   ['bank', '045', '새마을금고', 120],
+            ['bank', '071', '우체국', 130],
+
+            ['vehicle', 'motor', '오토바이', 10], ['vehicle', 'bike', '자전거', 20],
+            ['vehicle', 'kick', '전동킥보드', 30], ['vehicle', 'car', '자동차', 40],
+            ['vehicle', 'walk', '도보', 50],
+
+            ['rider_status', 'active', '활동 중', 10],
+            ['rider_status', 'suspended', '일시 정지', 20],
+            ['rider_status', 'leave_request', '탈퇴 요청', 30],
+            ['rider_status', 'offboarded', '계약 종료', 40],
+
+            ['settlement_status', 'uploaded', '업로드됨', 10],
+            ['settlement_status', 'parsing', '파싱 중', 20],
+            ['settlement_status', 'parsed', '파싱 완료', 30],
+            ['settlement_status', 'applied', '반영 완료', 40],
+            ['settlement_status', 'error', '오류', 50],
+
+            ['withdrawal_status', 'pending', '대기', 10],
+            ['withdrawal_status', 'downloaded', '다운로드 완료', 20],
+            ['withdrawal_status', 'completed', '처리 완료', 30],
+            ['withdrawal_status', 'rejected', '반려', 40],
+
+            ['platform', 'baemin', '배달의민족', 10],
+            ['platform', 'coupang', '쿠팡이츠', 20],
+            ['platform', 'other', '기타', 30],
+
+            ['deduction_kind', 'withholding', '원천세', 10],
+            ['deduction_kind', 'employment_ins', '고용·산재', 20],
+            ['deduction_kind', 'agency_fee', '정산 수수료', 30],
+            ['deduction_kind', 'hourly_ins', '시간제 보험', 40],
+            ['deduction_kind', 'ins_refund', '보험료 환급', 50],
+            ['deduction_kind', 'rental', '대여금 차감', 60],
+            ['deduction_kind', 'advance', '선지급 정산', 70],
+            ['deduction_kind', 'manual', '수동 조정', 80],
+        ];
+        $added = 0;
+        foreach ($codes as [$cat, $code, $label, $sort]) {
+            if (db_row('SELECT id FROM system_codes WHERE category = ? AND code = ? LIMIT 1', [$cat, $code]) !== null) {
+                continue;
+            }
+            db_insert(
+                'INSERT INTO system_codes (category, code, label, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
+                [$cat, $code, $label, $sort]
+            );
+            $added++;
+        }
+        echo $added > 0 ? "OK    시스템 코드 {$added}건 추가\n" : "SKIP  시스템 코드 (모두 있음)\n";
     }
 }

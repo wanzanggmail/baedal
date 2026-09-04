@@ -241,10 +241,9 @@ sudo /usr/bin/python3 -m pip install msoffcrypto-tool
 
 1. MySQL/RDS에서 **새 DB·계정** 생성 후 서버 `.env` 갱신 (유출된 비밀번호는 즉시 폐기)
 2. `DEPLOY_PATH`에서 `php migrate.php` (시스템 코드·차감 기본값까지 함께 만들어진다)
-3. ⚠️ **관리자 계정은 자동 생성되지 않는다** — `seed.php` 를 제거했으므로(2026-09-05)
-   `admins` 테이블에 최고관리자 1건을 직접 INSERT 해야 로그인할 수 있다
-   (비밀번호는 `password_hash()` 로 만든 값을 넣는다)
-4. 로그인 후 **시스템 관리 → 정산 엑셀 암호** 재등록
+3. 관리자 로그인 — `migrate.php` 가 본사 조직·최고관리자(`admin`)를 함께 만든다.
+   비밀번호는 `ADMIN_INIT_PASSWORD` 환경변수 값, 없으면 `Admin1234!` (**로그인 후 즉시 변경**)
+4. **시스템 관리 → 정산 엑셀 암호** 재등록
 5. 라이더·정산 엑셀 **재업로드** (백업 없으면 수동 재입력)
 
 

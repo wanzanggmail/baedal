@@ -23,8 +23,8 @@ Metronic 8.3.3 + PHP + MariaDB/MySQL.
 ```bash
 # 프로젝트 루트
 cp .env.example .env          # 필요 시 DB 접속 정보 입력 (없으면 inc/db.php 기본값)
-php migrate.php               # 스키마 + system_codes·차감 기본값 (멱등)
-# ⚠️ 관리자 계정은 자동 생성되지 않는다 — admins 에 직접 INSERT (seed.php 는 2026-09-05 제거)
+php migrate.php               # 스키마 + 본사 조직·최고관리자·시스템 코드·차감 기본값 (멱등)
+# 최고관리자 admin / ADMIN_INIT_PASSWORD 없으면 Admin1234! → 로그인 후 즉시 변경
 ```
 
 - 개발 로그인: `admin` / `Admin1234!` (seed 후 비밀번호 변경 권장)
