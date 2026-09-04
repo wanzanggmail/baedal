@@ -47,6 +47,8 @@ final class AdminDashboard
             'debt_balance'     => 0,
             'debt_riders'      => 0,
             'debt_overdue'     => 0,
+            'carry_total'      => 0,
+            'carry_riders'     => 0,
             'platform_rows'    => [],
             'platform_total'   => 0,
             'timeline'         => [],
@@ -117,14 +119,28 @@ final class AdminDashboard
         // planned_end_on 이 지났는데 잔액이 남은 건은 "만기미납"으로 따로 센다.
         try {
             if (self::tableExists('rider_debts')) {
+                require_once INC_PATH . '/RiderDebt.php';
+                require_once INC_PATH . '/RiderDebt.php';
                 [$dScope, $dParams] = Org::agencyScopeClause('r.agency_id');
                 $dCond = $dScope !== '' ? ' AND ' . $dScope : '';
                 $row = db_row(
                     "SELECT COALESCE(SUM(d.balance_amount), 0) AS amt,
                             COUNT(DISTINCT d.rider_id) AS riders,
-                            COALESCE(SUM(d.planned_end_on IS NOT NULL
-                                         AND d.planned_end_on < CURDATE()
-                                         AND d.balance_amount > 0), 0) AS overdue
+                            -- 차감 밀림: 달력일은 흐르는데 정산 반영이 뜸해 부과가 밀린 건.
+                            --   · 리스는 잔액 개념이 없고(항상 0) 종료일이 필수
+                            --   · 대여금·선지급금은 종료일이 없고 잔액이 0 되면 끝
+                            -- 예전 [만기미납] 조건(종료일 경과 AND 잔액>0)은 양쪽 다 해당 건이
+                            -- 없어 **항상 0** 이었다(2026-09-04 수정).
+                            COALESCE(SUM(
+                                d.opened_on IS NOT NULL AND d.daily_amount > 0
+                                AND d.opened_on <= CURDATE()
+                                AND (d.kind = 'lease' OR d.balance_amount > 0)
+                                AND (d.kind <> 'lease' OR d.planned_end_on IS NOT NULL)
+                                AND DATEDIFF(
+                                        LEAST(CURDATE(), COALESCE(d.planned_end_on, CURDATE())),
+                                        COALESCE(d.due_updated_on, DATE_SUB(d.opened_on, INTERVAL 1 DAY))
+                                    ) >= " . RiderDebt::GAP_WARNING_DAYS . "
+                            ), 0) AS overdue
                        FROM rider_debts d
                        INNER JOIN riders r ON r.id = d.rider_id
                       WHERE d.status = 'active'" . $dCond,
@@ -136,6 +152,18 @@ final class AdminDashboard
             }
         } catch (Throwable $e) {
             $data['errors'][] = '미수금: ' . $e->getMessage();
+        }
+
+        // 미회수 이월 차감 — 정산액이 모자라 못 걷고 다음 정산으로 넘긴 금액.
+        try {
+            if (self::tableExists('rider_carry_forward')) {
+                require_once INC_PATH . '/RiderCarryForward.php';
+                $cf = RiderCarryForward::summaryForScope();
+                $data['carry_total']  = $cf['total'];
+                $data['carry_riders'] = $cf['riders'];
+            }
+        } catch (Throwable $e) {
+            $data['errors'][] = '이월 차감: ' . $e->getMessage();
         }
 
         try {

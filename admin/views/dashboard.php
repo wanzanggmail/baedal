@@ -259,13 +259,25 @@ $riderDetailUrl = static function (int $riderId): string {
 						<span class="fw-semibold fs-2x text-gray-800 lh-1 ls-n2"><?= AdminDashboard::formatWon((int) $dash['debt_balance']) ?></span>
 						<span class="fw-semibold fs-7 text-gray-500 mt-1">라이더 미수금 잔액</span>
 					</div>
-					<?php if ((int) $dash['debt_overdue'] > 0): ?>
-					<span class="badge badge-light-danger fs-base">만기미납 <?= (int) $dash['debt_overdue'] ?>건</span>
-					<?php elseif ((int) $dash['debt_riders'] > 0): ?>
-					<span class="badge badge-light-warning fs-base">대상 <?= (int) $dash['debt_riders'] ?>명</span>
-					<?php else: ?>
-					<span class="badge badge-light-success fs-base">미수금 없음</span>
-					<?php endif; ?>
+					<div class="d-flex flex-wrap gap-2">
+						<?php if ((int) $dash['carry_total'] > 0): ?>
+						<span class="badge badge-light-danger fs-base" title="정산액이 모자라 못 걷고 다음 정산으로 넘긴 금액">
+							이월 <?= AdminDashboard::formatWon((int) $dash['carry_total']) ?>
+						</span>
+						<?php endif; ?>
+						<?php if ((int) $dash['debt_overdue'] > 0): ?>
+						<span class="badge badge-light-warning fs-base" title="정산 반영이 뜸해 일납 부과가 밀린 건">
+							차감밀림 <?= (int) $dash['debt_overdue'] ?>건
+						</span>
+						<?php endif; ?>
+						<?php if ((int) $dash['carry_total'] === 0 && (int) $dash['debt_overdue'] === 0): ?>
+							<?php if ((int) $dash['debt_riders'] > 0): ?>
+							<span class="badge badge-light-primary fs-base">대상 <?= (int) $dash['debt_riders'] ?>명</span>
+							<?php else: ?>
+							<span class="badge badge-light-success fs-base">미수금 없음</span>
+							<?php endif; ?>
+						<?php endif; ?>
+					</div>
 				</div>
 			</div>
 		</div>
