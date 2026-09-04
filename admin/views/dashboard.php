@@ -185,7 +185,7 @@ $riderDetailUrl = static function (int $riderId): string {
 
 	<!--begin::Row KPI-->
 	<div class="row gy-5 gx-xl-10 mb-5 mb-xl-10">
-		<div class="col-sm-6 col-xl-3">
+		<div class="col-sm-6 col-xl">
 			<div class="card card-flush h-100">
 				<div class="card-body d-flex justify-content-between align-items-start flex-column py-6">
 					<i class="ki-duotone ki-people fs-2hx text-primary">
@@ -204,7 +204,7 @@ $riderDetailUrl = static function (int $riderId): string {
 				</div>
 			</div>
 		</div>
-		<div class="col-sm-6 col-xl-3">
+		<div class="col-sm-6 col-xl">
 			<div class="card card-flush h-100">
 				<div class="card-body d-flex justify-content-between align-items-start flex-column py-6">
 					<i class="ki-duotone ki-time fs-2hx text-warning"><span class="path1"></span><span class="path2"></span></i>
@@ -220,7 +220,7 @@ $riderDetailUrl = static function (int $riderId): string {
 				</div>
 			</div>
 		</div>
-		<div class="col-sm-6 col-xl-3">
+		<div class="col-sm-6 col-xl">
 			<div class="card card-flush h-100">
 				<div class="card-body d-flex justify-content-between align-items-start flex-column py-6">
 					<i class="ki-duotone ki-minus-circle fs-2hx text-danger"><span class="path1"></span><span class="path2"></span></i>
@@ -235,7 +235,7 @@ $riderDetailUrl = static function (int $riderId): string {
 				</div>
 			</div>
 		</div>
-		<div class="col-sm-6 col-xl-3">
+		<div class="col-sm-6 col-xl">
 			<div class="card card-flush h-100">
 				<div class="card-body d-flex justify-content-between align-items-start flex-column py-6">
 					<i class="ki-duotone ki-notification fs-2hx text-info">
@@ -246,6 +246,26 @@ $riderDetailUrl = static function (int $riderId): string {
 						<span class="fw-semibold fs-7 text-gray-500 mt-1">게시 공지</span>
 					</div>
 					<span class="badge badge-light-primary fs-base">광고 <?= (int) $dash['active_banners'] ?>건</span>
+				</div>
+			</div>
+		</div>
+		<div class="col-sm-6 col-xl">
+			<div class="card card-flush h-100">
+				<div class="card-body d-flex justify-content-between align-items-start flex-column py-6">
+					<i class="ki-duotone ki-wallet fs-2hx text-warning">
+						<span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span>
+					</i>
+					<div class="d-flex flex-column my-6">
+						<span class="fw-semibold fs-2x text-gray-800 lh-1 ls-n2"><?= AdminDashboard::formatWon((int) $dash['debt_balance']) ?></span>
+						<span class="fw-semibold fs-7 text-gray-500 mt-1">라이더 미수금 잔액</span>
+					</div>
+					<?php if ((int) $dash['debt_overdue'] > 0): ?>
+					<span class="badge badge-light-danger fs-base">만기미납 <?= (int) $dash['debt_overdue'] ?>건</span>
+					<?php elseif ((int) $dash['debt_riders'] > 0): ?>
+					<span class="badge badge-light-warning fs-base">대상 <?= (int) $dash['debt_riders'] ?>명</span>
+					<?php else: ?>
+					<span class="badge badge-light-success fs-base">미수금 없음</span>
+					<?php endif; ?>
 				</div>
 			</div>
 		</div>

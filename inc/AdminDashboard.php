@@ -44,6 +44,9 @@ final class AdminDashboard
             'published_notices'=> 0,
             'month_deductions' => 0,
             'month_deduction_delta' => null,
+            'debt_balance'     => 0,
+            'debt_riders'      => 0,
+            'debt_overdue'     => 0,
             'platform_rows'    => [],
             'platform_total'   => 0,
             'timeline'         => [],
@@ -107,6 +110,32 @@ final class AdminDashboard
             $data['published_notices'] = count(Notice::listPublishedForRider(500));
         } catch (Throwable $e) {
             $data['errors'][] = '콘텐츠: ' . $e->getMessage();
+        }
+
+        // 라이더 미수금(대여금·리스·선지급) — 대리점이 회수해야 할 잔액.
+        // 소속 대리점 스코프를 타므로 대리점 계정은 자기 라이더만, 본사는 전체가 잡힌다.
+        // planned_end_on 이 지났는데 잔액이 남은 건은 "만기미납"으로 따로 센다.
+        try {
+            if (self::tableExists('rider_debts')) {
+                [$dScope, $dParams] = Org::agencyScopeClause('r.agency_id');
+                $dCond = $dScope !== '' ? ' AND ' . $dScope : '';
+                $row = db_row(
+                    "SELECT COALESCE(SUM(d.balance_amount), 0) AS amt,
+                            COUNT(DISTINCT d.rider_id) AS riders,
+                            COALESCE(SUM(d.planned_end_on IS NOT NULL
+                                         AND d.planned_end_on < CURDATE()
+                                         AND d.balance_amount > 0), 0) AS overdue
+                       FROM rider_debts d
+                       INNER JOIN riders r ON r.id = d.rider_id
+                      WHERE d.status = 'active'" . $dCond,
+                    $dParams
+                );
+                $data['debt_balance'] = (int) ($row['amt'] ?? 0);
+                $data['debt_riders']  = (int) ($row['riders'] ?? 0);
+                $data['debt_overdue'] = (int) ($row['overdue'] ?? 0);
+            }
+        } catch (Throwable $e) {
+            $data['errors'][] = '미수금: ' . $e->getMessage();
         }
 
         try {
