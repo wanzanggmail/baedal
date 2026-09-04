@@ -27,11 +27,11 @@ final class Deployer
     public static function currentCommit(): array
     {
         return [
-            'hash'    => self::run('git log -1 --format=%H'),
-            'short'   => self::run('git log -1 --format=%h'),
-            'subject' => self::run('git log -1 --format=%s'),
-            'author'  => self::run('git log -1 --format=%an'),
-            'date'    => self::run('git log -1 --format=%ci'),
+            'hash'    => self::run(self::gitCmd() . ' log -1 --format=%H'),
+            'short'   => self::run(self::gitCmd() . ' log -1 --format=%h'),
+            'subject' => self::run(self::gitCmd() . ' log -1 --format=%s'),
+            'author'  => self::run(self::gitCmd() . ' log -1 --format=%an'),
+            'date'    => self::run(self::gitCmd() . ' log -1 --format=%ci'),
         ];
     }
 
@@ -42,12 +42,12 @@ final class Deployer
      */
     public static function check(): array
     {
-        [$ok, $out] = self::exec('git fetch origin ' . escapeshellarg(self::BRANCH));
+        [$ok, $out] = self::exec(self::gitCmd() . ' fetch origin ' . escapeshellarg(self::BRANCH));
         if (!$ok) {
             return ['ok' => false, 'ahead' => 0, 'commits' => [], 'output' => $out];
         }
 
-        $log = self::run('git log HEAD..origin/' . escapeshellarg(self::BRANCH) . ' --format=%h^^^%s^^^%an');
+        $log = self::run(self::gitCmd() . ' log HEAD..origin/' . escapeshellarg(self::BRANCH) . ' --format=%h^^^%s^^^%an');
         $commits = [];
         foreach (array_filter(explode("\n", $log), static fn (string $l): bool => trim($l) !== '') as $line) {
             [$h, $s, $a] = array_pad(explode('^^^', $line, 3), 3, '');
@@ -67,13 +67,13 @@ final class Deployer
     {
         $out = [];
 
-        [$ok, $o] = self::exec('git fetch origin ' . escapeshellarg(self::BRANCH));
+        [$ok, $o] = self::exec(self::gitCmd() . ' fetch origin ' . escapeshellarg(self::BRANCH));
         $out[] = $o;
         if (!$ok) {
             return ['ok' => false, 'output' => implode("\n\n", $out)];
         }
 
-        [$ok, $o] = self::exec('git reset --hard origin/' . escapeshellarg(self::BRANCH));
+        [$ok, $o] = self::exec(self::gitCmd() . ' reset --hard origin/' . escapeshellarg(self::BRANCH));
         $out[] = $o;
         if (!$ok) {
             return ['ok' => false, 'output' => implode("\n\n", $out)];
@@ -139,6 +139,21 @@ final class Deployer
         return 'COMPOSER_HOME=' . escapeshellarg($home) . ' ' . escapeshellarg($bin);
     }
 
+    /**
+     * git 실행 명령 — `safe.directory` 예외를 **매 호출마다** 붙인다.
+     *
+     * 배포 디렉터리의 소유자(보통 apache)와 git 을 실행하는 사용자가 다르면 git 2.35.2+ 는
+     * "detected dubious ownership" 로 거부한다. 웹에서 눌러 배포하는 구조라 이 상황이
+     * 기본값이다. 서버마다 `git config --global` 을 손대게 하는 대신(아파치 계정은 HOME 이
+     * 쓰기 불가인 경우가 많다) 명령 단위로 이 저장소 경로만 예외 처리한다.
+     *
+     * ⚠️ 파일을 실제로 덮어쓰는 fetch/reset 은 이것만으로 부족하다 — 배포 디렉터리가
+     *    apache 소유여야 한다(`chown -R apache:apache <배포경로>`).
+     */
+    private static function gitCmd(): string
+    {
+        return 'git -c ' . escapeshellarg('safe.directory=' . ROOT_PATH);
+    }
     /** 고정 디렉터리(ROOT_PATH)에서 주어진 명령만 실행. @return array{0:bool,1:string} */
     private static function exec(string $cmd): array
     {
