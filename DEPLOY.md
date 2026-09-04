@@ -106,6 +106,7 @@ php -i | grep disable_functions
 | `ERROR 1045 Access denied` | RDS 마스터 계정은 **원격 접속이 기본 허용**이다(호스트 차단이면 1130이 뜬다). 1045는 순수 비밀번호 불일치 — 콘솔에서 재설정 |
 | composer `vendor does not exist and could not be created` | 저장소가 apache 소유인데 ec2-user로 실행해서. **apache로 실행 + COMPOSER_HOME 지정**:<br>`sudo -u apache env COMPOSER_HOME=/tmp/composer composer install --no-dev` |
 | `git clone` → `Permission denied` | `/var/www`가 root 소유. **빈 디렉터리를 먼저 만들어 apache에 넘긴 뒤** clone |
+| 배포 화면이 전부 `fatal: detected dubious ownership in repository at '/var/www/html'` | 저장소가 apache 가 아닌 계정(root·ec2-user)으로 clone 됨. **읽기 명령은 코드에서 `git -c safe.directory=` 로 우회하지만(2026-09-05), 실제 배포(fetch·reset)는 쓰기 권한이 필요**하다:<br>`sudo chown -R apache:apache /var/www/html`<br>확인: `stat -c '%U:%G' /var/www/html` → `apache:apache` |
 
 ## 평소 작업 흐름
 
