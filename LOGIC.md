@@ -309,7 +309,7 @@
 
 ## 6. 마이그레이션·시드
 
-`php migrate.php`(`inc/MigrateRunner.php`, 멱등) / `php seed.php`(조직트리+시드계정). 재설계분 신규 마이그레이션 필요: 대리점 은행계좌·카드·`agency_wallets`·`pg_payments`·`withdrawal_requests` 실패상태·이체수수료원가 컬럼. 운영 배포 후 `migrate.php`/`seed.php` 웹 접근 차단 권장.
+`php migrate.php`(`inc/MigrateRunner.php`, 멱등 — 스키마·시스템코드·차감기본값. `seed.php` 는 2026-09-05 제거, 관리자 계정은 수동 INSERT). 재설계분 신규 마이그레이션 필요: 대리점 은행계좌·카드·`agency_wallets`·`pg_payments`·`withdrawal_requests` 실패상태·이체수수료원가 컬럼. 운영 배포 후 `migrate.php` 웹 접근 차단 권장.
 
 ---
 

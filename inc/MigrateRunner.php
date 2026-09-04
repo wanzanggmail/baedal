@@ -91,7 +91,7 @@ final class MigrateRunner
         self::migrateCarryForward();
         self::migrateLeaseBalance();
 
-        echo "\n완료. (초기 데이터는 php seed.php)\n";
+        echo "\n완료.\n";
     }
 
     private static function runSqlFile(string $basename): void
@@ -130,7 +130,7 @@ final class MigrateRunner
         echo "== agency_fee columns ==\n";
 
         if (!db_table_exists('deduction_global_config')) {
-            echo "SKIP  deduction_global_config (테이블 없음 — seed.php 먼저)\n";
+            echo "SKIP  deduction_global_config (테이블 없음)\n";
 
             return;
         }
