@@ -87,6 +87,9 @@ final class MigrateRunner
         self::migrateTaxAgentToWithholding();
         self::migrateMessagingBilling();
         self::migrateAlimtalkTemplates();
+        self::migrateDebtAccrualBaseline();
+        self::migrateCarryForward();
+        self::migrateLeaseBalance();
 
         echo "\n완료. (초기 데이터는 php seed.php)\n";
     }
@@ -3000,4 +3003,156 @@ final class MigrateRunner
         }
     }
 
+
+    /**
+     * 미수금 일납 자동부과 **기준일 세팅** — DB당 딱 한 번만 실행된다(2026-09-04).
+     *
+     * 이날 대여금·선지급금까지 자동부과 대상이 되고 계산도 달력일 기준으로 바뀌면서,
+     * 그동안 부과되지 않았던 과거 구간이 다음 정산 반영 때 한꺼번에 청구될 수 있었다
+     * (개발 DB 실측 6,837,000원 / 24건). 갑 지시는 **"소급은 안해도되"** 이므로,
+     * 기존 미수금의 마지막 반영일을 오늘로 당겨 **과거분을 청구하지 않고** 오늘 이후만 쌓이게 한다.
+     *
+     * 마커 테이블 존재 여부로 1회성을 보장한다 — 두 번째 실행부터는 아무것도 하지 않는다
+     * (매번 돌면 기준일이 계속 밀려 정상 부과분까지 사라진다).
+     */
+    private static function migrateDebtAccrualBaseline(): void
+    {
+        echo "== 미수금 자동부과 기준일 세팅 ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts 없음\n";
+
+            return;
+        }
+        if (db_table_exists('rider_debt_accrual_baseline')) {
+            echo "SKIP  이미 기준일이 잡혀 있음(1회성)\n";
+
+            return;
+        }
+
+        $n = db_execute(
+            "UPDATE rider_debts
+                SET due_updated_on = CURDATE()
+              WHERE status = 'active' AND daily_amount > 0
+                AND (due_updated_on IS NULL OR due_updated_on < CURDATE())"
+        );
+
+        db_execute(
+            "CREATE TABLE rider_debt_accrual_baseline (
+                id         TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
+                applied_on DATE NOT NULL,
+                rows_set   INT  NOT NULL DEFAULT 0,
+                note       VARCHAR(255) NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+               COMMENT='미수금 일납 자동부과 기준일(1회성 마커)'"
+        );
+        db_insert(
+            'INSERT INTO rider_debt_accrual_baseline (id, applied_on, rows_set, note) VALUES (1, CURDATE(), ?, ?)',
+            [$n, '2026-09-04 갑 지시 "소급은 안해도되" — 과거 미부과분 청구하지 않음']
+        );
+
+        echo "OK    기준일 = " . date('Y-m-d') . " · 대상 {$n}건 (과거분 청구 안 함)\n";
+    }
+
+    /**
+     * 라이더 차감 이월 원장 — 그날 정산액이 정액 차감보다 적을 때 못 걷은 금액을 담는다.
+     * 이전에는 net = max(0, base - fee) 로 초과분이 증발했다(실측 9건 135,034원).
+     */
+    private static function migrateCarryForward(): void
+    {
+        echo "== 라이더 차감 이월 원장 ==\n";
+
+        if (db_table_exists('rider_carry_forward')) {
+            echo "SKIP  rider_carry_forward (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE rider_carry_forward (
+                id                 INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                rider_id           INT UNSIGNED NOT NULL,
+                origin_cycle_id    INT UNSIGNED NULL COMMENT '이월이 발생한 정산 사이클',
+                collected_cycle_id INT UNSIGNED NULL COMMENT '회수가 시작된 정산 사이클',
+                fee_code           VARCHAR(40)  NOT NULL COMMENT '원래 차감 코드(excel_deduction 등)',
+                label              VARCHAR(100) NOT NULL DEFAULT '',
+                amount             INT NOT NULL COMMENT '최초 이월액',
+                remaining_amount   INT NOT NULL COMMENT '아직 못 걷은 금액',
+                closed_at          DATETIME NULL,
+                updated_at         DATETIME NULL,
+                created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_rcf_rider (rider_id, remaining_amount),
+                KEY idx_rcf_origin (origin_cycle_id)
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+               COMMENT='라이더 차감 이월(정산액 부족으로 못 걷은 정액 차감)'"
+        );
+        echo "OK    rider_carry_forward 생성\n";
+    }
+
+    /**
+     * 리스를 상각(잔액) 모델로 전환 — 총액·잔액 백필 (2026-09-04 갑 확정).
+     *
+     * 예전엔 리스에 잔액을 두지 않아(항상 0) 잔여 리스료가 미수금 집계에 안 잡혔다
+     * (실측 15,030,000원). 리스 계약서 제5조가 "일일 리스료 × 365일 = 예정 총액"을
+     * 명시하는 구조이므로 대여금과 같은 상각 모델로 통일한다.
+     *
+     *   총액 = 일납 × 계약일수(개시일~종료예정일, 양끝 포함)
+     *   잔액 = 총액 − 이미 걷은 금액(rider_debt_entries 합)
+     *
+     * 멱등: principal_amount 가 이미 채워진 리스는 건너뛴다.
+     */
+    private static function normDateOrNull(mixed $v): ?string
+    {
+        $x = trim((string) ($v ?? ''));
+        if ($x === '') { return null; }
+        $d = DateTime::createFromFormat('Y-m-d', substr($x, 0, 10));
+
+        return ($d && $d->format('Y-m-d') === substr($x, 0, 10)) ? substr($x, 0, 10) : null;
+    }
+
+    private static function migrateLeaseBalance(): void
+    {
+        echo "== 리스 상각 모델 전환(총액·잔액 백필) ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts 없음\n";
+
+            return;
+        }
+        $rows = db_rows(
+            "SELECT id, daily_amount, opened_on, planned_end_on, due_updated_on
+               FROM rider_debts
+              WHERE kind = 'lease' AND principal_amount = 0
+                AND daily_amount > 0 AND opened_on IS NOT NULL AND planned_end_on IS NOT NULL"
+        );
+        if ($rows === []) {
+            echo "SKIP  전환할 리스 없음\n";
+
+            return;
+        }
+
+        $done = 0;
+        $sum  = 0;
+        foreach ($rows as $r) {
+            $id    = (int) $r['id'];
+            $daily = (int) $r['daily_amount'];
+            $days  = (int) ((new DateTime((string) $r['opened_on']))
+                        ->diff(new DateTime((string) $r['planned_end_on']))->days) + 1;
+            $principal = $daily * $days;
+            // 잔액은 **앞으로 실제로 부과될 금액**으로 잡는다 — 마지막 반영일 다음날부터 종료예정일까지.
+            // 총액(principal)은 계약서 그대로 두고, 그 차이는 2026-09-04 "소급은 안해도되" 결정으로
+            // 청구하지 않기로 한 과거분이다. 이렇게 해야 계약 만료 시 잔액이 0이 되어 정상 완납된다.
+            $from    = self::normDateOrNull($r['due_updated_on'] ?? null)
+                       ?? (new DateTime((string) $r['opened_on']))->modify('-1 day')->format('Y-m-d');
+            $remain  = (int) ((new DateTime($from))->diff(new DateTime((string) $r['planned_end_on']))->days);
+            $balance = $from >= (string) $r['planned_end_on'] ? 0 : max(0, $remain * $daily);
+            db_execute(
+                'UPDATE rider_debts SET principal_amount = ?, balance_amount = ? WHERE id = ?',
+                [$principal, $balance, $id]
+            );
+            $done++;
+            $sum += $balance;
+        }
+        echo "OK    리스 {$done}건 전환 · 잔여 리스료 합 " . number_format($sum) . "원\n";
+    }
 }

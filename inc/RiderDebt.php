@@ -29,8 +29,16 @@ final class RiderDebt
         'advance' => 'advance',
     ];
 
-    /** 잔액이 상각(감소)되는 종류. 리스는 반복 부과라 잔액이 줄지 않음 */
-    private const AMORTIZING = ['loan', 'advance'];
+    /**
+     * 잔액이 상각(감소)되는 종류 — **2026-09-04 부터 리스 포함**(갑 확정).
+     *
+     * 예전엔 리스를 "반복 부과"로 보고 잔액을 두지 않았다. 그 결과 리스 계약의
+     * 잔여 리스료(실측 15,030,000원)가 미수금 집계 어디에도 안 잡혔다.
+     * 리스도 `일납 × 계약일수` 로 총액이 정해지므로 대여금과 같은 상각 모델로 통일한다.
+     *
+     * ⚠️ 리스료(일납)를 바꾸면 총액·잔액을 다시 계산해야 한다 — update() 가 자동으로 한다.
+     */
+    private const AMORTIZING = ['loan', 'advance', 'lease'];
 
     /**
      * 리스 제공 주체 → 걷은 리스료를 나눠 갖는 조직들(2026-08-08 갑 확정).
@@ -260,11 +268,16 @@ final class RiderDebt
         }
         $principal = max(0, (int) ($in['principal_amount'] ?? 0));
         $daily     = max(0, (int) ($in['daily_amount'] ?? 0));
-        // 리스는 원금 개념이 없어 잔액 0에서 시작, 대여금/선지급은 잔액=원금
-        $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
 
-        $openedOn  = self::normDate($in['opened_on'] ?? null);
+        $openedOn   = self::normDate($in['opened_on'] ?? null);
         $plannedEnd = $kind === 'lease' ? self::normDate($in['planned_end_on'] ?? null) : null;
+
+        // 리스 총액은 입력받지 않고 **계약에서 계산**한다 — 일납 × 계약일수.
+        // 오타로 과다·과소 징수가 나는 걸 막고, 계약 정보와 항상 일치시킨다.
+        if ($kind === 'lease') {
+            $principal = self::leasePrincipal($daily, $openedOn, $plannedEnd);
+        }
+        $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
         if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
             throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
         }
@@ -361,6 +374,31 @@ final class RiderDebt
             $sets[]   = 'closed_on = ?';
             $params[] = $status === 'closed' ? date('Y-m-d') : null;
         }
+        // 리스 계약이 바뀌면 총액·잔액을 다시 계산한다 — 총액 = 일납 × 계약일수.
+        // 리스 계약서(제5조)가 "365일 기준 예정 총액"을 명시하는 구조라 계약과 총액이
+        // 어긋나면 안 된다. 잔액은 이미 걷은 만큼을 빼서 유지한다.
+        if ((string) $debt['kind'] === 'lease'
+            && (array_key_exists('daily_amount', $in)
+                || array_key_exists('opened_on', $in)
+                || array_key_exists('planned_end_on', $in))
+            && !array_key_exists('balance_amount', $in)
+        ) {
+            $newDaily = array_key_exists('daily_amount', $in) ? max(0, (int) $in['daily_amount']) : (int) $debt['daily_amount'];
+            $newOpen  = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
+            $newEnd   = array_key_exists('planned_end_on', $in) ? self::normDate($in['planned_end_on']) : self::normDate($debt['planned_end_on'] ?? null);
+            $newPrincipal = self::leasePrincipal($newDaily, $newOpen, $newEnd);
+            if ($newPrincipal > 0) {
+                $collected = (int) (db_row(
+                    'SELECT COALESCE(SUM(amount), 0) AS s FROM rider_debt_entries WHERE debt_id = ?',
+                    [$id]
+                )['s'] ?? 0);
+                $sets[]   = 'principal_amount = ?';
+                $params[] = $newPrincipal;
+                $sets[]   = 'balance_amount = ?';
+                $params[] = max(0, $newPrincipal - $collected);
+            }
+        }
+
         // 잔액 수동 보정(상각형만)
         if (array_key_exists('balance_amount', $in) && in_array((string) $debt['kind'], self::AMORTIZING, true)) {
             $sets[]   = 'balance_amount = ?';
@@ -386,7 +424,7 @@ final class RiderDebt
      *
      * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}
      */
-    public static function applyRepayment(int $debtId, string $appliedDate, int $days, ?int $amount, string $memo = ''): array
+    public static function applyRepayment(int $debtId, string $appliedDate, int $days, ?int $amount, string $memo = '', ?string $coveredThrough = null): array
     {
         $debt = self::find($debtId);
         if ($debt === null) {
@@ -443,10 +481,16 @@ final class RiderDebt
             }
         }
 
+        // 차감 귀속일(applied_date)과 **부과가 커버한 마지막 날**은 다를 수 있다.
+        // 부분 부과(여유분이 모자라 일부 일수만 걷을 때) 시 귀속일은 반드시 **정산일**이어야
+        // buildFeeItems(applied_date = settlement_date 로 조회)가 그 차감을 실제로 소비한다.
+        // 반면 due_updated_on 은 커버한 날까지만 밀려야 나머지가 다음 정산에서 다시 잡힌다.
+        $covered = self::normDate($coveredThrough) ?? $appliedDate;
+
         $chain = $kind === 'lease' ? self::orgChainForRider((int) $debt['rider_id']) : ['agency' => 0, 'distributor' => 0, 'hq' => 0];
 
         return db_transaction(static function () use (
-            $debtId, $debt, $appliedDate, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
+            $debtId, $debt, $appliedDate, $covered, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
         ): array {
             // 1) 정산 반영이 소비할 deduction_entries
             $dedId = db_insert(
@@ -470,10 +514,10 @@ final class RiderDebt
                 $newStatus = $balanceAfter <= 0 ? 'closed' : (string) $debt['status'];
                 db_execute(
                     'UPDATE rider_debts SET balance_amount = ?, due_updated_on = ?, status = ?, closed_on = ? WHERE id = ?',
-                    [$balanceAfter, $appliedDate, $newStatus, $newStatus === 'closed' ? $appliedDate : $debt['closed_on'], $debtId]
+                    [$balanceAfter, $covered, $newStatus, $newStatus === 'closed' ? $appliedDate : $debt['closed_on'], $debtId]
                 );
             } else {
-                db_execute('UPDATE rider_debts SET due_updated_on = ? WHERE id = ?', [$appliedDate, $debtId]);
+                db_execute('UPDATE rider_debts SET due_updated_on = ? WHERE id = ?', [$covered, $debtId]);
             }
 
             // 4) 리스 수수료 상위 배분 — 대리점 지갑 → 본사·총판 지갑(같은 트랜잭션)
@@ -550,32 +594,86 @@ final class RiderDebt
      */
     public static function applyLeaseForPeriod(int $debtId, string $periodStart, string $periodEnd): ?array
     {
+        return self::applyDailyAccrualForPeriod($debtId, $periodEnd);
+    }
+
+    /**
+     * 일납 자동 부과 — **대여금·리스·선지급금 공통**(2026-09-04 갑 확정).
+     *
+     * 갑 원문: *"일하지 않는 날에도 차감이 생겨야해. 대여금 선지급금도 자동으로 되어야해"*
+     *
+     * ⚠️ **근무일이 아니라 달력일 기준**이다. 그래서 정산 반영이 뜸했던 구간(업로드가
+     * 없어서 건너뛴 날들)도 이번 호출에서 **한꺼번에 메운다**. 이전 구현
+     * (applyLeaseForPeriod)은 업로드의 정산기간(min~max)과 계약기간이 겹치는 날만
+     * 셌기 때문에, 라이더가 쉬어서 파일에 안 나온 날은 영영 차감되지 않았다.
+     *
+     * 부과 구간 = (마지막 반영일+1) ~ min(정산기간 끝, 종료예정일)
+     *   - 마지막 반영일: `due_updated_on`, 없으면 `opened_on - 1일`(= 개시일부터 전부)
+     *   - `planned_end_on` 이 없으면(대여금·선지급금) 종료 상한 없이 정산기간 끝까지.
+     *     대신 상각형이라 **잔액이 바닥나면 자동 완납(closed)** 되어 더 부과되지 않는다.
+     *
+     * 멱등성: 귀속일이 같으면 (debt_id, applied_date) UNIQUE 에 걸려 조용히 null 을
+     * 반환한다(같은 업로드 재반영 시 이중 차감 없음).
+     *
+     * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}|null
+     */
+    public static function applyDailyAccrualForPeriod(int $debtId, string $periodEnd, ?int $headroom = null): ?array
+    {
         $debt = self::find($debtId);
-        if ($debt === null || (string) $debt['kind'] !== 'lease' || (string) $debt['status'] !== 'active') {
+        if ($debt === null || (string) $debt['status'] !== 'active') {
             return null;
         }
 
-        $daily = (int) $debt['daily_amount'];
+        $daily  = (int) $debt['daily_amount'];
         $opened = self::normDate($debt['opened_on'] ?? null);
-        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
-        // 계약기간(출고일~종료예정일)이 설정 안 된 리스는 자동계산 불가 — 수동 차감(applyRepayment)으로 처리해야 함.
-        if ($daily <= 0 || $opened === null || $plannedEnd === null) {
+        // 일납이 없거나 개시일이 없으면 자동계산 불가 — 수동 차감(applyRepayment)으로 처리한다.
+        if ($daily <= 0 || $opened === null) {
             return null;
         }
 
-        $ps = self::normDate($periodStart);
         $pe = self::normDate($periodEnd);
-        if ($ps === null || $pe === null) {
+        if ($pe === null) {
             throw new InvalidArgumentException('정산기간 형식이 올바르지 않습니다. (YYYY-MM-DD)');
         }
 
-        $overlapStart = max($ps, $opened);
-        $overlapEnd   = min($pe, $plannedEnd);
-        if ($overlapStart > $overlapEnd) {
-            return null; // 계약기간과 정산기간이 겹치지 않음
+        // 상각형(대여금·선지급금)은 잔액이 남아 있어야 부과한다.
+        $isAmortizing = in_array((string) $debt['kind'], self::AMORTIZING, true);
+        $balance      = (int) $debt['balance_amount'];
+        if ($isAmortizing && $balance <= 0) {
+            return null;
         }
 
-        $days = (int) (new DateTime($overlapStart))->diff(new DateTime($overlapEnd))->days + 1;
+        // 부과 시작 = 마지막 반영 다음날(없으면 개시일)
+        $lastCovered = self::normDate($debt['due_updated_on'] ?? null);
+        $chargeStart = $lastCovered !== null ? self::addDays($lastCovered, 1) : $opened;
+        if ($chargeStart < $opened) {
+            $chargeStart = $opened;
+        }
+
+        // 부과 끝 = 정산기간 끝, 종료예정일이 있으면 그보다 늦지 않게
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        $chargeEnd  = ($plannedEnd !== null && $plannedEnd < $pe) ? $plannedEnd : $pe;
+
+        if ($chargeStart > $chargeEnd) {
+            return null; // 이미 반영됐거나 계약 시작 전 / 종료 후
+        }
+
+        $days   = (int) (new DateTime($chargeStart))->diff(new DateTime($chargeEnd))->days + 1;
+
+        // 그날 걷을 수 있는 여유분($headroom)이 주어지면 **걷을 수 있는 일수만큼만** 부과한다.
+        // 나머지 날짜는 due_updated_on 이 안 밀리므로 다음 정산에서 자동으로 다시 잡힌다(이월).
+        // 라이더 실수령이 0으로 잘리면서 차감액이 증발하는 걸 막는 장치다(2026-09-04 갑).
+        if ($headroom !== null) {
+            if ($headroom < $daily) {
+                return null; // 하루치도 못 걷음 → 전부 이월
+            }
+            $affordable = intdiv($headroom, $daily);
+            if ($affordable < $days) {
+                $days      = $affordable;
+                $chargeEnd = self::addDays($chargeStart, $days - 1);
+            }
+        }
+
         $amount = $days * $daily;
         if ($amount <= 0) {
             return null;
@@ -584,20 +682,20 @@ final class RiderDebt
         try {
             return self::applyRepayment(
                 $debtId,
-                $pe,
+                $pe,          // 귀속일 = 정산일 — 이 사이클이 소비해야 한다
                 $days,
                 $amount,
-                sprintf('자동계산: 계약기간∩정산기간(%s~%s) %d일', $overlapStart, $overlapEnd, $days)
+                sprintf('자동계산: %s~%s %d일(달력일)', $chargeStart, $chargeEnd, $days),
+                $chargeEnd    // 커버한 마지막 날 — 나머지는 다음 정산으로 이월
             );
         } catch (Throwable $e) {
-            // (debt_id, applied_date) UNIQUE 위반 = 이미 이 정산기간으로 처리됨 → 재실행 시 조용히 skip
+            // (debt_id, applied_date) UNIQUE 위반 = 이미 이 귀속일로 처리됨 → 재실행 시 조용히 skip
             if (str_contains($e->getMessage(), 'uq_rde_debt_applied') || str_contains($e->getMessage(), 'Duplicate entry')) {
                 return null;
             }
             throw $e;
         }
     }
-
     /**
      * 리스 수수료 배분 리포트 — 기간 내 실제로 배분된 금액을 조직별로 집계.
      * 현재 로그인 계정의 스코프(본사=전체 / 총판=하위 / 대리점=자기)를 자동 적용한다.
@@ -698,32 +796,50 @@ final class RiderDebt
         return [implode(' AND ', $conds), $params];
     }
 
-    /**
-     * 리스 차감 공백 상태 — 계약기간은 흐르는데 정산 반영이 뜸해서 차감이 밀린 경우를
-     * 관리자·라이더 화면에 동일하게 보여주기 위한 공용 계산. 실제 차감은 여전히
-     * applyLeaseForPeriod()(정산 반영 시점)에서만 일어나며, 이 메서드는 판단만 한다.
-     *
-     * @param array<string,mixed> $debt rider_debts 행(kind 무관하게 넘겨도 안전)
-     * @return array{missing_end_date: bool, overdue: bool, gap_days: int}|null
-     *         active 상태의 리스가 아니면 null(대여금/선지급/비활성/완료는 해당 없음)
-     */
+    /** @deprecated accrualGap() 을 쓸 것 — 리스만 보던 시절의 이름. */
     public static function leaseAccrualGap(array $debt, ?string $today = null): ?array
     {
-        if ((string) ($debt['kind'] ?? '') !== 'lease' || (string) ($debt['status'] ?? '') !== 'active') {
+        return (string) ($debt['kind'] ?? '') === 'lease' ? self::accrualGap($debt, $today) : null;
+    }
+
+    /**
+     * 차감 공백 상태 — **대여금·리스·선지급금 공통**. 달력일은 흐르는데 정산 반영이
+     * 뜸해서 차감이 밀린 일수를 관리자·라이더 화면에 동일하게 보여주기 위한 계산.
+     * 판단만 하고 실제 차감은 applyDailyAccrualForPeriod()(정산 반영 시점)가 한다.
+     *
+     * 다음 정산 반영 때 여기 gap_days 만큼이 **한꺼번에 부과**된다.
+     *
+     * @param array<string,mixed> $debt rider_debts 행
+     * @return array{missing_end_date: bool, overdue: bool, gap_days: int}|null
+     *         active 가 아니거나 일납·개시일이 없으면 null
+     */
+    public static function accrualGap(array $debt, ?string $today = null): ?array
+    {
+        if ((string) ($debt['status'] ?? '') !== 'active') {
             return null;
         }
-        $today      = self::normDate($today) ?? date('Y-m-d');
-        $opened     = self::normDate($debt['opened_on'] ?? null);
-        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        $today  = self::normDate($today) ?? date('Y-m-d');
+        $opened = self::normDate($debt['opened_on'] ?? null);
+        $kind   = (string) ($debt['kind'] ?? '');
 
-        if ($opened === null || $plannedEnd === null) {
+        // 리스는 계약 종료일이 있어야 자동계산이 성립한다(반복 부과라 잔액 상한이 없음).
+        $plannedEnd = self::normDate($debt['planned_end_on'] ?? null);
+        if ($kind === 'lease' && ($opened === null || $plannedEnd === null)) {
             return ['missing_end_date' => true, 'overdue' => false, 'gap_days' => 0];
         }
+        if ($opened === null || (int) ($debt['daily_amount'] ?? 0) <= 0) {
+            return null; // 일납/개시일 없는 건은 수동 차감 대상
+        }
+        // 상각형은 잔액이 없으면 더 부과되지 않으므로 공백도 없다.
+        if (in_array($kind, self::AMORTIZING, true) && (int) ($debt['balance_amount'] ?? 0) <= 0) {
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0];
+        }
         if ($opened > $today) {
-            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0]; // 계약 시작 전
+            return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0]; // 개시 전
         }
 
-        $coverageEnd = min($today, $plannedEnd); // 오늘 또는 계약 종료일 중 이른 쪽까지는 반영돼 있어야 함
+        // 오늘(또는 종료예정일 중 이른 쪽)까지는 반영돼 있어야 한다.
+        $coverageEnd = ($plannedEnd !== null && $plannedEnd < $today) ? $plannedEnd : $today;
         $lastCovered = self::normDate($debt['due_updated_on'] ?? null) ?? self::addDays($opened, -1);
         if ($lastCovered >= $coverageEnd) {
             return ['missing_end_date' => false, 'overdue' => false, 'gap_days' => 0];
@@ -737,7 +853,19 @@ final class RiderDebt
             'gap_days'         => $gapDays,
         ];
     }
+    /**
+     * 리스 총액 = 일납 × 계약일수(개시일~종료예정일, 양끝 포함).
+     * 계약 정보가 모자라면 0 — 자동계산이 안 되므로 수동 차감으로 처리해야 한다.
+     */
+    private static function leasePrincipal(int $daily, ?string $openedOn, ?string $plannedEnd): int
+    {
+        if ($daily <= 0 || $openedOn === null || $plannedEnd === null || $plannedEnd < $openedOn) {
+            return 0;
+        }
+        $days = (int) (new DateTime($openedOn))->diff(new DateTime($plannedEnd))->days + 1;
 
+        return $daily * $days;
+    }
     private static function addDays(string $date, int $days): string
     {
         return (new DateTime($date))->modify(($days >= 0 ? '+' : '') . $days . ' days')->format('Y-m-d');

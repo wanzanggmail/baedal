@@ -127,7 +127,7 @@ $r = db_row(
 
 // ── ⑥ fee_code 커버리지 ────────────────────────────────────────────────────
 $hd('⑥ fee_code 커버리지  (명세서·집계에서 처리 안 되는 코드)');
-$known = ['excel_deduction', 'manual', 'withholding', 'employment_ins', 'accident_ins',
+$known = ['excel_deduction', 'manual', 'withholding', 'employment_ins', 'accident_ins', 'carry_forward',
           'hourly_ins', 'agency_fee', 'advance', 'lease', 'rental', 'loan', 'vat', 'ins_refund'];
 $un = 0;
 foreach (db_rows('SELECT fee_code, COUNT(*) AS c, SUM(amount) AS s FROM settlement_fee_items GROUP BY fee_code') as $r) {
@@ -138,6 +138,25 @@ foreach (db_rows('SELECT fee_code, COUNT(*) AS c, SUM(amount) AS s FROM settleme
 }
 if ($un === 0) {
     $ok('모든 fee_code 처리됨');
+}
+
+// ── ⑥-B 차감 누수 (정산액 < 공제) ──────────────────────────────────────────
+$hd('⑥-B 차감 누수  (공제 합이 정산액을 넘어 증발한 금액)');
+$r = db_row(
+    'SELECT COUNT(*) AS c, COALESCE(SUM(total_fee_amount-(gross_amount+support_amount)),0) AS d
+       FROM settlement_rider_cycles
+      WHERE total_fee_amount > gross_amount + support_amount'
+);
+if ((int) $r['c'] === 0) {
+    $ok('공제가 정산액을 넘는 사이클 없음');
+} else {
+    $wrn("누수 {$r['c']}건 {$n($r['d'])}원 — 2026-09-04 이월 도입 **이전** 데이터. 이후 정산에서는 rider_carry_forward 로 이월되므로 늘어나면 안 된다");
+}
+if (db_table_exists('rider_carry_forward')) {
+    $cf = db_row('SELECT COUNT(*) AS c, COALESCE(SUM(remaining_amount),0) AS s FROM rider_carry_forward WHERE remaining_amount > 0');
+    (int) $cf['c'] === 0
+        ? $ok('미회수 이월분 없음')
+        : $wrn("미회수 이월 {$cf['c']}건 {$n($cf['s'])}원 (다음 정산에서 자동 회수 대상)");
 }
 
 // ── ⑦ 음수 잔액 ────────────────────────────────────────────────────────────

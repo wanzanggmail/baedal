@@ -94,13 +94,18 @@ if (!$needsMigrate) {
     $k = db_row(
         "SELECT
             SUM(CASE WHEN d.status = 'active' THEN 1 ELSE 0 END) AS active_cnt,
-            SUM(CASE WHEN d.status = 'active' AND d.kind IN ('loan','advance') THEN d.balance_amount ELSE 0 END) AS balance_sum,
+            SUM(CASE WHEN d.status = 'active' THEN d.balance_amount ELSE 0 END) AS balance_sum,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' THEN d.daily_amount ELSE 0 END) AS lease_daily,
             SUM(CASE WHEN d.status = 'closed' THEN 1 ELSE 0 END) AS closed_cnt,
             SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND (d.opened_on IS NULL OR d.planned_end_on IS NULL) THEN 1 ELSE 0 END) AS lease_no_end,
-            SUM(CASE WHEN d.status = 'active' AND d.kind = 'lease' AND d.opened_on IS NOT NULL AND d.planned_end_on IS NOT NULL
+            -- 차감 밀림: 리스뿐 아니라 대여금·선지급금도 달력일로 부과되므로 함께 센다(2026-09-04).
+            --   · 종료예정일이 없는 건(대여금·선지급금)은 오늘까지가 커버 대상
+            --   · 상각형은 잔액이 남아 있는 건만 해당
+            SUM(CASE WHEN d.status = 'active' AND d.opened_on IS NOT NULL AND d.daily_amount > 0
                      AND d.opened_on <= CURDATE()
-                     AND DATEDIFF(LEAST(CURDATE(), d.planned_end_on), COALESCE(d.due_updated_on, DATE_SUB(d.opened_on, INTERVAL 1 DAY))) >= " . RiderDebt::GAP_WARNING_DAYS . "
+                     AND (d.kind = 'lease' OR d.balance_amount > 0)
+                     AND (d.kind <> 'lease' OR d.planned_end_on IS NOT NULL)
+                     AND DATEDIFF(LEAST(CURDATE(), COALESCE(d.planned_end_on, CURDATE())), COALESCE(d.due_updated_on, DATE_SUB(d.opened_on, INTERVAL 1 DAY))) >= " . RiderDebt::GAP_WARNING_DAYS . "
                 THEN 1 ELSE 0 END) AS lease_overdue
            FROM rider_debts d INNER JOIN riders r ON r.id = d.rider_id
           WHERE 1=1 {$kWhere}",
@@ -363,7 +368,7 @@ $currentUrl = admin_url('deduction/debts');
 					<tbody>
 						<?php foreach ($rows as $d):
 							$dk = (string) $d['kind'];
-							$isAmort = in_array($dk, ['loan', 'advance'], true);
+							$isAmort = in_array($dk, ['loan', 'advance', 'lease'], true);
 						?>
 						<tr>
 							<td>
@@ -396,7 +401,7 @@ $currentUrl = admin_url('deduction/debts');
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $won($d['daily_amount']) : '—' ?></td>
 							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-600 fs-8">
-								<?php $gap = $dk === "lease" ? RiderDebt::leaseAccrualGap($d) : null; ?>
+								<?php $gap = RiderDebt::accrualGap($d); ?>
 								<?php if ($dk === "lease" && (string) ($d["opened_on"] ?? "") !== "" && (string) ($d["planned_end_on"] ?? "") !== ""): ?>
 								<?= htmlspecialchars((string) $d["opened_on"], ENT_QUOTES, "UTF-8") ?> ~ <?= htmlspecialchars((string) $d["planned_end_on"], ENT_QUOTES, "UTF-8") ?>
 								<?php if ($gap !== null && $gap["overdue"]): ?>
