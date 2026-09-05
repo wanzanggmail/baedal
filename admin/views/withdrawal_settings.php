@@ -199,6 +199,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 										<th class="min-w-110px">본사 몫 (원/건)</th>
 										<th class="min-w-110px">총판 몫 (원/건)</th>
 										<th class="min-w-110px">세무대리 몫 (원/건)</th>
+										<th class="min-w-110px">개발사 몫 (원/건)</th>
 										<th class="min-w-90px text-end">대리점 몫<br>(자동)</th>
 									</tr>
 								</thead>
@@ -212,6 +213,8 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 											value="<?= (int) $config['dist_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_tax_short" min="0"
 											value="<?= (int) ($config['tax_fee_short'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dev_short" min="0"
+											value="<?= (int) ($config['dev_fee_short'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td class="text-end fw-semibold" id="cfg_agency_short">–</td>
 									</tr>
 									<tr>
@@ -223,13 +226,15 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 											value="<?= (int) $config['dist_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_tax_long" min="0"
 											value="<?= (int) ($config['tax_fee_long'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dev_long" min="0"
+											value="<?= (int) ($config['dev_fee_long'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td class="text-end fw-semibold" id="cfg_agency_long">–</td>
 									</tr>
 								</tbody>
 							</table>
 						</div>
 						<div class="form-text fs-9 mb-6" id="cfg_share_hint">
-							세무대리 몫은 <strong>세무대리 지갑으로 실제 이체</strong>됩니다. 뗴는 순서는 <strong>세무대리 → 본사 → 총판 → 대리점(나머지)</strong>이며,
+							세무대리·개발사 몫은 <strong>각 조직 지갑으로 실제 이체</strong>됩니다. 뗴는 순서는 <strong>세무대리 → 개발사 → 본사 → 총판 → 대리점(나머지)</strong>이며,
 							대리점 몫이 0보다 작아지면 대리점은 0원이 되고 대행수수료까지만 가져갑니다.
 						</div>
 						<?php if ($isAgencySelf) : ?>
@@ -325,11 +330,11 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			if (!outShort || !outLong) { return; }
 			function intv(id) { var e = document.getElementById(id); return e ? (parseInt(e.value, 10) || 0) : 0; }
 			function refShow(id, val) { var e = document.getElementById(id); if (e) { e.textContent = val.toLocaleString() + '원'; } }
-			function render(out, fee, hq, dist, tax) {
-				var agency = fee - hq - dist - (tax || 0);
+			function render(out, fee, hq, dist, tax, dev) {
+				var agency = fee - hq - dist - (tax || 0) - (dev || 0);
 				if (agency < 0) {
 					out.innerHTML = '<span class="text-danger">0</span>';
-					out.title = '세무대리+본사+총판이 대행수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
+					out.title = '세무대리+개발사+본사+총판이 대행수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
 				} else {
 					out.textContent = agency.toLocaleString();
 					out.title = '';
@@ -339,10 +344,10 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				var fs = intv('cfg_fee_short'), fl = intv('cfg_fee_long');
 				refShow('cfg_fee_short_ref', fs);
 				refShow('cfg_fee_long_ref', fl);
-				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'), intv('cfg_tax_short'));
-				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'),  intv('cfg_tax_long'));
+				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'), intv('cfg_tax_short'), intv('cfg_dev_short'));
+				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'),  intv('cfg_tax_long'),  intv('cfg_dev_long'));
 			}
-			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long','cfg_tax_short','cfg_tax_long']
+			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long','cfg_tax_short','cfg_tax_long','cfg_dev_short','cfg_dev_long']
 				.forEach(function (id) { var e = document.getElementById(id); if (e) { e.addEventListener('input', recompute); } });
 			recompute();
 		})();
@@ -398,6 +403,8 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				payload.dist_fee_short = parseInt(document.getElementById('cfg_dist_short').value, 10) || 0;
 				payload.tax_fee_short = parseInt(document.getElementById('cfg_tax_short').value, 10) || 0;
 				payload.tax_fee_long = parseInt(document.getElementById('cfg_tax_long').value, 10) || 0;
+				payload.dev_fee_short = parseInt(document.getElementById('cfg_dev_short').value, 10) || 0;
+				payload.dev_fee_long = parseInt(document.getElementById('cfg_dev_long').value, 10) || 0;
 				payload.dist_fee_long  = parseInt(document.getElementById('cfg_dist_long').value, 10) || 0;
 			}
 			// 이체 수수료도 본사 전용 — 편집 가능할 때만 보낸다.

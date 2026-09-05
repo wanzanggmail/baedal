@@ -35,10 +35,11 @@ final class AgencyPayout
             throw new RuntimeException('지갑/출금 테이블이 없습니다. php migrate.php 를 실행하세요.');
         }
 
-        // 자체 인출은 자기 조직 지갑을 빼는 것 — 대리점·총판, 그리고 세무대리(수집한 원천세 납입)까지 허용.
+        // 자체 인출은 자기 조직 지갑을 빼는 것 — 대리점·총판, 세무대리(수집한 원천세 납입),
+        // 개발사(정산수수료 배분 몫)까지 허용.
         $org = db_row('SELECT id, level, name FROM organizations WHERE id = ? LIMIT 1', [$agencyId]);
-        if ($org === null || !in_array((string) $org['level'], ['agency', 'distributor', 'tax_agent'], true)) {
-            throw new InvalidArgumentException('대리점·총판·세무대리 조직만 자체 인출할 수 있습니다.');
+        if ($org === null || !in_array((string) $org['level'], ['agency', 'distributor', 'tax_agent', 'developer'], true)) {
+            throw new InvalidArgumentException('대리점·총판·세무대리·개발사 조직만 자체 인출할 수 있습니다.');
         }
 
         $amount = (int) $amount;
