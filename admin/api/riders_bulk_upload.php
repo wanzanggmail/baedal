@@ -107,19 +107,19 @@ if ($headerIdx === null) {
     $err('헤더를 찾을 수 없습니다. 템플릿을 다운로드해 그 양식 그대로 사용하세요. (필요 컬럼: 이름 / 휴대전화)');
 }
 
+// 로그인ID·라이더코드·차량종류·팀코드는 **받지 않는다**(2026-09-05 갑 지시) — 자동 처리한다.
+// 예전 양식으로 올려도 그 열은 그냥 무시된다.
 $fieldMatchers = [
-    'name'           => ['이름'],
-    'phone'          => ['휴대전화'],
-    'login_id'       => ['로그인ID', '로그인 ID'],
-    'rider_code'     => ['라이더코드', '라이더 코드'],
-    'vehicle_type'   => ['차량종류', '차량 종류'],
-    'team_code'      => ['팀코드', '팀 코드'],
-    'bank_code'      => ['은행코드', '은행 코드'],
-    'bank_account'   => ['계좌번호', '계좌 번호'],
-    'account_holder' => ['예금주'],
-    'email'          => ['이메일'],
-    'coupang_id'     => ['쿠팡ID', '쿠팡 ID'],
-    'baemin_id'      => ['배민ID', '배민 ID'],
+    'name'                    => ['이름'],
+    'phone'                   => ['휴대전화'],
+    'is_daily_settlement'     => ['일정산', '선정산'],
+    'withholding_tax_enabled' => ['원천세'],
+    'bank_code'               => ['은행코드', '은행 코드'],
+    'bank_account'            => ['계좌번호', '계좌 번호'],
+    'account_holder'          => ['예금주'],
+    'email'                   => ['이메일'],
+    'coupang_id'              => ['쿠팡ID', '쿠팡 ID'],
+    'baemin_id'               => ['배민ID', '배민 ID'],
 ];
 foreach ((array) $all[$headerIdx] as $c => $v) {
     $s = trim((string) ($v ?? ''));
@@ -155,19 +155,22 @@ foreach ($all as $i => $cols) {
     }
 
     $rows[] = [
-        'row_no'         => $i + 1,
-        'name'           => $name,
-        'phone'          => $phone,
-        'login_id'       => $get('login_id'),
-        'rider_code'     => $get('rider_code'),
-        'vehicle_type'   => $get('vehicle_type') !== '' ? $get('vehicle_type') : 'motor',
-        'team_code'      => $get('team_code') !== '' ? $get('team_code') : 'etc',
-        'bank_code'      => $get('bank_code'),
-        'bank_account'   => $get('bank_account'),
-        'account_holder' => $get('account_holder'),
-        'email'          => $get('email'),
-        'coupang_id'     => $get('coupang_id'),
-        'baemin_id'      => $get('baemin_id'),
+        'row_no'                  => $i + 1,
+        'name'                    => $name,
+        'phone'                   => $phone,
+        // 아래 셋은 파일에서 받지 않고 고정 — 로그인ID·라이더코드는 RiderRegistration 이 자동 생성한다.
+        'login_id'                => '',
+        'rider_code'              => '',
+        'vehicle_type'            => 'motor',
+        'team_code'               => 'etc',
+        'is_daily_settlement'     => $get('is_daily_settlement'),
+        'withholding_tax_enabled' => $get('withholding_tax_enabled'),
+        'bank_code'               => $get('bank_code'),
+        'bank_account'            => $get('bank_account'),
+        'account_holder'          => $get('account_holder'),
+        'email'                   => $get('email'),
+        'coupang_id'              => $get('coupang_id'),
+        'baemin_id'               => $get('baemin_id'),
     ];
 }
 
@@ -175,19 +178,23 @@ if ($rows === []) {
     $err('읽을 데이터가 없습니다.');
 }
 
-// 파일 안에서도 같은 값끼리 중복될 수 있으므로(휴대전화 두 번, 로그인ID 두 번 등) 미리 표시.
-// ⚠️ 휴대전화는 **숫자만 남겨서** 센다 — `010-1234-5678`과 `01012345678`은 같은 번호인데
-//    적힌 그대로 비교하면 서로 다른 값이 돼 같은 사람이 두 번 등록된다.
-$phoneKey   = static fn (string $p): string => preg_replace('/\D/', '', $p) ?? '';
-$phoneSeen  = [];
-$loginSeen  = [];
-$codeSeen   = [];
+// 파일 안에서 같은 휴대전화가 두 번 나오면 같은 사람이 두 번 등록된다 — 미리 표시한다.
+// ⚠️ **숫자만 남겨서** 센다: `010-1234-5678`과 `01012345678`은 같은 번호인데 적힌 그대로
+//    비교하면 서로 다른 값이 된다. 로그인ID가 이 숫자에서 만들어지므로 더더욱 같이 묶어야 한다.
+//    (로그인ID·라이더코드는 더는 파일에서 받지 않으므로 중복 검사 대상이 아니다.)
+$phoneKey  = static fn (string $p): string => preg_replace('/\D/', '', $p) ?? '';
+$phoneSeen = [];
 foreach ($rows as $r) {
     $pk = $phoneKey($r['phone']);
     if ($pk !== '') { $phoneSeen[$pk] = ($phoneSeen[$pk] ?? 0) + 1; }
-    if ($r['login_id'] !== '') { $loginSeen[$r['login_id']] = ($loginSeen[$r['login_id']] ?? 0) + 1; }
-    if ($r['rider_code'] !== '') { $codeSeen[$r['rider_code']] = ($codeSeen[$r['rider_code']] ?? 0) + 1; }
 }
+
+// RiderRegistration::boolFlag() 와 같은 규칙 — 미리보기 표시용.
+$flag = static function (string $v): bool {
+    $t = strtolower(trim($v));
+
+    return $t !== '' && in_array($t, ['1', 'y', 'yes', 'o', 't', 'true', '예', '대상', '사용', 'ㅇ'], true);
+};
 
 $results = [];
 $okCount = 0;
@@ -197,10 +204,6 @@ foreach ($rows as $r) {
     $rowErr = null;
     if (($phoneSeen[$phoneKey($r['phone'])] ?? 0) > 1) {
         $rowErr = '파일 안에서 휴대전화가 중복됩니다.';
-    } elseif ($r['login_id'] !== '' && ($loginSeen[$r['login_id']] ?? 0) > 1) {
-        $rowErr = '파일 안에서 로그인ID가 중복됩니다.';
-    } elseif ($r['rider_code'] !== '' && ($codeSeen[$r['rider_code']] ?? 0) > 1) {
-        $rowErr = '파일 안에서 라이더코드가 중복됩니다.';
     }
 
     if ($mode === 'preview') {
@@ -232,13 +235,16 @@ foreach ($rows as $r) {
     }
 
     $results[] = [
-        'row_no'     => $r['row_no'],
-        'name'       => $r['name'],
-        'phone'      => $r['phone'],
-        'login_id'   => $r['login_id'],
-        'rider_code' => $r['rider_code'],
-        'ok'         => $rowErr === null,
-        'error'      => $rowErr,
+        'row_no'      => $r['row_no'],
+        'name'        => $r['name'],
+        'phone'       => $r['phone'],
+        'login_id'    => $r['login_id'],
+        'rider_code'  => $r['rider_code'],
+        // 미리보기에서 정산 설정이 의도대로 읽혔는지 눈으로 확인할 수 있게 함께 내려준다.
+        'daily'       => $flag($r['is_daily_settlement']),
+        'withholding' => $flag($r['withholding_tax_enabled']),
+        'ok'          => $rowErr === null,
+        'error'       => $rowErr,
     ];
 }
 

@@ -486,7 +486,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<div class="table-responsive" style="max-height: 420px;">
 							<table class="table table-row-bordered align-middle gy-2 fs-7">
 								<thead><tr class="fw-bold text-muted bg-light">
-									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th>상태</th>
+									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th class="text-center">일정산</th><th class="text-center">원천세</th><th>상태</th>
 								</tr></thead>
 								<tbody id="bulk_tbody"></tbody>
 							</table>
@@ -602,6 +602,12 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
 		});
 	}
+	// 일괄등록 미리보기 — 일정산·원천세 대상 여부 배지
+	function badge(on) {
+		return on
+			? '<span class="badge badge-light-primary">대상</span>'
+			: '<span class="badge badge-light">-</span>';
+	}
 	function showAlert(msg, type) {
 		alertEl.className = 'alert alert-' + (type || 'danger') + ' mb-6';
 		alertEl.innerHTML = msg;
@@ -641,6 +647,8 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				+ '<td>' + esc(r.name) + '</td>'
 				+ '<td>' + esc(r.phone) + '</td>'
 				+ '<td class="font-monospace">' + esc(r.login_id) + '</td>'
+				+ '<td class="text-center">' + badge(r.daily) + '</td>'
+				+ '<td class="text-center">' + badge(r.withholding) + '</td>'
 				+ '<td>' + (r.ok
 					? '<span class="badge badge-light-success fs-8">등록 가능</span>'
 					: '<span class="badge badge-light-danger fs-8">' + esc(r.error) + '</span>')
