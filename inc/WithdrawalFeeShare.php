@@ -12,9 +12,10 @@ require_once __DIR__ . '/Org.php';
  * 라이더가 출금할 때 지갑에서 `실지급액 + 정산수수료`가 빠진다. 실지급액만 라이더 계좌로
  * 나가므로 **정산수수료만큼은 대리점 지갑에 남는다.** 그 남은 돈을 본사·총판·대리점이 나눈다.
  *
+ *   세무대리 몫 = short×tax_fee_short + long×tax_fee_long  (2026-09-05 갑 — 가장 먼저 뗀다)
  *   본사 몫  = short×hq_fee_short + long×hq_fee_long  (구간별 배달 건당 정액)
  *   총판 몫  = short×dist_fee_short + long×dist_fee_long
- *   대리점 몫 = 대행수수료 − 본사 − 총판 (나머지 전부)
+ *   대리점 몫 = 대행수수료 − 세무대리 − 본사 − 총판 (나머지 전부)
  *
  * 구간(기준 미만/이상)은 주문의 정산일 경과일로 나뉜다. 사이클 점유 기록이 있는 경로
  * (라이더 주정산)는 `withdrawal_request_cycles`↔`settlement_rider_cycles`로 재구성하고,
@@ -40,11 +41,11 @@ final class WithdrawalFeeShare
      *                              `withdrawal_request_cycles` 점유 기록을 만들지 않는 경로용).
      *                              null이면 점유 기록에서 구간별로 재구성한다.
      * @param int|null $longOrders  기준 이상 배달 건수(위와 함께 넘긴다).
-     * @return array{hq:int, distributor:int, agency:int, orders:int, moved:int}
+     * @return array{hq:int, distributor:int, tax:int, agency:int, orders:int, moved:int}
      */
     public static function distribute(int $requestId, int $riderId, int $totalFee, ?int $adminId = null, ?int $shortOrders = null, ?int $longOrders = null): array
     {
-        $none = ['hq' => 0, 'distributor' => 0, 'agency' => 0, 'orders' => 0, 'moved' => 0];
+        $none = ['hq' => 0, 'distributor' => 0, 'tax' => 0, 'agency' => 0, 'orders' => 0, 'moved' => 0];
 
         if ($requestId < 1 || $totalFee <= 0 || !AgencyWallet::tableExists()) {
             return $none;
@@ -66,7 +67,16 @@ final class WithdrawalFeeShare
 
         $hq   = (int) $share['hq'];
         $dist = (int) $share['distributor'];
+        $tax  = (int) ($share['tax'] ?? 0);
         $chain = Org::chainForAgency($agencyId);
+
+        // 세무대리는 조직 트리 바깥(parent 없는 단일 조직)이라 chain 에 없다 — 따로 찾는다.
+        // 조직이 없으면(마이그레이션 전 등) 세무대리 몫을 떼지 않는다 — 갈 곳 없는 돈이
+        // 대리점 지갑에서 빠져 증발하는 걸 막는다.
+        $taxOrgId = $tax > 0 ? Org::taxAgentOrgId() : 0;
+        if ($tax > 0 && $taxOrgId < 1) {
+            $tax = 0;
+        }
 
         // 총판이 없는(본사 직속) 대리점이면 총판 몫은 갈 곳이 없다 → 본사로 합친다.
         // 그냥 두면 대리점 지갑에서 빠진 돈이 어디에도 안 들어가 증발한다.
@@ -77,10 +87,10 @@ final class WithdrawalFeeShare
             $foldNote = ' · 총판 없음(본사 직속)이라 총판 몫을 본사에 합산';
         }
 
-        $moveOut = $hq + $dist;
+        $moveOut = $hq + $dist + $tax;
         if ($moveOut <= 0) {
             // 전액 대리점 몫이면 이동할 게 없다(이미 대리점 지갑에 있음).
-            return ['hq' => 0, 'distributor' => 0, 'agency' => (int) $share['agency'], 'orders' => $orders, 'moved' => 0];
+            return ['hq' => 0, 'distributor' => 0, 'tax' => 0, 'agency' => (int) $share['agency'], 'orders' => $orders, 'moved' => 0];
         }
 
         $note = sprintf('출금#%d 정산수수료 배분(배달 %d건)', $requestId, $orders);
@@ -92,10 +102,14 @@ final class WithdrawalFeeShare
         if ($dist > 0 && $chain['distributor'] > 0) {
             AgencyWallet::credit($chain['distributor'], $dist, 'wd_fee_in', $requestId, $note . ' · 총판 몫', $adminId);
         }
+        if ($tax > 0 && $taxOrgId > 0) {
+            AgencyWallet::credit($taxOrgId, $tax, 'wd_fee_in', $requestId, $note . ' · 세무대리 몫', $adminId);
+        }
 
         return [
             'hq'          => $hq,
             'distributor' => $dist,
+            'tax'         => $tax,
             'agency'      => (int) $share['agency'],
             'orders'      => $orders,
             'moved'       => $moveOut,
