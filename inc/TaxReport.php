@@ -26,6 +26,28 @@ require_once __DIR__ . '/Org.php';
  */
 final class TaxReport
 {
+    /**
+     * 조회 범위 — 세무대리는 **전 대리점**을 본다.
+     *
+     * 🐛 Org::agencyScopeClause() 를 그대로 쓰면 안 된다. Org::scopeAgencyIds() 는
+     *    admin=null(전체) / distributor=하위 대리점 / **그 외=자기 조직 id** 라서,
+     *    tax_agent 계정은 `r.agency_id IN (세무대리 org id)` 가 되어 아무 대리점도 안 잡힌다
+     *    (2026-09-05 실제로 목록이 0곳으로 나왔다).
+     *    세무대리는 대리점을 거느리는 조직이 아니라 전 대리점의 신고를 대행하는 조직이므로
+     *    본사와 같은 「전체」로 취급한다. `Org::scopeAgencyIds()` 자체는 건드리지 않는다 —
+     *    지갑 입출금처럼 세무대리가 **자기 것만** 봐야 하는 화면이 그 규칙에 기대고 있다.
+     *
+     * @return array{0:string, 1:list<mixed>}
+     */
+    private static function scopeClause(string $column): array
+    {
+        if (admin_org_level() === Org::LEVEL_TAX_AGENT) {
+            return ['', []];
+        }
+
+        return Org::agencyScopeClause($column);
+    }
+
     /** 세무비용 단가(원/콜) — 설정이 없으면 샘플 파일과 같은 15원. */
     public static function feePerCall(): int
     {
@@ -52,11 +74,10 @@ final class TaxReport
         $out = [];
 
         // ── 정산분 ──
-        [$scope, $params] = Org::agencyScopeClause('r.agency_id');
+        [$scope, $params] = self::scopeClause('r.agency_id');
         $cond = $scope !== '' ? ' AND ' . $scope : '';
         foreach (db_rows(
             "SELECT r.agency_id AS aid, o.name AS name, o.code AS code,
-                    COUNT(DISTINCT c.rider_id) AS riders,
                     COALESCE(SUM(c.order_count), 0) AS calls,
                     COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base
                FROM settlement_rider_cycles c
@@ -71,7 +92,7 @@ final class TaxReport
                 'agency_id'   => $aid,
                 'agency_name' => (string) $r['name'],
                 'code'        => (string) $r['code'],
-                'riders'      => (int) $r['riders'],
+                'riders'      => 0,   // 원천세 대상 인원만 아래에서 채운다
                 'calls'       => (int) $r['calls'],
                 'base'        => 0,   // 원천세 대상분만 아래에서 채운다
                 'base_wh'     => 0,
@@ -84,6 +105,7 @@ final class TaxReport
         // ── 정산분 원천세 + 그 원천세가 붙은 사이클의 기준금액 ──
         foreach (db_rows(
             "SELECT r.agency_id AS aid,
+                    COUNT(DISTINCT c.rider_id) AS riders,
                     COALESCE(SUM(fi.amount), 0) AS wh,
                     COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base
                FROM settlement_fee_items fi
@@ -98,13 +120,14 @@ final class TaxReport
             if (!isset($out[$aid])) {
                 continue;
             }
+            $out[$aid]['riders']  = (int) $r['riders'];
             $out[$aid]['base']    = (int) $r['base'];
             $out[$aid]['base_wh'] = (int) $r['wh'];
         }
 
         // ── 프로모션분 ──
         if (db_table_exists('promotion_entries') && db_table_exists('promotion_batches')) {
-            [$pScope, $pParams] = Org::agencyScopeClause('b.agency_id');
+            [$pScope, $pParams] = self::scopeClause('b.agency_id');
             $pCond = $pScope !== '' ? ' AND ' . $pScope : '';
             foreach (db_rows(
                 "SELECT b.agency_id AS aid, o.name AS name, o.code AS code,
