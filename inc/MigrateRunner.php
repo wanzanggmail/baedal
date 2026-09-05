@@ -92,6 +92,7 @@ final class MigrateRunner
         self::migrateCarryForward();
         self::migrateLeaseBalance();
         self::migrateTaxReportFields();
+        self::migrateTaxFeeShare();
 
         echo "\n완료.\n";
     }
@@ -3346,5 +3347,40 @@ final class MigrateRunner
                 echo "OK    deduction_global_config.tax_fee_per_call 추가(기본 15원/콜)\n";
             }
         }
+    }
+
+    /**
+     * 정산수수료 배분에 **세무대리 몫** 추가 (2026-09-05 갑).
+     *
+     * 갑: "정산수수료 배분에서 본사 총판 세무대리 이렇게 3개로 하고 세무대리꺼는
+     *      세무대리 지갑으로 보내면 어때?"
+     *
+     * 본사·총판과 같은 구조(기준 미만/이상 배달 건당 정액). 기본 0 이라 설정을 넣기 전까지는
+     * 지금과 동작이 완전히 같다.
+     */
+    private static function migrateTaxFeeShare(): void
+    {
+        echo "== 정산수수료 세무대리 몫 ==\n";
+
+        if (!db_table_exists('withdrawal_config')) {
+            echo "SKIP  withdrawal_config 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+        $adds = [];
+        if (!in_array('tax_fee_short', $cols, true)) {
+            $adds[] = "ADD COLUMN tax_fee_short INT NOT NULL DEFAULT 0 COMMENT '세무대리 몫 — 기준 미만 배달 건당(원)'";
+        }
+        if (!in_array('tax_fee_long', $cols, true)) {
+            $adds[] = "ADD COLUMN tax_fee_long INT NOT NULL DEFAULT 0 COMMENT '세무대리 몫 — 기준 이상 배달 건당(원)'";
+        }
+        if ($adds === []) {
+            echo "SKIP  tax_fee_short/long (이미 있음)\n";
+
+            return;
+        }
+        db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
+        echo "OK    withdrawal_config 세무대리 몫 컬럼 " . count($adds) . "개 추가(기본 0원)\n";
     }
 }
