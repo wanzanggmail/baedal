@@ -14,6 +14,7 @@ final class Org
     public const LEVEL_DISTRIBUTOR = 'distributor';
     public const LEVEL_AGENCY      = 'agency';
     public const LEVEL_TAX_AGENT   = 'tax_agent'; // 세무대리 — 독립 조직, 고용·산재 예수금 신고·수집(2026-09-01)
+    public const LEVEL_DEVELOPER   = 'developer'; // 개발사 — 독립 조직, 정산수수료 배분 몫 수령(2026-09-05)
 
     /** @var array<int, array<string,mixed>>|null  id => row */
     private static ?array $cache = null;
@@ -30,6 +31,7 @@ final class Org
             self::LEVEL_DISTRIBUTOR => '총판',
             self::LEVEL_AGENCY      => '대리점',
             self::LEVEL_TAX_AGENT   => '세무대리',
+            self::LEVEL_DEVELOPER   => '개발사',
             default                 => $level,
         };
     }
@@ -38,6 +40,19 @@ final class Org
     public static function taxAgentOrgId(): int
     {
         $row = db_row("SELECT id FROM organizations WHERE level = 'tax_agent' ORDER BY id ASC LIMIT 1");
+
+        return $row !== null ? (int) $row['id'] : 0;
+    }
+
+    /**
+     * 개발사 조직 id (독립 조직, 단일). 없으면 0.
+     *
+     * 세무대리와 같은 자리 — 조직 트리(본사>총판>대리점) 밖에 있고, 정산수수료 배분에서
+     * 자기 몫을 받아 자기 지갑에서 인출한다(2026-09-05 갑).
+     */
+    public static function developerOrgId(): int
+    {
+        $row = db_row("SELECT id FROM organizations WHERE level = 'developer' ORDER BY id ASC LIMIT 1");
 
         return $row !== null ? (int) $row['id'] : 0;
     }
@@ -146,7 +161,9 @@ final class Org
         }
 
         $level = (string) $org['level'];
-        if ($level === self::LEVEL_ADMIN) {
+        // 개발사는 본사와 같은 전체 권한(2026-09-05 갑). 스코프를 안 열어주면
+        // scopeAgencyIds() 가 [개발사 org id] 를 돌려줘 모든 목록이 빈 화면이 된다.
+        if ($level === self::LEVEL_ADMIN || $level === self::LEVEL_DEVELOPER) {
             return null;
         }
         if ($level === self::LEVEL_DISTRIBUTOR) {
@@ -168,7 +185,8 @@ final class Org
         if ($org === null) {
             return admin_has_role('super') ? null : [];
         }
-        if ((string) $org['level'] === self::LEVEL_ADMIN) {
+        $lvl = (string) $org['level'];
+        if ($lvl === self::LEVEL_ADMIN || $lvl === self::LEVEL_DEVELOPER) {
             return null;
         }
 

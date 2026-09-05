@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 require_once INC_PATH . '/AgencyPayout.php';
 
-// 자체 인출은 자기 조직 지갑을 빼는 것 — 대리점·총판·세무대리(수집한 원천세 납입) 모두 "셀프". 본사는 조회만.
-$isSelf    = in_array(admin_org_level(), [Org::LEVEL_AGENCY, Org::LEVEL_DISTRIBUTOR, Org::LEVEL_TAX_AGENT], true);
+// 자체 인출은 자기 조직 지갑을 빼는 것 — 대리점·총판·세무대리(원천세 납입)·개발사(배분 몫) 모두 "셀프".
+// 본사는 조회만. 개발사는 메뉴 권한이 본사와 같지만(2026-09-05 갑) 지갑만은 자기 것을 빼야 한다.
+$isSelf    = in_array(admin_org_level(), [Org::LEVEL_AGENCY, Org::LEVEL_DISTRIBUTOR, Org::LEVEL_TAX_AGENT, Org::LEVEL_DEVELOPER], true);
 $myOrg     = $isSelf ? admin_org_id() : 0;
 $apiUrl    = ADMIN_BASE . '/api/agency_payout.php';
 $needsMigrate = !db_table_exists('agency_wallets') || !db_table_exists('withdrawal_requests');

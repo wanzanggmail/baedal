@@ -93,6 +93,7 @@ final class MigrateRunner
         self::migrateLeaseBalance();
         self::migrateTaxReportFields();
         self::migrateTaxFeeShare();
+        self::migrateDeveloperOrg();
 
         echo "\n완료.\n";
     }
@@ -3382,5 +3383,95 @@ final class MigrateRunner
         }
         db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
         echo "OK    withdrawal_config 세무대리 몫 컬럼 " . count($adds) . "개 추가(기본 0원)\n";
+    }
+
+    /**
+     * 개발사 조직 — 정산수수료 배분 몫을 받고 자기 지갑에서 인출한다 (2026-09-05 갑).
+     *
+     * 갑: "개발사도 하나 추가해줘 세무대리처럼 대행수수료 나눠서 가져가고 지갑에서 출금할수 있도록"
+     *     "개발사는 메뉴 권한을 본사 최고관리자랑 동일하게 해줘"
+     *
+     * 세무대리와 같은 자리 — 조직 트리(본사>총판>대리점) 밖의 단일 독립 조직이다.
+     * 메뉴·데이터 권한은 본사와 동일하되(Org::scopeAgencyIds 가 null 을 준다), 지갑만은
+     * 자기 것을 본다.
+     */
+    private static function migrateDeveloperOrg(): void
+    {
+        echo "== 개발사 조직 ==\n";
+
+        if (!db_table_exists('organizations')) {
+            echo "SKIP  organizations 없음\n";
+
+            return;
+        }
+
+        // 1) organizations.level 에 'developer' 추가
+        $col = db_row("SHOW COLUMNS FROM organizations LIKE 'level'");
+        if ($col !== null && !str_contains((string) $col['Type'], 'developer')) {
+            db_execute("ALTER TABLE organizations MODIFY COLUMN level ENUM('admin','distributor','agency','tax_agent','developer') NOT NULL");
+            echo "OK    organizations.level 에 developer 추가\n";
+        }
+
+        // 2) 개발사 조직(단일)
+        $dev = db_row("SELECT id FROM organizations WHERE level = 'developer' ORDER BY id ASC LIMIT 1");
+        if ($dev === null) {
+            $code  = db_row("SELECT id FROM organizations WHERE code = 'DEV' LIMIT 1") === null ? 'DEV' : 'DEV-' . date('ymdHis');
+            $devId = db_insert(
+                "INSERT INTO organizations (parent_id, level, code, name, is_active, created_at)
+                 VALUES (NULL, 'developer', ?, '개발사', 1, NOW())",
+                [$code]
+            );
+            echo "OK    개발사 조직 생성(id={$devId}, code={$code})\n";
+        } else {
+            $devId = (int) $dev['id'];
+            echo "SKIP  개발사 조직 (이미 있음, id={$devId})\n";
+        }
+
+        // 3) 대표계정 — 메뉴 권한을 본사 최고관리자와 동일하게 하려고 role='super' 로 만든다.
+        if (db_table_exists('admins')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM admins'), 'Field');
+            if (!in_array('org_id', $cols, true)) {
+                echo "SKIP  개발사 계정 (admins.org_id 아직 없음)\n";
+            } elseif (db_row('SELECT id FROM admins WHERE org_id = ? LIMIT 1', [$devId]) !== null) {
+                echo "SKIP  개발사 계정 (이미 있음)\n";
+            } elseif (db_row("SELECT id FROM admins WHERE login_id = 'dev' LIMIT 1") !== null) {
+                echo "SKIP  개발사 계정 (login_id 'dev' 가 이미 쓰임)\n";
+            } else {
+                $pw = (string) (getenv('DEV_INIT_PASSWORD') ?: 'Admin1234!');
+                db_insert(
+                    "INSERT INTO admins (login_id, password_hash, name, role, org_id, is_active)
+                     VALUES ('dev', ?, '개발사', 'super', ?, 1)",
+                    [password_hash($pw, PASSWORD_BCRYPT, ['cost' => 12]), $devId]
+                );
+                echo "OK    개발사 계정 생성(dev / role=super)\n";
+                echo getenv('DEV_INIT_PASSWORD')
+                    ? "      비밀번호: DEV_INIT_PASSWORD 환경변수 값\n"
+                    : "      ⚠️ 비밀번호가 기본값(Admin1234!)입니다 — 로그인 후 즉시 변경하세요.\n";
+            }
+        }
+
+        // 4) 지갑
+        if (db_table_exists('agency_wallets')) {
+            db_execute('INSERT IGNORE INTO agency_wallets (agency_id, balance, withholding_reserve) VALUES (?, 0, 0)', [$devId]);
+            echo "OK    개발사 지갑 확인\n";
+        }
+
+        // 5) 정산수수료 배분 — 개발사 몫(기본 0원이라 설정 전까지 동작 변화 없음)
+        if (db_table_exists('withdrawal_config')) {
+            $wc   = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+            $adds = [];
+            if (!in_array('dev_fee_short', $wc, true)) {
+                $adds[] = "ADD COLUMN dev_fee_short INT NOT NULL DEFAULT 0 COMMENT '개발사 몫 — 기준 미만 배달 건당(원)'";
+            }
+            if (!in_array('dev_fee_long', $wc, true)) {
+                $adds[] = "ADD COLUMN dev_fee_long INT NOT NULL DEFAULT 0 COMMENT '개발사 몫 — 기준 이상 배달 건당(원)'";
+            }
+            if ($adds === []) {
+                echo "SKIP  dev_fee_short/long (이미 있음)\n";
+            } else {
+                db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $adds));
+                echo "OK    withdrawal_config 개발사 몫 컬럼 " . count($adds) . "개 추가(기본 0원)\n";
+            }
+        }
     }
 }
