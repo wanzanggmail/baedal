@@ -197,14 +197,22 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 										</div>
 										<div class="separator my-2"></div>
 										<div class="menu-item px-5">
+											<a href="<?= htmlspecialchars(admin_url('system/mypage'), ENT_QUOTES, 'UTF-8') ?>" class="menu-link px-5">내 계정<span class="text-muted fs-8 ms-2">비밀번호 변경</span></a>
+										</div>
+										<div class="menu-item px-5">
 											<a href="<?= htmlspecialchars(admin_url('dashboard'), ENT_QUOTES, 'UTF-8') ?>" class="menu-link px-5">대시보드</a>
 										</div>
+										<?php // 권한 없는 계정에 링크만 보여주면 눌렀을 때 403 이 뜬다 — 접근 가능한 것만 노출. ?>
+										<?php if (admin_can_access_route('system/admins')) : ?>
 										<div class="menu-item px-5">
 											<a href="<?= htmlspecialchars(admin_url('system/admins'), ENT_QUOTES, 'UTF-8') ?>" class="menu-link px-5">관리자·권한</a>
 										</div>
+										<?php endif; ?>
+										<?php if (admin_can_access_route('system/codes')) : ?>
 										<div class="menu-item px-5">
 											<a href="<?= htmlspecialchars(admin_url('system/codes'), ENT_QUOTES, 'UTF-8') ?>" class="menu-link px-5">코드/마스터</a>
 										</div>
+										<?php endif; ?>
 										<div class="separator my-2"></div>
 										<div class="menu-item px-5">
 											<a href="<?= htmlspecialchars(admin_logout_url(), ENT_QUOTES, 'UTF-8') ?>" class="menu-link px-5 text-danger">로그아웃</a>

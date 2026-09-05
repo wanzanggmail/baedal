@@ -37,6 +37,7 @@ return [
     'system/orgs' => ['title' => '조직 관리(총판·대리점)', 'view' => 'system_orgs'],
     'system/admins' => ['title' => '관리자 계정·권한', 'view' => 'system_admins'],
     'system/team' => ['title' => '대표·서브계정 관리', 'view' => 'org_accounts'],
+    'system/mypage' => ['title' => '내 계정', 'view' => 'mypage'],
     'system/codes' => ['title' => '코드/마스터', 'view' => 'system_codes'],
     'system/settlement-excel' => ['title' => '정산 엑셀 열기 암호', 'view' => 'system_settlement_excel'],
     'system/audit' => ['title' => '감사 로그', 'view' => 'system_audit'],

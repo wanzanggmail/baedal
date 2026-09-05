@@ -137,6 +137,12 @@ function admin_can_access_route(string $route): bool
     if ($user === null) {
         return false;
     }
+    // 내 계정(system/mypage) — 로그인한 **누구나** 자기 정보·비밀번호를 볼 수 있어야 한다.
+    // 아래 총판/세무대리 화이트리스트보다 먼저 통과시켜야 그 계정들도 비밀번호를 바꿀 수 있다.
+    if ($route === 'system/mypage') {
+        return true;
+    }
+
     // ⚠️ super 단축경로보다 **먼저** 판정한다.
     // 대표·서브계정 관리(system/team)는 총판·대리점이 자기 조직 서브계정을 직접 관리하는
     // 화면이라 본사에는 해당이 없다(본사는 system/admins 로 전체 계정을 관리한다).
