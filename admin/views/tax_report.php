@@ -68,8 +68,12 @@ foreach ($agencies as $a) {
 		<!--begin::기간-->
 		<div class="card mb-6">
 			<div class="card-body py-5">
-				<form method="get" class="row g-3 align-items-end">
-					<input type="hidden" name="r" value="tax/report" />
+				<?php // 라우트 유지 — 쿼리 URL 모드에서는 GET 제출이 기존 쿼리를 통째로 갈아치워서
+				     // route 파라미터가 사라지고 대시보드로 튕긴다(2026-09-05 수정). ?>
+				<form method="get" action="<?= htmlspecialchars(admin_url('tax/report'), ENT_QUOTES, 'UTF-8') ?>" class="row g-3 align-items-end">
+					<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL): ?>
+					<input type="hidden" name="route" value="tax/report" />
+					<?php endif; ?>
 					<div class="col-sm-3">
 						<label class="form-label fw-semibold fs-7" for="f_from">시작일</label>
 						<input type="date" class="form-control form-control-solid" id="f_from" name="from" value="<?= htmlspecialchars($from, ENT_QUOTES, 'UTF-8') ?>" />
