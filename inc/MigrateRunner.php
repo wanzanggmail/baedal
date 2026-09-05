@@ -91,6 +91,7 @@ final class MigrateRunner
         self::migrateDebtAccrualBaseline();
         self::migrateCarryForward();
         self::migrateLeaseBalance();
+        self::migrateTaxReportFields();
 
         echo "\n완료.\n";
     }
@@ -3285,5 +3286,65 @@ final class MigrateRunner
             $added++;
         }
         echo $added > 0 ? "OK    시스템 코드 {$added}건 추가\n" : "SKIP  시스템 코드 (모두 있음)\n";
+    }
+
+    /**
+     * 세무신고용 필드 (2026-09-05 갑).
+     *
+     * 세무대리가 대리점별 「세무신고용」 엑셀을 뽑을 때 라이더마다 두 가지를 더 본다:
+     *   · 세금신고 유무   — 체크박스. 신고 대상인지 여부만 판단하면 된다.
+     *   · 금액조정필요    — 자유 텍스트. 나중에 확인할 메모를 남긴다.
+     *
+     * `withholding_tax_enabled`(정산 시 3.3% 공제 여부)와는 **다른 값**이다 —
+     * 이쪽은 돈 계산, 저쪽은 신고 대상 판단이라 각각 켤 수 있어야 한다.
+     *
+     * 기본값은 1(신고 대상) — 기존 라이더가 전부 「미신고」로 보이면 안 되기 때문이다.
+     * 예외만 체크를 풀어 관리한다.
+     *
+     * 세무비용 단가는 「총 콜수 × 단가」로 청구액을 내는 데 쓴다(샘플 파일 기준 15원/콜).
+     */
+    private static function migrateTaxReportFields(): void
+    {
+        echo "== 세무신고용 필드 ==\n";
+
+        if (db_table_exists('riders')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM riders'), 'Field');
+            if (in_array('tax_report_enabled', $cols, true)) {
+                echo "SKIP  riders.tax_report_enabled (이미 있음)\n";
+            } else {
+                db_execute(
+                    "ALTER TABLE riders
+                        ADD COLUMN tax_report_enabled TINYINT(1) NOT NULL DEFAULT 1
+                            COMMENT '세금신고 대상 여부(세무대리 판단용) — 원천세 공제 여부와 별개'
+                        AFTER withholding_tax_enabled"
+                );
+                echo "OK    riders.tax_report_enabled 추가\n";
+            }
+            if (in_array('tax_adjust_note', $cols, true)) {
+                echo "SKIP  riders.tax_adjust_note (이미 있음)\n";
+            } else {
+                db_execute(
+                    "ALTER TABLE riders
+                        ADD COLUMN tax_adjust_note VARCHAR(255) NULL
+                            COMMENT '금액조정필요 — 세무신고 시 참고할 자유 메모'
+                        AFTER tax_report_enabled"
+                );
+                echo "OK    riders.tax_adjust_note 추가\n";
+            }
+        }
+
+        if (db_table_exists('deduction_global_config')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
+            if (in_array('tax_fee_per_call', $cols, true)) {
+                echo "SKIP  deduction_global_config.tax_fee_per_call (이미 있음)\n";
+            } else {
+                db_execute(
+                    "ALTER TABLE deduction_global_config
+                        ADD COLUMN tax_fee_per_call INT NOT NULL DEFAULT 15
+                            COMMENT '세무비용 단가(원/콜) — 세무신고용 파일의 최종 세무 비용 산출'"
+                );
+                echo "OK    deduction_global_config.tax_fee_per_call 추가(기본 15원/콜)\n";
+            }
+        }
     }
 }

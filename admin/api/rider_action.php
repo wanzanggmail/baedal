@@ -249,6 +249,32 @@ if ($method === 'POST' || $method === 'PATCH') {
         exit;
     }
 
+    // 세금신고 유무 — 원천세 공제(withholding_tax)와 **별개** 값이다.
+    //   · withholding_tax_enabled : 정산할 때 3.3% 를 실제로 뗄지 (돈 계산)
+    //   · tax_report_enabled      : 국세청 신고 대상으로 볼지 (세무대리 판단)
+    if ($action === 'tax_report') {
+        $on = !empty($body['enabled']) ? 1 : 0;
+        db_execute('UPDATE riders SET tax_report_enabled = ? WHERE id = ?', [$on, $id]);
+        AuditLog::record('rider.tax_report', (string) ($rider['rider_code'] ?? $id), $on ? '세금신고 대상' : '세금신고 제외');
+        echo json_encode([
+            'ok'      => true,
+            'message' => $on ? '세금신고 대상으로 설정했습니다.' : '세금신고 대상에서 제외했습니다.',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // 금액조정필요 — 세무신고용 파일에 그대로 실리는 자유 메모.
+    if ($action === 'tax_adjust_note') {
+        $note = mb_substr(trim((string) ($body['note'] ?? '')), 0, 255);
+        db_execute('UPDATE riders SET tax_adjust_note = ? WHERE id = ?', [$note !== '' ? $note : null, $id]);
+        AuditLog::record('rider.tax_adjust_note', (string) ($rider['rider_code'] ?? $id), $note !== '' ? $note : '(메모 삭제)');
+        echo json_encode([
+            'ok'      => true,
+            'message' => $note !== '' ? '금액조정 메모를 저장했습니다.' : '금액조정 메모를 지웠습니다.',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($action === 'update_profile') {
         // 라이더 프로필 정보 일괄 수정 (연락처·소속·계좌 등)
         $vehicleAllowed = ['motor', 'bike', 'car', 'walk', 'kick'];

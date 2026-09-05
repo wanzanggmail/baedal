@@ -55,4 +55,5 @@ return [
     'system/alimtalk-templates' => ['title' => '알림톡 템플릿', 'view' => 'alimtalk_templates'],
     // 세무대리 전용 — 원천세 예수금 확인·수집(2026-09-04 정정: 고용·산재 아님)
     'tax/dashboard' => ['title' => '원천세 예수금', 'view' => 'tax_dashboard'],
+    'tax/report' => ['title' => '세무신고용 자료', 'view' => 'tax_report'],
 ];
