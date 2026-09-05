@@ -174,9 +174,15 @@ final class RiderRegistration
             }
         }
 
+        // 일정산(선정산) 대상 · 원천세 대상 — 미지정이면 DB 기본값과 같은 0(미대상).
+        $dailySettle = self::boolFlag($in['is_daily_settlement'] ?? null);
+        $withholding = self::boolFlag($in['withholding_tax_enabled'] ?? null);
+
         return [
             'riderCode'   => $riderCode,
             'loginId'     => $loginId,
+            'dailySettle' => $dailySettle,
+            'withholding' => $withholding,
             'name'        => $name,
             'phone'       => $phone,
             'email'       => $email,
@@ -207,8 +213,9 @@ final class RiderRegistration
                 'INSERT INTO riders
                     (rider_code, login_id, password_hash, must_change_password, name, phone, email, birth_date,
                      status, team_code, vehicle_type, address,
-                     bank_code, bank_account, account_holder, agency_id)
-                 VALUES (?, ?, ?, 1, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?, ?)',
+                     bank_code, bank_account, account_holder, agency_id,
+                     is_daily_settlement, withholding_tax_enabled)
+                 VALUES (?, ?, ?, 1, ?, ?, ?, ?, \'active\', ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $v['riderCode'], $v['loginId'], $passwordHash, $v['name'], $v['phone'], $v['email'],
                     $v['birth'] !== '' ? $v['birth'] : null,
@@ -217,6 +224,8 @@ final class RiderRegistration
                     $v['bankAccount'] !== '' ? Crypto::encrypt($v['bankAccount']) : null,
                     $v['accHolder'] !== '' ? $v['accHolder'] : null,
                     $v['agencyId'],
+                    $v['dailySettle'] ? 1 : 0,
+                    $v['withholding'] ? 1 : 0,
                 ]
             );
 
@@ -231,5 +240,19 @@ final class RiderRegistration
         });
 
         return ['id' => $newId, 'rider_code' => $v['riderCode'], 'login_id' => $v['loginId']];
+    }
+
+    /**
+     * 엑셀·폼에서 온 "예/아니오" 값을 불리언으로 — 일괄등록 양식이 사람 손으로 채워지므로
+     * Y/N, O/X, 1/0, 예/아니오, TRUE/FALSE 를 모두 받는다. 빈값은 false(미대상).
+     */
+    private static function boolFlag(mixed $v): bool
+    {
+        $s = strtolower(trim((string) ($v ?? '')));
+        if ($s === '') {
+            return false;
+        }
+
+        return in_array($s, ['1', 'y', 'yes', 'o', 't', 'true', '예', '대상', '사용', 'ㅇ'], true);
     }
 }

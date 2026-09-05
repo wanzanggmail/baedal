@@ -195,9 +195,25 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 						<input class="form-check-input" type="checkbox" id="withholding_toggle" <?= !empty($rider['withholding_tax_enabled']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="withholding_toggle">원천세 공제 대상 </label>
 					</div>
+					<?php // 세금신고 유무 — 원천세 공제 여부와 **별개**. 세무대리가 신고 대상만 골라 보는 용도(2026-09-05 갑). ?>
+					<div class="form-check form-switch d-flex align-items-center justify-content-left gap-2 mb-3">
+						<input class="form-check-input" type="checkbox" id="tax_report_toggle" <?= (int) ($rider['tax_report_enabled'] ?? 1) === 1 ? 'checked' : '' ?> />
+						<label class="form-check-label fw-semibold" for="tax_report_toggle">세금신고 대상</label>
+					</div>
 					<div class="form-check form-switch d-flex align-items-center justify-content-left gap-2 mb-4">
 						<input class="form-check-input" type="checkbox" id="hold_toggle" <?= !empty($rider['withdrawal_hold']) ? 'checked' : '' ?> />
 						<label class="form-check-label fw-semibold" for="hold_toggle">출금 보류</label>
+					</div>
+					<?php // 금액조정필요 — 세무신고 파일에 그대로 실리는 자유 메모(2026-09-05 갑). ?>
+					<div class="mb-3">
+						<label class="form-label fw-semibold fs-8 mb-1" for="tax_adjust_note">금액조정필요</label>
+						<div class="input-group input-group-sm">
+							<input type="text" class="form-control form-control-solid" id="tax_adjust_note" maxlength="255"
+								value="<?= htmlspecialchars((string) ($rider['tax_adjust_note'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+								placeholder="예: 8월 프로모션 중복 지급분 확인" />
+							<button class="btn btn-sm btn-light-primary" type="button" id="btn_tax_adjust_note">저장</button>
+						</div>
+						<div class="form-text fs-8">세무신고용 파일의 「금액조정필요」 칸에 그대로 나갑니다.</div>
 					</div>
 					<?php // 예외 보증금 — 비우면 대리점 기본, 값을 넣으면 그 금액이 우선(2026-09-01 갑). ?>
 					<div class="mb-1">
@@ -917,6 +933,16 @@ $fmtWon = static fn ($n): string => number_format((int) $n) . '원';
 	document.getElementById('withholding_toggle').addEventListener('change', function () {
 		var on = this.checked;
 		apiPatch({ action: 'withholding_tax', enabled: on }, on ? '원천세 공제 대상으로 설정했습니다.' : '원천세 비대상으로 변경했습니다.');
+	});
+
+	document.getElementById('tax_report_toggle').addEventListener('change', function () {
+		var on = this.checked;
+		apiPatch({ action: 'tax_report', enabled: on }, on ? '세금신고 대상으로 설정했습니다.' : '세금신고 대상에서 제외했습니다.');
+	});
+
+	document.getElementById('btn_tax_adjust_note').addEventListener('click', function () {
+		var note = document.getElementById('tax_adjust_note').value.trim();
+		apiPatch({ action: 'tax_adjust_note', note: note }, note === '' ? '금액조정 메모를 지웠습니다.' : '금액조정 메모를 저장했습니다.');
 	});
 
 	document.getElementById('hold_toggle').addEventListener('change', function () {
