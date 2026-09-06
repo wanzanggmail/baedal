@@ -94,6 +94,7 @@ final class MigrateRunner
         self::migrateTaxReportFields();
         self::migrateTaxFeeShare();
         self::migrateDeveloperOrg();
+        self::migrateTransferBankCodes();
 
         echo "\n완료.\n";
     }
@@ -3473,5 +3474,96 @@ final class MigrateRunner
                 echo "OK    withdrawal_config 개발사 몫 컬럼 " . count($adds) . "개 추가(기본 0원)\n";
             }
         }
+    }
+
+    /**
+     * 펌뱅킹 이체 은행코드 (2026-09-06 갑 제공).
+     *
+     * 갑: "이체 은행코드야 ... 이체은행은 일반은행 코드와 다르게 이 코드로 보내야해"
+     *     "펌뱅킹할때 쓰는 은행코드라고 보면되"
+     *
+     * 두 곳에 넣는다:
+     *   1) `transfer_bank` — 펌뱅킹에 실제로 보내는 `C###` 코드. **이쪽이 원본**이다.
+     *   2) `bank` — 라이더·대리점이 계좌를 등록할 때 고르는 3자리 코드.
+     *      기존에 13개뿐이라 증권사·저축은행 계좌는 아예 등록할 수 없었다.
+     *
+     * ⚠️ 목록에 **같은 이름이 두 번 나오는 코드**가 있다(하나은행 081·005, 미래에셋 230·238).
+     *    `transfer_bank` 에는 받은 그대로 전부 넣지만, `bank` 드롭다운에 같은 이름이 두 개
+     *    보이면 고를 수가 없으므로 005·230 은 `bank` 에서 제외한다
+     *    (005 는 옛 외환은행 → 하나은행 081 로 통합, 230 은 238 과 같은 미래에셋).
+     *    그 계좌를 쓰는 사람도 081·238 로 고르면 펌뱅킹은 정상 처리된다.
+     *
+     * 기존 코드는 건드리지 않는다 — 이미 있는 건 SKIP.
+     */
+    private static function migrateTransferBankCodes(): void
+    {
+        echo "== 펌뱅킹 이체 은행코드 ==\n";
+
+        if (!db_table_exists('system_codes')) {
+            echo "SKIP  system_codes 없음\n";
+
+            return;
+        }
+
+        /** @var list<array{0:string,1:string}> [3자리 코드, 은행명] — 갑이 준 순서 그대로 */
+        $banks = [
+            ['002', '산업은행'],   ['003', '기업은행'],   ['004', '국민은행'],
+            ['081', '하나은행'],   ['005', '하나은행'],   ['007', '수협은행'],
+            ['011', '농협은행'],   ['012', '단위농협'],   ['020', '우리은행'],
+            ['023', 'SC제일은행'], ['027', '씨티은행'],   ['031', '대구은행'],
+            ['032', '부산은행'],   ['034', '광주은행'],   ['035', '제주은행'],
+            ['037', '전북은행'],   ['039', '경남은행'],   ['045', '새마을금고'],
+            ['048', '신협'],       ['050', '상호저축은행'], ['054', 'HSBC'],
+            ['055', '도이치'],     ['057', 'JP모간'],     ['060', 'BOA'],
+            ['061', '비엔피파리바은행'], ['062', '중국공상은행'], ['063', '중국은행'],
+            ['064', '산림조합'],   ['067', '중국건설은행'], ['071', '우체국'],
+            ['088', '신한은행'],   ['089', 'K뱅크'],      ['090', '카카오뱅크'],
+            ['092', '토스뱅크'],   ['209', '유안타증권'], ['218', 'KB증권'],
+            ['224', 'BNK투자증권'], ['225', 'IBK투자증권'], ['227', '다올투자증권'],
+            ['230', '미래에셋'],   ['238', '미래에셋'],   ['240', '삼성증권'],
+            ['243', '한국투자증권'], ['247', 'NH투자증권'], ['261', '교보증권'],
+            ['262', '하이투자증권'], ['263', 'HMC증권(현대차증권)'], ['264', '키움증권'],
+            ['265', '이베스트증권'], ['266', 'SK증권'],    ['267', '대신증권'],
+            ['268', '아이엠투자증권'], ['269', '한화증권'], ['270', '하나금융투자'],
+            ['271', '토스증권'],   ['278', '신한금융투자'], ['279', 'DB금융투자증권'],
+            ['280', '유진투자증권'], ['287', '메리츠증권'], ['288', '카카오페이증권'],
+            ['290', '부국증권'],   ['291', '신영증권'],   ['292', '케이프투자증권(LIG)'],
+            ['294', '한국포스증권'],
+        ];
+
+        // `bank` 드롭다운에서 뺄 중복 이름 코드(위 주석 참고)
+        $skipInBank = ['005', '230'];
+
+        $addT = 0;
+        $addB = 0;
+        $sort = 0;
+        foreach ($banks as [$code, $label]) {
+            $sort += 10;
+
+            // 1) 펌뱅킹 이체 코드 — C + 3자리
+            $tCode = 'C' . $code;
+            if (db_row('SELECT id FROM system_codes WHERE category = ? AND code = ? LIMIT 1', ['transfer_bank', $tCode]) === null) {
+                db_insert(
+                    'INSERT INTO system_codes (category, code, label, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
+                    ['transfer_bank', $tCode, $label, $sort]
+                );
+                $addT++;
+            }
+
+            // 2) 계좌 등록용 3자리 코드
+            if (in_array($code, $skipInBank, true)) {
+                continue;
+            }
+            if (db_row('SELECT id FROM system_codes WHERE category = ? AND code = ? LIMIT 1', ['bank', $code]) === null) {
+                db_insert(
+                    'INSERT INTO system_codes (category, code, label, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
+                    ['bank', $code, $label, $sort]
+                );
+                $addB++;
+            }
+        }
+
+        echo $addT > 0 ? "OK    transfer_bank {$addT}건 추가\n" : "SKIP  transfer_bank (모두 있음)\n";
+        echo $addB > 0 ? "OK    bank {$addB}건 추가(증권사·저축은행 계좌 등록 가능)\n" : "SKIP  bank (모두 있음)\n";
     }
 }

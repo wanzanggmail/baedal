@@ -206,6 +206,17 @@ foreach ($rows as $r) {
         $rowErr = '파일 안에서 휴대전화가 중복됩니다.';
     }
 
+    // 은행코드 오타를 미리보기에서 잡는다 — 지금까지 검증이 없어 잘못된 코드가 그대로 저장됐고,
+    // 출금 화면에서 은행명이 빈칸으로 나오거나 펌뱅킹에서 거절될 때까지 몰랐다.
+    if ($rowErr === null && $r['bank_code'] !== '') {
+        $bc = str_pad(preg_replace('/\D/', '', $r['bank_code']) ?? '', 3, '0', STR_PAD_LEFT);
+        if (db_row("SELECT 1 AS x FROM system_codes WHERE category='bank' AND code = ? LIMIT 1", [$bc]) === null) {
+            $rowErr = sprintf('등록되지 않은 은행코드입니다: %s (템플릿의 「은행코드」 시트를 확인하세요)', $r['bank_code']);
+        } else {
+            $r['bank_code'] = $bc;   // 4 → 004 처럼 엑셀이 지운 앞자리 0 을 복원
+        }
+    }
+
     if ($mode === 'preview') {
         if ($rowErr === null) {
             // 미리보기에서는 실제로 만들지 않고 검증만 — create()와 완전히 같은 규칙(validate())을 재사용.
