@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once INC_PATH . '/AgencyWallet.php';
+require_once INC_PATH . '/SettlementLedger.php';   // 과세표준 SQL 조각(선차감 제외)
 
 $needsMigrate = !db_table_exists('settlement_fee_items') || !db_table_exists('rider_wallets');
 
@@ -35,7 +36,7 @@ if (!$needsMigrate) {
         "SELECT r.id, r.phone, r.name, r.agency_id, o.name AS agency_name,
                 COUNT(fi.id) AS tax_count,
                 COALESCE(SUM(fi.amount), 0) AS tax_total,
-                COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base_total
+                COALESCE(SUM(" . SettlementLedger::taxBaseSqlExpr('c') . "), 0) AS base_total
            FROM riders r
            LEFT JOIN organizations o ON o.id = r.agency_id
            LEFT JOIN settlement_rider_cycles c ON {$cycleCond}
@@ -53,6 +54,7 @@ if (!$needsMigrate) {
     $detailRows = db_rows(
         'SELECT c.rider_id, c.settlement_date, c.platform, c.team_region,
                 c.gross_amount, c.support_amount, c.net_amount,
+                ' . SettlementLedger::taxBaseSqlExpr('c') . ' AS tax_base,
                 fi.amount AS tax_amount
            FROM settlement_rider_cycles c
            INNER JOIN settlement_fee_items fi ON fi.cycle_id = c.id AND fi.fee_code = \'withholding\'
@@ -184,7 +186,7 @@ $quickRanges = [
 							<?php if (!$isAgency) : ?><th>대리점</th><?php endif; ?>
 							<th>라이더</th>
 							<th class="text-center">공제 건수</th>
-							<th class="text-end">과세표준</th>
+							<th class="text-end">과세표준<span class="d-block fw-normal fs-9 text-muted">선차감 제외</span></th>
 							<th class="text-end">원천세 합계</th>
 							<th class="text-end">상세</th>
 						</tr>
@@ -224,13 +226,15 @@ $quickRanges = [
 											<th>팀지역</th>
 											<th class="text-end">정산금액</th>
 											<th class="text-end">지원금</th>
-											<th class="text-end">과세표준</th>
+											<th class="text-end">과세표준<span class="d-block fw-normal fs-9 text-muted">선차감 제외</span></th>
 											<th class="text-end">원천세(3.3%)</th>
 										</tr>
 									</thead>
 									<tbody>
 										<?php foreach ($details as $d) :
-										    $dBase = (int) $d['gross_amount'] + (int) $d['support_amount']; ?>
+										    // 과세표준 = 정산액+지원금 − 대리점 선차감(2026-09-06). 원천세가 이 기준으로
+										    // 계산돼 저장되므로, 여기서 gross 를 그대로 쓰면 세율이 안 맞아 보인다.
+										    $dBase = (int) ($d['tax_base'] ?? ((int) $d['gross_amount'] + (int) $d['support_amount'])); ?>
 										<tr>
 											<td class="text-gray-800"><?= htmlspecialchars(substr((string) $d['settlement_date'], 0, 10), ENT_QUOTES, 'UTF-8') ?></td>
 											<td class="text-muted"><?= htmlspecialchars($platformShort[(string) $d['platform']] ?? (string) $d['platform'], ENT_QUOTES, 'UTF-8') ?></td>

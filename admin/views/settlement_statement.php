@@ -302,7 +302,12 @@ if ($riderId > 0) {
 	$riders = db_rows(
 		"SELECT r.id, r.name, r.rider_code, r.is_daily_settlement, o.name AS agency_name,
 		        COUNT(DISTINCT c.settlement_date) AS days, SUM(c.order_count) AS orders,
-		        SUM(c.gross_amount + c.support_amount) AS gross, SUM(c.total_fee_amount) AS fee, SUM(c.net_amount) AS net
+		        -- 정산금액은 **발급될 명세서와 같은 기준**으로 보여준다(선차감 제외, 2026-09-06).
+		        -- 목록엔 11,000원인데 발급물엔 10,000원이면 그 자체로 오해가 된다.
+		        SUM(c.gross_amount + c.support_amount)
+		          - COALESCE(SUM((SELECT SUM(pfi.amount) FROM settlement_fee_items pfi
+		                           WHERE pfi.cycle_id = c.id AND pfi.fee_code = 'agency_prededuct')), 0) AS gross,
+		        SUM(c.total_fee_amount) AS fee, SUM(c.net_amount) AS net
 		   FROM settlement_rider_cycles c
 		   JOIN riders r ON r.id = c.rider_id
 		   LEFT JOIN organizations o ON o.id = r.agency_id
