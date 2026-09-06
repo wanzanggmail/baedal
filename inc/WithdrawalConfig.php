@@ -177,19 +177,35 @@ final class WithdrawalConfig
 
         // 본사 몫(건당) 하한 검증 — 하한값은 **「대행수수료 설정」의 최저 금액**(AgencyFeeConfig)을
         // 그대로 쓴다(2026-08-31 갑: "대행수수료 최저 금액은 대행수수료 설정 부분에 되어 있어").
-        // 별도 필드를 만들지 않고 구간별(미만/이상) 최저를 각각 본사 몫에 건다. 0이면 하한 없음.
+        // 별도 필드를 만들지 않고 구간별(미만/이상) 최저를 각각 건다. 0이면 하한 없음.
+        //
+        // 🔄 2026-09-06 갑: **하한이 걸리는 "본사 몫"은 본사 혼자가 아니라
+        // 본사+세무대리+개발사를 합한 금액이다.** 세무대리·개발사는 본사가 떼어 나눠주는
+        // 몫이지 별개 주머니가 아니라서, 셋의 합이 최저 금액을 넘으면 된다.
+        // (예전엔 hq 단독으로 봤기 때문에, 같은 총액이어도 세무·개발로 나눠 적으면 거부됐다.)
         require_once __DIR__ . '/AgencyFeeConfig.php';
         $min = AgencyFeeConfig::minimums();
+        $hqGroupShort = $cfg['hq_fee_short'] + $cfg['tax_fee_short'] + $cfg['dev_fee_short'];
+        $hqGroupLong  = $cfg['hq_fee_long'] + $cfg['tax_fee_long'] + $cfg['dev_fee_long'];
         $tooLow = [];
-        if ($min['fee_per_tx_short'] > 0 && $cfg['hq_fee_short'] < $min['fee_per_tx_short']) {
-            $tooLow[] = sprintf('기준 미만 본사 몫 %d원(최저 %d원)', $cfg['hq_fee_short'], $min['fee_per_tx_short']);
+        if ($min['fee_per_tx_short'] > 0 && $hqGroupShort < $min['fee_per_tx_short']) {
+            $tooLow[] = sprintf(
+                '기준 미만 합계 %d원 = 본사 %d + 세무대리 %d + 개발사 %d (최저 %d원)',
+                $hqGroupShort, $cfg['hq_fee_short'], $cfg['tax_fee_short'], $cfg['dev_fee_short'],
+                $min['fee_per_tx_short']
+            );
         }
-        if ($min['fee_per_tx_long'] > 0 && $cfg['hq_fee_long'] < $min['fee_per_tx_long']) {
-            $tooLow[] = sprintf('기준 이상 본사 몫 %d원(최저 %d원)', $cfg['hq_fee_long'], $min['fee_per_tx_long']);
+        if ($min['fee_per_tx_long'] > 0 && $hqGroupLong < $min['fee_per_tx_long']) {
+            $tooLow[] = sprintf(
+                '기준 이상 합계 %d원 = 본사 %d + 세무대리 %d + 개발사 %d (최저 %d원)',
+                $hqGroupLong, $cfg['hq_fee_long'], $cfg['tax_fee_long'], $cfg['dev_fee_long'],
+                $min['fee_per_tx_long']
+            );
         }
         if ($tooLow !== []) {
             throw new InvalidArgumentException(
-                '본사 몫(건당)은 대행수수료 최저 금액보다 낮을 수 없습니다 — ' . implode(' · ', $tooLow)
+                '본사 몫(본사+세무대리+개발사 합계, 건당)은 대행수수료 최저 금액보다 낮을 수 없습니다 — '
+                . implode(' · ', $tooLow)
             );
         }
 
