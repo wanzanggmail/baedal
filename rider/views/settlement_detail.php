@@ -67,12 +67,19 @@ if ($riderId > 0 && !$needsMigrate) {
 
         if (db_table_exists('settlement_order_details')) {
             $orders = db_rows(
-                'SELECT store_name, pickup_area, delivery_area, delivered_at, net_amount
+                'SELECT settlement_date, store_name, pickup_area, delivery_area, delivered_at, net_amount
                    FROM settlement_order_details
                   WHERE rider_id = ? AND settlement_date = ?
                   ORDER BY delivered_at ASC, id ASC
                   LIMIT 200',
                 [$riderId, $date]
+            );
+            // 🔒 건별 금액에서도 선차감을 뺀다(2026-09-06 갑). 총액만 낮추고 건별을 그대로 두면
+            // 라이더가 건별을 더했을 때 총액과 안 맞아 바로 들통난다.
+            require_once INC_PATH . '/RiderPrededuct.php';
+            $orders = RiderPrededuct::applyToRows(
+                $orders,
+                RiderPrededuct::totalsByDate($riderId, $date, $date)
             );
         }
 

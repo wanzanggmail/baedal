@@ -27,6 +27,7 @@ if (!isset($platformLabels[$filterPlatform])) {
 const RIDER_ORDER_LIST_CAP = 300;
 
 $rows      = [];
+$pdByDate  = [];   // 날짜별 선차감(라이더에게는 안 보이는 대리점 몫)
 $listTotal = 0;
 $listCount = 0;
 $truncated = false;
@@ -51,6 +52,11 @@ if ($riderId > 0 && !$needsMigrate) {
     $listTotal = (int) ($sumRow['total'] ?? 0);
     $truncated = $listCount > RIDER_ORDER_LIST_CAP;
 
+    // 🔒 합계에서도 선차감을 뺀다(2026-09-06 갑). 아래 목록은 건별로 빼므로 둘이 맞는다.
+    require_once INC_PATH . '/RiderPrededuct.php';
+    $pdByDate  = RiderPrededuct::totalsByDate($riderId, $filterFrom, $filterTo, $filterPlatform);
+    $listTotal = max(0, $listTotal - array_sum($pdByDate));
+
     $rows = db_rows(
         "SELECT od.settlement_date, od.store_name, od.pickup_area, od.delivered_at, od.net_amount, u.platform
            FROM settlement_order_details od
@@ -60,6 +66,11 @@ if ($riderId > 0 && !$needsMigrate) {
           LIMIT " . RIDER_ORDER_LIST_CAP,
         $params
     );
+}
+
+// 🔒 건별 금액에서 선차감을 뺀다(2026-09-06 갑).
+if ($rows !== [] && !empty($pdByDate)) {
+    $rows = RiderPrededuct::applyToRows($rows, $pdByDate);
 }
 
 // 날짜별로 묶어서 표시 — 하루에 여러 건이라 평평한 목록이면 어느 날짜인지 알기 어렵다.

@@ -25,6 +25,13 @@ if ($riderId > 0 && SettlementLedger::tableExists()) {
               ORDER BY delivered_at ASC',
             [$riderId, $minDate, $maxDate]
         );
+        // 🔒 건별 금액에서 선차감을 뺀다(2026-09-06 갑) — 라이더에게는 안 보이는 대리점 몫.
+        require_once INC_PATH . '/RiderPrededuct.php';
+        $orderRows = RiderPrededuct::applyToRows(
+            $orderRows,
+            RiderPrededuct::totalsByDate($riderId, $minDate, $maxDate)
+        );
+
         $itemsByDate = [];
         foreach ($orderRows as $o) {
             $d = (string) $o['settlement_date'];
