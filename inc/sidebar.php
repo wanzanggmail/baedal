@@ -60,31 +60,35 @@ if (!function_exists('stmt_menu_visible')) {
 										</div>
 										<!--end:매뉴얼-->
 
-										<!--begin:세무대리(원천세 예수금) — 세무대리 + 본사(점검) 노출-->
-										<?php if (admin_can_access_route('tax/dashboard')) : ?>
-										<div class="menu-item">
-											<a class="menu-link<?= nav_active('tax/dashboard') ?>" href="<?= htmlspecialchars(admin_url('tax/dashboard'), ENT_QUOTES, 'UTF-8') ?>">
+										<!--begin:세무관리 — 원천세 예수금 + 세무신고용 자료(2026-09-06 갑)-->
+										<?php // 낱개로 흩어져 있던 두 화면을 한 폴더로 묶는다. 접근 권한은 각각 그대로라,
+										// 볼 수 있는 화면이 하나도 없으면 폴더 자체가 안 나온다.
+										$taxMenu = array_values(array_filter([
+											['tax/dashboard', '원천세 예수금'],
+											['tax/report',    '세무신고용 자료'],
+										], static fn (array $m): bool => admin_can_access_route($m[0])));
+										if ($taxMenu !== []) : ?>
+										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show('tax/') ?>">
+											<span class="menu-link">
 												<span class="menu-icon">
 													<i class="ki-duotone ki-shield-tick fs-2"><span class="path1"></span><span class="path2"></span></i>
 												</span>
-												<span class="menu-title">원천세 예수금</span>
-											</a>
+												<span class="menu-title">세무관리</span>
+												<span class="menu-arrow"></span>
+											</span>
+											<div class="menu-sub menu-sub-accordion">
+												<?php foreach ($taxMenu as [$taxRoute, $taxLabel]) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active($taxRoute) ?>" href="<?= htmlspecialchars(admin_url($taxRoute), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title"><?= htmlspecialchars($taxLabel, ENT_QUOTES, 'UTF-8') ?></span>
+													</a>
+												</div>
+												<?php endforeach; ?>
+											</div>
 										</div>
 										<?php endif; ?>
-										<!--end:세무대리(원천세 예수금)-->
-
-										<!--begin:세무신고용 자료 — 대리점별 신고 파일(2026-09-05 갑)-->
-										<?php if (admin_can_access_route('tax/report')) : ?>
-										<div class="menu-item">
-											<a class="menu-link<?= nav_active('tax/report') ?>" href="<?= htmlspecialchars(admin_url('tax/report'), ENT_QUOTES, 'UTF-8') ?>">
-												<span class="menu-icon">
-													<i class="ki-duotone ki-file-down fs-2"><span class="path1"></span><span class="path2"></span></i>
-												</span>
-												<span class="menu-title">세무신고용 자료</span>
-											</a>
-										</div>
-										<?php endif; ?>
-										<!--end:세무신고용 자료-->
+										<!--end:세무관리-->
 										<?php // 지갑 입출금·자체 인출은 세무대리 계정만 여기서 노출(본사는 지급·출금 그룹에 이미 있음).
 										if (admin_org_level() === Org::LEVEL_TAX_AGENT) : ?>
 										<div class="menu-item">

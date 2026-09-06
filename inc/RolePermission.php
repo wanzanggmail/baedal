@@ -15,7 +15,9 @@ final class RolePermission
         'deduction'  => '차감·수수료(대행수수료/미수금)',
         'promotion'  => '프로모션',
         'withdrawal' => '출금',
-        'content'    => '콘텐츠',
+        // 'content'(콘텐츠)는 2026-09-06 갑 지시로 **본사 최고관리자·개발사 전용**이 되어
+        // 역할별로 열고 닫을 값이 아니다. 여기 남겨두면 켜도 아무 일이 없는 스위치가 되므로
+        // 뺀다(판정은 admin_can_access_route). 기존 role_permissions 행은 무시된다.
         'riders'     => '라이더',
     ];
 

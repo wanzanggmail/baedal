@@ -53,7 +53,8 @@ $riders = db_rows(
     "SELECT r.id, r.rider_code, r.login_id, r.name,
             r.phone, r.status,
             r.is_daily_settlement, r.withholding_tax_enabled,
-            r.withdrawal_hold, r.created_at, r.last_login_at
+            r.withdrawal_hold, r.created_at, r.last_login_at,
+            r.bank_code, r.bank_account
      FROM riders r
      WHERE {$whereStr}
      ORDER BY r.name ASC
@@ -87,6 +88,8 @@ $statusBadge = [
     'leave_request' => 'warning', 'offboarded' => 'dark',
 ];
 $banks      = db_rows("SELECT code, label FROM system_codes WHERE category='bank' AND is_active=1 ORDER BY sort_order");
+// 목록의 「계좌」 칸에 은행 이름을 띄우려고 코드→이름 맵을 미리 만든다(행마다 조회하지 않게).
+$bankLabel  = array_column($banks, 'label', 'code');
 $detailBase = admin_url('riders/detail');
 $detailBase .= str_contains($detailBase, '?') ? '&id=' : '?id=';
 $apiBase    = ADMIN_BASE . '/api/riders.php';
@@ -136,7 +139,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 	<div class="card card-flush mb-8">
 		<div class="card-body py-5">
 			<div class="row g-4 align-items-end">
-				<div class="col-md-4">
+				<div class="col-md-2">
 					<label class="form-label fw-semibold">검색</label>
 					<input type="text" class="form-control form-control-solid" name="q"
 					       placeholder="이름, 로그인ID, 전화"
@@ -188,6 +191,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 							<th class="min-w-100px">로그인ID</th>
 							<th class="min-w-90px">이름</th>
 							<th class="min-w-120px">연락처</th>
+							<th class="min-w-100px">계좌</th>
 							<th class="min-w-80px">일일정산</th>
 							<th class="min-w-80px">원천세공제</th>
 							<th class="min-w-100px">상태</th>
@@ -213,11 +217,27 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						    $detailUrl = $detailBase . (int) $r['id'];
 						    $isDaily  = !empty($r['is_daily_settlement']);
 						    $isWht    = !empty($r['withholding_tax_enabled']);
+						    // 계좌번호는 암호화되어 있어 목록에서 풀지 않는다 — **있는지 없는지만** 본다.
+						    // 은행코드나 계좌 한쪽만 있으면 이체가 안 되므로 「미완」으로 따로 표시한다.
+						    $hasAcct  = trim((string) ($r['bank_account'] ?? '')) !== '';
+						    $hasBank  = trim((string) ($r['bank_code'] ?? '')) !== '';
+						    $bankName = $bankLabel[(string) ($r['bank_code'] ?? '')] ?? (string) ($r['bank_code'] ?? '');
 						?>
 						<tr>
 							<td class="font-monospace fs-7 text-gray-800"><?= htmlspecialchars($r['login_id'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-900 fw-semibold"><?= htmlspecialchars($r['name'], ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700"><?= htmlspecialchars($phoneMsk, ENT_QUOTES, 'UTF-8') ?></td>
+							<td>
+								<?php if ($hasAcct && $hasBank): ?>
+								<span class="badge badge-light-success">등록</span>
+								<div class="text-muted fs-8"><?= htmlspecialchars($bankName, ENT_QUOTES, 'UTF-8') ?></div>
+								<?php elseif ($hasAcct || $hasBank): ?>
+								<span class="badge badge-light-warning" title="<?= $hasAcct ? '은행을 고르지 않았습니다.' : '계좌번호가 비어 있습니다.' ?>">미완</span>
+								<div class="text-muted fs-8"><?= $hasAcct ? '은행 없음' : '번호 없음' ?></div>
+								<?php else: ?>
+								<span class="badge badge-light-danger">미등록</span>
+								<?php endif; ?>
+							</td>
 							<td><span class="badge badge-light-<?= $isDaily ? 'success' : 'secondary' ?>"><?= $isDaily ? '일일' : '주정산' ?></span></td>
 							<td><span class="badge badge-light-<?= $isWht ? 'info' : 'secondary' ?>"><?= $isWht ? '공제' : '미대상' ?></span></td>
 							<td>
