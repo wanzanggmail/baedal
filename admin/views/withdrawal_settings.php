@@ -187,8 +187,11 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<div class="alert bg-light-info d-flex flex-column p-4 mb-4 fs-8" id="cfg_min_ref"
 							data-min-short="<?= (int) $agencyMin['fee_per_tx_short'] ?>" data-min-long="<?= (int) $agencyMin['fee_per_tx_long'] ?>">
 							<div class="fw-semibold text-gray-800 mb-1">본사 몫(건당) 하한 — <span class="text-primary">대행수수료 최저 금액</span> 적용</div>
+							<?php // 2026-09-06 갑: 하한이 걸리는 「본사 몫」은 본사+세무대리+개발사 **합계**다. ?>
+							<div class="text-gray-700 mb-1">하한은 <strong>본사 + 세무대리 + 개발사 합계</strong>에 걸립니다. 셋을 어떻게 나누든 합계만 최저 금액 이상이면 됩니다.</div>
 							<?php if ((int) $agencyMin['fee_per_tx_short'] > 0 || (int) $agencyMin['fee_per_tx_long'] > 0) : ?>
-							<div class="text-gray-700">기준 미만 <strong><?= number_format((int) $agencyMin['fee_per_tx_short']) ?>원</strong> · 기준 이상 <strong><?= number_format((int) $agencyMin['fee_per_tx_long']) ?>원</strong> 미만으로는 본사 몫을 저장할 수 없습니다.</div>
+							<div class="text-gray-700">기준 미만 <strong><?= number_format((int) $agencyMin['fee_per_tx_short']) ?>원</strong> · 기준 이상 <strong><?= number_format((int) $agencyMin['fee_per_tx_long']) ?>원</strong> 미만으로는 저장할 수 없습니다.</div>
+							<div class="text-gray-700 mt-1">지금 합계 — 기준 미만 <strong id="cfg_hqsum_short">–</strong> · 기준 이상 <strong id="cfg_hqsum_long">–</strong></div>
 							<?php else : ?>
 							<div class="text-gray-700">현재 대행수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
 							<?php endif; ?>
@@ -202,8 +205,8 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 										<th class="min-w-90px text-end">대행수수료<br>(건당)</th>
 										<th class="min-w-110px">본사 몫 (원/건)</th>
 										<th class="min-w-110px">총판 몫 (원/건)</th>
-										<th class="min-w-110px">세무대리 몫 (원/건)</th>
-										<th class="min-w-110px">개발사 몫 (원/건)</th>
+										<th class="min-w-110px">세무대리 몫 (원/건)<br><span class="fw-normal fs-9">본사 하한에 포함</span></th>
+										<th class="min-w-110px">개발사 몫 (원/건)<br><span class="fw-normal fs-9">본사 하한에 포함</span></th>
 										<th class="min-w-90px text-end">대리점 몫<br>(자동)</th>
 									</tr>
 								</thead>
@@ -211,7 +214,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 									<tr>
 										<td class="fw-semibold">기준 미만</td>
 										<td class="text-end" id="cfg_fee_short_ref"><?= number_format((int) $config['fee_per_tx_short']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="<?= (int) $agencyMin['fee_per_tx_short'] ?>"
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="0"
 											value="<?= (int) $config['hq_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_short" min="0"
 											value="<?= (int) $config['dist_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
@@ -224,7 +227,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 									<tr>
 										<td class="fw-semibold">기준 이상</td>
 										<td class="text-end" id="cfg_fee_long_ref"><?= number_format((int) $config['fee_per_tx_long']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="<?= (int) $agencyMin['fee_per_tx_long'] ?>"
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="0"
 											value="<?= (int) $config['hq_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
 										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_long" min="0"
 											value="<?= (int) $config['dist_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
@@ -348,10 +351,25 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 					out.title = '';
 				}
 			}
+			/* 하한은 본사+세무대리+개발사 **합계**에 걸린다(2026-09-06 갑). 저장 눌러야 알 수
+			   있으면 답답하니, 합계와 미달 여부를 입력하는 동안 바로 보여준다. */
+			var minRef  = document.getElementById('cfg_min_ref');
+			var MIN_S   = minRef ? (parseInt(minRef.getAttribute('data-min-short'), 10) || 0) : 0;
+			var MIN_L   = minRef ? (parseInt(minRef.getAttribute('data-min-long'), 10) || 0) : 0;
+			function sumShow(id, sum, min) {
+				var e = document.getElementById(id);
+				if (!e) { return; }
+				e.textContent = sum.toLocaleString() + '원';
+				var low = min > 0 && sum < min;
+				e.className = low ? 'text-danger' : 'text-success';
+				e.title = low ? '최저 ' + min.toLocaleString() + '원에 미달합니다.' : '';
+			}
 			function recompute() {
 				var fs = intv('cfg_fee_short'), fl = intv('cfg_fee_long');
 				refShow('cfg_fee_short_ref', fs);
 				refShow('cfg_fee_long_ref', fl);
+				sumShow('cfg_hqsum_short', intv('cfg_hq_short') + intv('cfg_tax_short') + intv('cfg_dev_short'), MIN_S);
+				sumShow('cfg_hqsum_long',  intv('cfg_hq_long')  + intv('cfg_tax_long')  + intv('cfg_dev_long'),  MIN_L);
 				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'), intv('cfg_tax_short'), intv('cfg_dev_short'));
 				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'),  intv('cfg_tax_long'),  intv('cfg_dev_long'));
 			}
@@ -402,20 +420,28 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				var ref     = document.getElementById('cfg_min_ref');
 				var minS    = ref ? (parseInt(ref.getAttribute('data-min-short'), 10) || 0) : 0;
 				var minL    = ref ? (parseInt(ref.getAttribute('data-min-long'), 10) || 0) : 0;
+				var num     = function (id) { return parseInt((document.getElementById(id) || {}).value, 10) || 0; };
 				var hqShort = parseInt(hqShortEl.value, 10) || 0;
-				var hqLong  = parseInt(document.getElementById('cfg_hq_long').value, 10) || 0;
-				if ((minS > 0 && hqShort < minS) || (minL > 0 && hqLong < minL)) {
-					showToast('본사 몫(건당)은 대행수수료 최저 금액(미만 ' + minS.toLocaleString() + '원 / 이상 ' + minL.toLocaleString() + '원)보다 낮을 수 없습니다.', false);
+				var hqLong  = num('cfg_hq_long');
+				var taxS = num('cfg_tax_short'), taxL = num('cfg_tax_long');
+				var devS = num('cfg_dev_short'), devL = num('cfg_dev_long');
+				/* 하한은 본사 단독이 아니라 본사+세무대리+개발사 합계에 걸린다(2026-09-06 갑). */
+				var sumS = hqShort + taxS + devS;
+				var sumL = hqLong + taxL + devL;
+				if ((minS > 0 && sumS < minS) || (minL > 0 && sumL < minL)) {
+					showToast('본사+세무대리+개발사 합계(건당)는 대행수수료 최저 금액(미만 ' + minS.toLocaleString()
+						+ '원 / 이상 ' + minL.toLocaleString() + '원)보다 낮을 수 없습니다. 현재 합계 '
+						+ sumS.toLocaleString() + '원 / ' + sumL.toLocaleString() + '원', false);
 					return;
 				}
 				payload.hq_fee_short   = hqShort;
 				payload.hq_fee_long    = hqLong;
-				payload.dist_fee_short = parseInt(document.getElementById('cfg_dist_short').value, 10) || 0;
-				payload.tax_fee_short = parseInt(document.getElementById('cfg_tax_short').value, 10) || 0;
-				payload.tax_fee_long = parseInt(document.getElementById('cfg_tax_long').value, 10) || 0;
-				payload.dev_fee_short = parseInt(document.getElementById('cfg_dev_short').value, 10) || 0;
-				payload.dev_fee_long = parseInt(document.getElementById('cfg_dev_long').value, 10) || 0;
-				payload.dist_fee_long  = parseInt(document.getElementById('cfg_dist_long').value, 10) || 0;
+				payload.dist_fee_short = num('cfg_dist_short');
+				payload.tax_fee_short = taxS;
+				payload.tax_fee_long = taxL;
+				payload.dev_fee_short = devS;
+				payload.dev_fee_long = devL;
+				payload.dist_fee_long  = num('cfg_dist_long');
 			}
 			// 이체 수수료도 본사 전용 — 편집 가능할 때만 보낸다.
 			var tfEl = document.getElementById('cfg_transfer_fee');
