@@ -163,8 +163,13 @@ foreach ($all as $i => $cols) {
         'rider_code'              => '',
         'vehicle_type'            => 'motor',
         'team_code'               => 'etc',
+        // 빈칸 기본값(2026-09-06 갑): 일정산은 N, **원천세는 Y**.
+        //   대부분의 라이더가 원천세 대상이라 빈칸을 N 으로 두면 옮겨 적을 때 빠뜨리기 쉽다.
+        //   제외할 사람만 N 을 적게 한다.
         'is_daily_settlement'     => $get('is_daily_settlement'),
-        'withholding_tax_enabled' => $get('withholding_tax_enabled'),
+        'withholding_tax_enabled' => $get('withholding_tax_enabled') !== ''
+            ? $get('withholding_tax_enabled')
+            : 'Y',
         'bank_code'               => $get('bank_code'),
         'bank_account'            => $get('bank_account'),
         'account_holder'          => $get('account_holder'),
