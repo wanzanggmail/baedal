@@ -60,7 +60,7 @@ $org = Org::find($agencyId);
 $columns = [
     ['이름*',         '홍길동'],
     ['휴대전화*',      '01012345678'],
-    ['일정산대상',     'Y'],
+    ['일정산대상',     'N'],
     ['원천세대상',     'Y'],
     ['은행코드',       ''],
     ['계좌번호',       ''],
@@ -113,7 +113,9 @@ try {
         '- Y 인 라이더의 공제분만 대리점 예수금으로 쌓여 세무대리가 월별로 가져갑니다.',
         '',
         '- 두 항목 모두 Y / N 으로 적습니다. O·X, 1·0, 예·아니오 도 인식합니다.',
-        '- **비워두면 N(미대상)** 으로 등록됩니다. 등록 후 라이더 상세에서 개별 변경할 수 있습니다.',
+        '- 비워두면 일정산은 N(주정산), 원천세는 Y(대상) 으로 등록됩니다.',
+        '  대부분의 기사가 원천세 대상이라 그렇게 잡았습니다 — 제외할 분만 N 을 적으세요.',
+        '- 등록 후 라이더 상세에서 개별 변경할 수 있습니다.',
         '',
         '[자동 처리되는 항목]',
         '- 로그인ID: 휴대전화에서 숫자만 뽑아 만듭니다(010-1234-5678 → 01012345678).',
@@ -122,6 +124,8 @@ try {
         '- 차량종류: 전부 오토바이로 등록됩니다.',
         '- 초기 비밀번호는 0000이며, 최초 로그인 시 변경이 강제됩니다.',
         '',
+        '- 은행코드는 3자리 숫자입니다. 「은행코드」 시트에서 찾아 그대로 적으세요(예: 신한은행 → 088).',
+        '  엑셀이 앞의 0을 지우지 않도록 셀 서식을 텍스트로 두거나 088 처럼 그대로 입력하면 됩니다.',
         '- 쿠팡ID/배민ID는 같은 대리점 안에서 다른 라이더와 중복될 수 없습니다.',
         '- 2번째 줄(예시 행)은 지우고 업로드하거나, 그대로 두면 미리보기 화면에서 확인 후 빼면 됩니다.',
     ];
@@ -129,6 +133,40 @@ try {
         $note->setCellValue('A' . ($i + 3), $line);
     }
     $note->getColumnDimension('A')->setWidth(90);
+
+    // ── 은행코드 시트 ────────────────────────────────────────────────────
+    // 코드마스터(system_codes.bank)를 그대로 뽑는다 — 목록이 바뀌면 템플릿도 같이 바뀐다.
+    // 펌뱅킹 이체코드(transfer_bank, C###)도 함께 보여줘 담당자가 대조할 수 있게 한다.
+    $bankSheet = $book->createSheet();
+    $bankSheet->setTitle('은행코드');
+    $bankSheet->setCellValue('A1', '은행코드');
+    $bankSheet->setCellValue('B1', '은행명');
+    $bankSheet->setCellValue('C1', '펌뱅킹 이체코드');
+    $bankSheet->getStyle('A1:C1')->getFont()->setBold(true);
+    $bankSheet->getStyle('A1:C1')->getFill()
+        ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+        ->getStartColor()->setRGB('F2F4F7');
+
+    $bankRows = db_table_exists('system_codes')
+        ? db_rows("SELECT code, label FROM system_codes WHERE category = 'bank' AND is_active = 1 ORDER BY sort_order ASC, code ASC")
+        : [];
+    $r = 2;
+    foreach ($bankRows as $b) {
+        // 코드는 **반드시 문자열**로 넣는다 — 숫자로 들어가면 엑셀이 앞의 0 을 지워 004 가 4 가 된다.
+        $bankSheet->setCellValueExplicit('A' . $r, (string) $b['code'], DataType::TYPE_STRING);
+        $bankSheet->setCellValue('B' . $r, (string) $b['label']);
+        $bankSheet->setCellValueExplicit('C' . $r, 'C' . (string) $b['code'], DataType::TYPE_STRING);
+        $r++;
+    }
+    $bankSheet->getStyle('A2:A' . max(2, $r - 1))->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+    $bankSheet->getStyle('C2:C' . max(2, $r - 1))->getFont()->getColor()->setRGB('999999');
+    foreach (['A', 'B', 'C'] as $col) {
+        $bankSheet->getColumnDimension($col)->setAutoSize(true);
+    }
+    $bankSheet->freezePane('A2');
+    $bankSheet->setCellValue('E1', '※ 「은행코드」 열의 3자리를 라이더 시트에 그대로 적으세요.');
+    $bankSheet->setCellValue('E2', '※ 펌뱅킹 이체코드는 시스템이 자동 변환하므로 입력할 필요가 없습니다.');
+    $bankSheet->getStyle('E1:E2')->getFont()->setItalic(true)->getColor()->setRGB('777777');
 
     $book->setActiveSheetIndex(0);
 

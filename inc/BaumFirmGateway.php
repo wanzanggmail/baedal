@@ -61,10 +61,17 @@ final class BaumFirmGateway implements FirmBankingGateway
     // ─────────────────────────────── 은행코드 ───────────────────────────────
 
     /**
-     * 우리 은행코드(3자리 표준) → 바움 코드(`C` + 3자리).
+     * 우리 은행코드(3자리 표준) → 펌뱅킹 코드(`C` + 3자리).
      *
-     * 매뉴얼 「은행 코드」 별첨과 대조해 **우리가 쓰는 13개 코드가 전부 매핑됨을 확인**했다.
-     * 이미 `C` 로 시작하면 그대로 둔다(설정에서 바움 코드를 직접 넣은 경우 대비).
+     * 이미 `C` 로 시작하면 그대로 둔다(설정에서 펌뱅킹 코드를 직접 넣은 경우 대비).
+     *
+     * 2026-09-06 갑이 이체 은행코드 전체(64건)를 주면서 `system_codes.transfer_bank` 에
+     * 등록했다. 예전엔 무조건 `C` 를 붙여 보냈기 때문에 **목록에 없는 코드도 그대로 나가**
+     * 은행에서 거절될 때까지 알 수 없었다. 이제 마스터에 없으면 **보내기 전에** 막는다.
+     *
+     * 마스터가 아직 없는 환경(마이그레이션 전)에서는 검증을 건너뛴다 — 기존 동작 유지.
+     *
+     * @throws InvalidArgumentException 등록되지 않은 은행코드일 때
      */
     public static function bankCode(string $ourCode): string
     {
@@ -72,11 +79,45 @@ final class BaumFirmGateway implements FirmBankingGateway
         if ($c === '') {
             return '';
         }
-        if (str_starts_with($c, 'C')) {
-            return $c;
+        $code = str_starts_with($c, 'C')
+            ? $c
+            : 'C' . str_pad(preg_replace('/\D/', '', $c) ?? '', 3, '0', STR_PAD_LEFT);
+
+        $known = self::transferBankCodes();
+        if ($known !== [] && !isset($known[$code])) {
+            throw new InvalidArgumentException(
+                "펌뱅킹에 등록되지 않은 은행코드입니다: {$ourCode} (변환값 {$code}). "
+                . '시스템 > 코드/마스터의 「이체 은행코드」에서 확인하세요.'
+            );
         }
 
-        return 'C' . str_pad(preg_replace('/\D/', '', $c) ?? '', 3, '0', STR_PAD_LEFT);
+        return $code;
+    }
+
+    /**
+     * 펌뱅킹 이체 은행코드 목록 — `C###` => 은행명. 요청 단위로 캐시한다
+     * (대량 이체에서 건마다 DB를 치지 않게).
+     *
+     * @return array<string,string>
+     */
+    private static function transferBankCodes(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $cache = [];
+        try {
+            if (db_table_exists('system_codes')) {
+                foreach (db_rows("SELECT code, label FROM system_codes WHERE category = 'transfer_bank'") as $r) {
+                    $cache[strtoupper((string) $r['code'])] = (string) $r['label'];
+                }
+            }
+        } catch (Throwable) {
+            $cache = [];   // 조회 실패 시엔 검증하지 않는다 — 이체를 막지 않기 위함
+        }
+
+        return $cache;
     }
 
     /**

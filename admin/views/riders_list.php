@@ -486,7 +486,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 						<div class="table-responsive" style="max-height: 420px;">
 							<table class="table table-row-bordered align-middle gy-2 fs-7">
 								<thead><tr class="fw-bold text-muted bg-light">
-									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th class="text-center">일정산</th><th class="text-center">원천세</th><th>상태</th>
+									<th>#</th><th>이름</th><th>휴대전화</th><th>로그인ID</th><th class="text-center">일정산</th><th class="text-center">원천세</th><th class="min-w-175px">은행</th><th>상태</th>
 								</tr></thead>
 								<tbody id="bulk_tbody"></tbody>
 							</table>
@@ -629,11 +629,55 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 		fd.append('mode', mode);
 		fd.append('file', fileInput.files[0]);
 		if (!IS_AGENCY) { fd.append('agency_id', agencyId()); }
+		fd.append('bank_fixes', JSON.stringify(bankFixes));
 		return fd;
 	}
 
+	/* 미리보기에서 고른 은행 — {행번호: 코드}. 확정할 때 함께 보낸다. */
+	var bankFixes = {};
+	var bankOptions = [];
+
+	/**
+	 * 은행 셀.
+	 *  - 알아서 읽힌 행은 그냥 은행명만 보여준다.
+	 *  - 못 읽었거나 여러 개로 읽힌 행만 드롭다운을 띄워 **그 자리에서 고치게** 한다.
+	 *    (엑셀을 다시 만들어 올리게 하면 한 줄 고치자고 전체를 다시 돌려야 한다)
+	 */
+	function bankCell(r) {
+		if (r.bank_status === 'empty' && !bankFixes[r.row_no]) {
+			return '<span class="text-muted fs-8">-</span>';
+		}
+		var fixed = bankFixes[r.row_no];
+		if (r.bank_status === 'ok' || fixed) {
+			var code = fixed || r.bank_code;
+			var label = fixed ? (labelOf(fixed)) : r.bank_label;
+			return '<span class="badge badge-light-success fs-8">' + esc(label) + '</span>'
+				+ '<span class="text-muted fs-8 ms-1 font-monospace">' + esc(code) + '</span>';
+		}
+		/* 후보가 있으면 후보만, 없으면 전체 목록 */
+		var list = (r.bank_cands && r.bank_cands.length) ? r.bank_cands : bankOptions;
+		var opts = ['<option value="">— 선택 —</option>'].concat(list.map(function (b) {
+			return '<option value="' + esc(b.code) + '">' + esc(b.label) + ' (' + esc(b.code) + ')</option>';
+		})).join('');
+		return '<div class="d-flex flex-column gap-1">'
+			+ '<span class="text-danger fs-8">입력값: ' + esc(r.bank_input) + '</span>'
+			+ '<select class="form-select form-select-sm bulk-bank-pick" data-row="' + r.row_no + '">' + opts + '</select>'
+			+ '</div>';
+	}
+
+	function labelOf(code) {
+		for (var i = 0; i < bankOptions.length; i++) {
+			if (bankOptions[i].code === code) return bankOptions[i].label;
+		}
+		return code;
+	}
+
+	var lastPreview = null;
+
 	function renderPreview(d) {
 		var s = d.summary;
+		if (d.banks && d.banks.length) { bankOptions = d.banks; }
+		lastPreview = d;
 		document.getElementById('bulk_summary').innerHTML =
 			'<div class="d-flex flex-wrap gap-2 fs-6">'
 			+ '<span class="badge badge-light fs-7 py-2">총 ' + s.total + '행</span>'
@@ -649,6 +693,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 				+ '<td class="font-monospace">' + esc(r.login_id) + '</td>'
 				+ '<td class="text-center">' + badge(r.daily) + '</td>'
 				+ '<td class="text-center">' + badge(r.withholding) + '</td>'
+				+ '<td>' + bankCell(r) + '</td>'
 				+ '<td>' + (r.ok
 					? '<span class="badge badge-light-success fs-8">등록 가능</span>'
 					: '<span class="badge badge-light-danger fs-8">' + esc(r.error) + '</span>')
@@ -662,6 +707,26 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 			confirmBtn.classList.add('d-none');
 		}
 	}
+
+	/* 은행을 고르면 그 값을 담아두고, 미리보기를 다시 받아 서버 판정을 그대로 반영한다.
+	   화면에서만 OK 로 바꾸면 다른 검증(중복 등)과 어긋날 수 있다. */
+	document.getElementById('bulk_tbody').addEventListener('change', function (e) {
+		var sel = e.target.closest('.bulk-bank-pick');
+		if (!sel) { return; }
+		var row = sel.getAttribute('data-row');
+		if (sel.value) { bankFixes[row] = sel.value; } else { delete bankFixes[row]; }
+		if (!fileInput.files[0]) { return; }
+
+		sel.disabled = true;
+		fetch(UP_API, { method: 'POST', body: buildForm('preview'), credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (d) { if (d.ok) { renderPreview(d); } })
+			.catch(function () { sel.disabled = false; });
+	});
+
+	fileInput.addEventListener('change', function () {
+		bankFixes = {};   /* 다른 파일인데 앞 파일의 행번호 수정값이 남으면 엉뚱한 줄에 붙는다 */
+	});
 
 	form.addEventListener('submit', function (e) {
 		e.preventDefault();

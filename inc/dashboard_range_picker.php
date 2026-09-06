@@ -11,8 +11,12 @@ declare(strict_types=1);
  *
  * @var string $periodFrom
  * @var string $periodTo
+ * @var string|null $rangeRoute 적용 시 이동할 라우트. 안 주면 대시보드(기존 동작).
  */
-$rangeBaseUrl = admin_url('dashboard');
+// require 는 호출부와 변수 스코프를 공유한다 — 한 페이지에서 두 번 쓸 때 앞의 값이
+// 남지 않도록 읽고 바로 비운다.
+$rangeBaseUrl = admin_url($rangeRoute ?? 'dashboard');
+unset($rangeRoute);
 // JS(daterangepicker) 초기화 전에도 화면에 기간이 비어 보이지 않도록 서버에서 먼저 텍스트를 채운다.
 $rangeDisplayText = $periodFrom === $periodTo ? $periodFrom : ($periodFrom . ' ~ ' . $periodTo);
 ?>

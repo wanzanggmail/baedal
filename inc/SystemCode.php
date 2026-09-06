@@ -10,6 +10,7 @@ final class SystemCode
     /** @var list<string> */
     public const CATEGORIES = [
         'bank',
+        'transfer_bank',
         'card_issuer',
         'vehicle',
         'rider_status',
@@ -24,6 +25,7 @@ final class SystemCode
     {
         return [
             'bank'              => '은행 코드',
+            'transfer_bank'     => '이체 은행코드(펌뱅킹)',
             'card_issuer'       => '카드 발급사/매입사 코드(PG)',
             'vehicle'           => '차량 유형',
             'rider_status'      => '라이더 상태',

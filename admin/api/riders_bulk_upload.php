@@ -17,6 +17,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
 require_once INC_PATH . '/Org.php';
 require_once INC_PATH . '/RiderRegistration.php';
+require_once INC_PATH . '/BankResolver.php';
 require_once INC_PATH . '/XlsxParser.php';
 require_once INC_PATH . '/AuditLog.php';
 
@@ -163,8 +164,13 @@ foreach ($all as $i => $cols) {
         'rider_code'              => '',
         'vehicle_type'            => 'motor',
         'team_code'               => 'etc',
+        // 빈칸 기본값(2026-09-06 갑): 일정산은 N, **원천세는 Y**.
+        //   대부분의 라이더가 원천세 대상이라 빈칸을 N 으로 두면 옮겨 적을 때 빠뜨리기 쉽다.
+        //   제외할 사람만 N 을 적게 한다.
         'is_daily_settlement'     => $get('is_daily_settlement'),
-        'withholding_tax_enabled' => $get('withholding_tax_enabled'),
+        'withholding_tax_enabled' => $get('withholding_tax_enabled') !== ''
+            ? $get('withholding_tax_enabled')
+            : 'Y',
         'bank_code'               => $get('bank_code'),
         'bank_account'            => $get('bank_account'),
         'account_holder'          => $get('account_holder'),
@@ -189,6 +195,18 @@ foreach ($rows as $r) {
     if ($pk !== '') { $phoneSeen[$pk] = ($phoneSeen[$pk] ?? 0) + 1; }
 }
 
+// 미리보기에서 고른 은행 — {행번호: 코드}. 확정 요청에 함께 온다.
+$fixes = [];
+if (isset($_POST['bank_fixes'])) {
+    $decoded = json_decode((string) $_POST['bank_fixes'], true);
+    if (is_array($decoded)) {
+        foreach ($decoded as $k => $v) {
+            $fixes[(string) $k] = trim((string) $v);
+        }
+    }
+}
+$bankMap = BankResolver::banks();
+
 // RiderRegistration::boolFlag() 와 같은 규칙 — 미리보기 표시용.
 $flag = static function (string $v): bool {
     $t = strtolower(trim($v));
@@ -204,6 +222,33 @@ foreach ($rows as $r) {
     $rowErr = null;
     if (($phoneSeen[$phoneKey($r['phone'])] ?? 0) > 1) {
         $rowErr = '파일 안에서 휴대전화가 중복됩니다.';
+    }
+
+    // 은행은 **코드든 이름이든** 받는다(2026-09-06 갑) — 088·88·국민·국민은행·카카오 …
+    // 미리보기에서 고른 값($fixes)이 있으면 그게 최우선이다.
+    $bankStatus = 'empty';
+    $bankCands  = [];
+    $bankInput  = $r['bank_code'];
+    if ($rowErr === null) {
+        $fixed = $fixes[(string) $r['row_no']] ?? '';
+        if ($fixed !== '' && isset($bankMap[$fixed])) {
+            $r['bank_code'] = $fixed;
+            $bankStatus     = 'ok';
+        } elseif ($bankInput !== '') {
+            $res = BankResolver::resolve($bankInput);
+            $bankStatus = $res['status'];
+            $bankCands  = $res['candidates'];
+            if ($res['status'] === 'ok') {
+                $r['bank_code'] = $res['code'];
+            } else {
+                $r['bank_code'] = '';
+                $rowErr = $res['status'] === 'ambiguous'
+                    ? sprintf('은행이 여러 개로 읽힙니다: %s — 아래에서 골라주세요', $bankInput)
+                    : sprintf('알 수 없는 은행입니다: %s — 아래에서 골라주세요', $bankInput);
+            }
+        } else {
+            $r['bank_code'] = '';
+        }
     }
 
     if ($mode === 'preview') {
@@ -243,6 +288,12 @@ foreach ($rows as $r) {
         // 미리보기에서 정산 설정이 의도대로 읽혔는지 눈으로 확인할 수 있게 함께 내려준다.
         'daily'       => $flag($r['is_daily_settlement']),
         'withholding' => $flag($r['withholding_tax_enabled']),
+        // 은행 — 미리보기에서 고칠 수 있게 입력값·판정·후보를 함께 내려준다.
+        'bank_input'  => $bankInput,
+        'bank_code'   => $r['bank_code'],
+        'bank_label'  => $r['bank_code'] !== '' ? ($bankMap[$r['bank_code']] ?? '') : '',
+        'bank_status' => $bankStatus,
+        'bank_cands'  => $bankCands,
         'ok'          => $rowErr === null,
         'error'       => $rowErr,
     ];
@@ -258,7 +309,8 @@ if ($mode === 'preview') {
             'ok'    => $okCount,
             'fail'  => $failCount,
         ],
-        'rows' => $results,
+        'banks' => BankResolver::options(),   // 미리보기 드롭다운
+        'rows'  => $results,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
