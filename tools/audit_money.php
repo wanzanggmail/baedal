@@ -128,7 +128,10 @@ $r = db_row(
 // ── ⑥ fee_code 커버리지 ────────────────────────────────────────────────────
 $hd('⑥ fee_code 커버리지  (명세서·집계에서 처리 안 되는 코드)');
 $known = ['excel_deduction', 'manual', 'withholding', 'employment_ins', 'accident_ins', 'carry_forward',
-          'hourly_ins', 'agency_fee', 'advance', 'lease', 'rental', 'loan', 'vat', 'ins_refund'];
+          'hourly_ins', 'agency_fee', 'advance', 'lease', 'rental', 'loan', 'vat', 'ins_refund',
+          // 대리점 선차감(2026-09-06) — 라이더 화면에서는 감추지만 **합계에는 반영**된다
+          // (RiderStatement 가 총공제에서 빼 정산금액을 낮추는 방식). 원장 항등식도 그대로.
+          'agency_prededuct'];
 $un = 0;
 foreach (db_rows('SELECT fee_code, COUNT(*) AS c, SUM(amount) AS s FROM settlement_fee_items GROUP BY fee_code') as $r) {
     if (!in_array((string) $r['fee_code'], $known, true)) {
