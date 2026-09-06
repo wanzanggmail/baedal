@@ -54,11 +54,16 @@ $action  = trim((string) ($body['action'] ?? ''));
 $orgId   = (int) ($body['org_id'] ?? 0);
 $adminId = (int) ($_SESSION['admin_id'] ?? 0);
 
-$org = db_row("SELECT id, name, level FROM organizations WHERE id = ? LIMIT 1", [$orgId]);
+// org_id 를 안 보내거나 0 이면 **전역 기본값**을 뜻한다(2026-09-06 갑).
+//   대리점별 설정이 없을 때 쓰이는 값이라 조직 행이 없다 — 조직 조회를 건너뛴다.
+$isGlobal = $orgId < 1;
+$org = $isGlobal
+    ? ['id' => 0, 'name' => '전역 기본값', 'level' => '']
+    : db_row("SELECT id, name, level FROM organizations WHERE id = ? LIMIT 1", [$orgId]);
 if ($org === null) {
     $err('조직을 찾을 수 없습니다.', 404);
 }
-if ((string) $org['level'] !== 'agency') {
+if (!$isGlobal && (string) $org['level'] !== 'agency') {
     $err('수수료는 대리점 단위로만 설정합니다.');
 }
 
@@ -68,12 +73,16 @@ try {
         $dist = (float) ($body['distributor_pct'] ?? 0);
         $ag   = (float) ($body['agency_pct'] ?? 0);
 
-        PgFeeConfig::saveForAgency($orgId, $hq, $dist, $ag, $adminId > 0 ? $adminId : null);
+        if ($isGlobal) {
+            PgFeeConfig::saveGlobal($hq, $dist, $ag, $adminId > 0 ? $adminId : null);
+        } else {
+            PgFeeConfig::saveForAgency($orgId, $hq, $dist, $ag, $adminId > 0 ? $adminId : null);
+        }
         AuditLog::record(
             'org.platform_fee',
-            (string) $orgId,
+            $isGlobal ? 'global' : (string) $orgId,
             sprintf('%s 플랫폼 수수료 · 본사 %.2f%% / 총판 %.2f%% / 대리점 %.2f%% (합 %.2f%%)',
-                (string) $org['name'], $hq, $dist, $ag, $hq + $dist + $ag)
+                $isGlobal ? '전역 기본값' : (string) $org['name'], $hq, $dist, $ag, $hq + $dist + $ag)
         );
     } else {
 

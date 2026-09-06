@@ -46,13 +46,66 @@ final class PgFeeConfig
     }
 
     /**
+     * 전역 기본값 — 대리점별 설정이 없을 때 쓰이는 값.
+     *
+     * @return array{agency:float, distributor:float, hq:float}
+     */
+    public static function globalBreakdown(): array
+    {
+        $d = ['agency' => self::DEFAULT_PCT, 'distributor' => self::DEFAULT_PCT, 'hq' => self::DEFAULT_PCT];
+        if (!self::hasSplitColumns()) {
+            return $d;
+        }
+        $row = db_row('SELECT hq_pct, distributor_pct, agency_pct FROM org_fee_config WHERE org_id IS NULL LIMIT 1');
+        if ($row === null) {
+            return $d;
+        }
+
+        return [
+            'agency'      => (float) $row['agency_pct'],
+            'distributor' => (float) $row['distributor_pct'],
+            'hq'          => (float) $row['hq_pct'],
+        ];
+    }
+
+    /** 전역 기본값 저장. 행이 없으면 만든다. */
+    public static function saveGlobal(float $hq, float $distributor, float $agency, ?int $adminId = null): void
+    {
+        if (!self::tableExists() || !self::hasSplitColumns()) {
+            throw new RuntimeException('org_fee_config 구조가 준비되지 않았습니다. php migrate.php 를 실행하세요.');
+        }
+        foreach ([$hq, $distributor, $agency] as $p) {
+            if ($p < 0 || $p > 100) {
+                throw new InvalidArgumentException('요율은 0~100% 사이여야 합니다.');
+            }
+        }
+        $by = ($adminId !== null && $adminId > 0) ? $adminId : null;
+        if (db_row('SELECT id FROM org_fee_config WHERE org_id IS NULL LIMIT 1') !== null) {
+            db_execute(
+                'UPDATE org_fee_config
+                    SET hq_pct = ?, distributor_pct = ?, agency_pct = ?, updated_by = ?, updated_at = NOW()
+                  WHERE org_id IS NULL',
+                [$hq, $distributor, $agency, $by]
+            );
+        } else {
+            db_insert(
+                'INSERT INTO org_fee_config (org_id, pg_service_fee_pct, hq_pct, distributor_pct, agency_pct, updated_by)
+                 VALUES (NULL, ?, ?, ?, ?, ?)',
+                [$agency, $hq, $distributor, $agency, $by]
+            );
+        }
+    }
+
+    /**
      * 대리점 하나에 적용되는 플랫폼 수수료 분해.
      *
      * @return array{agency:float, distributor:float, hq:float, total:float}
      */
     public static function breakdownForAgency(int $agencyId): array
     {
-        $d = ['agency' => self::DEFAULT_PCT, 'distributor' => self::DEFAULT_PCT, 'hq' => self::DEFAULT_PCT];
+        // 대리점 행 → 전역 기본값 → 코드 기본값 순으로 떨어진다(2026-09-06 갑).
+        // 예전엔 대리점 행이 없으면 곧장 코드에 박힌 1% 였고, 화면에서 바꿀 수가 없었다.
+        $d = self::globalBreakdown();
 
         if ($agencyId > 0 && self::hasSplitColumns()) {
             $row = db_row(
