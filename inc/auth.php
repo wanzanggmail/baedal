@@ -122,7 +122,8 @@ function admin_route_area_map(): array
         'deduction/'  => 'deduction',
         'promotion'   => 'promotion',
         'withdrawal/' => 'withdrawal',
-        'content/'    => 'content',
+        // 'content/' 는 여기 없다 — 역할별 권한이 아니라 조직·역할 고정 규칙으로
+        // 위(admin_can_access_route)에서 먼저 처리한다(2026-09-06 갑).
         'riders/'     => 'riders',
         'dashboard'   => 'dashboard',
     ];
@@ -150,6 +151,16 @@ function admin_can_access_route(string $route): bool
     // API(admin_can_manage_team)는 403 을 내는 상태가 된다 — 실제로 그렇게 동작했다.
     if (str_starts_with($route, 'system/team')) {
         return admin_can_manage_team();
+    }
+
+    // 콘텐츠(공지·배너) — **본사 최고관리자와 개발사만**(2026-09-06 갑).
+    // ⚠️ super 단축경로보다 **먼저** 판정한다. 조직 대표계정도 역할이 super 일 수 있어
+    // 뒤에 두면 대리점 계정이 그대로 통과한다.
+    // 예전엔 역할별 권한관리(role_permissions)의 'content' 영역을 따랐고, manager 역할은
+    // 무조건 통과라 **대리점 총괄관리자 22명이 전부 보고 있었다.**
+    if ($route === 'content' || str_starts_with($route, 'content/')) {
+        return admin_has_role('super')
+            && in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DEVELOPER], true);
     }
 
     if ($user['role'] === 'super') {
@@ -279,6 +290,15 @@ function admin_can_write(string $area): bool
     }
 
     $role = $user['role'];
+
+    // 콘텐츠(공지·배너) — 본사 최고관리자·개발사만(2026-09-06 갑). 화면 규칙과 **같은 조건**을
+    // super 단축경로보다 먼저 건다. 화면만 막으면 API(admin_deny_write_json)는 이 함수만 보므로
+    // 대리점 super 계정이 직접 호출해 공지를 쓸 수 있다.
+    if ($area === 'content') {
+        return $role === 'super'
+            && in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DEVELOPER], true);
+    }
+
     if ($role === 'super') {
         return true;
     }
@@ -294,11 +314,6 @@ function admin_can_write(string $area): bool
 
     // manager: 자기 조직 범위 내 전체 화면 쓰기 가능(시스템관리 제외, 위에서 이미 차단됨)
     $canWrite = $role === 'manager' ? true : RolePermission::canWrite($role, $area);
-
-    // 2026-07 재설계: 공지·배너 작성은 본사(admin 레벨)만. 총판·대리점은 조회(broadcast 수신)만.
-    if ($area === 'content') {
-        return $canWrite && admin_org_level() === Org::LEVEL_ADMIN;
-    }
 
     return $canWrite;
 }
