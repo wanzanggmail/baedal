@@ -96,6 +96,7 @@ final class MigrateRunner
         self::migrateDeveloperOrg();
         self::migrateTransferBankCodes();
         self::migrateOrgFeeGlobalRow();
+        self::migrateAgencyPredeductFee();
 
         echo "\n완료.\n";
     }
@@ -3617,5 +3618,44 @@ final class MigrateRunner
         } else {
             echo "SKIP  전역 기본값 행 (이미 있음)\n";
         }
+    }
+
+    /**
+     * 대리점 선차감 수수료 — 건당 정액, **대리점 몫**(2026-09-06 갑).
+     *
+     * 갑: "대리점에서 선차감 수수료를 100원 책정하면, 라이더가 한 건에 1,100원이 발생할 때
+     *      100원을 미리 대리점 몫으로 잡아놓는다. 관리자에서는 1,100원으로 나오는데
+     *      라이더한테는 1,000원으로 나온다."
+     *
+     * 기존 `agency_fee`(선정산수수료·대행)와 **다른 것**이다:
+     *   - agency_fee : 일정산 라이더만 · 본사 귀속 · 라이더 명세서에 보인다
+     *   - 선차감      : 전 라이더 · **대리점 귀속** · 라이더에게는 안 보이고 단가에서 빠진 것처럼 보인다
+     *
+     * 기본값 0 — 켜기 전까지 아무 대리점도 영향을 받지 않는다.
+     */
+    private static function migrateAgencyPredeductFee(): void
+    {
+        echo "== 대리점 선차감 수수료 ==\n";
+
+        if (!db_table_exists('deduction_global_config')) {
+            echo "SKIP  deduction_global_config 없음\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
+        if (in_array('agency_prededuct_fee', $cols, true)) {
+            echo "SKIP  agency_prededuct_fee (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "ALTER TABLE deduction_global_config
+                ADD COLUMN agency_prededuct_fee INT UNSIGNED NOT NULL DEFAULT 0
+                    COMMENT '대리점 선차감 수수료(배달 건당 정액, 대리점 귀속). 0 = 사용 안 함'
+                AFTER agency_fee_min_long"
+        );
+        echo "OK    agency_prededuct_fee 추가(기본 0 = 사용 안 함)\n";
     }
 }

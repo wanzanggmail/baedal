@@ -67,7 +67,17 @@ final class RiderStatement
         // 고정차감 = 리스 + 대여금 + (전주차미납: 데이터 없음 → 0). 선지급차감 = 선지급.
         $fixed    = $get('lease') + $get('rental') + $get('loan');
         $advance  = $get('advance');
-        $totalFee = (int) $cyc['f'];
+
+        // 🔒 대리점 선차감(2026-09-06 갑) — **라이더에게는 보이지 않는다.**
+        // 공제 한 줄로 보여주는 대신 정산금액 자체를 그만큼 낮춰, 라이더 눈에는
+        // 배달 단가가 처음부터 그 금액이었던 것처럼 보이게 한다
+        // (갑: 관리자에서는 1,100원으로 나오는데 라이더한테는 1,000원으로 나오는거야).
+        //
+        // 총공제에서 빼기만 하면 아래 계산이 전부 따라온다:
+        //   정산금액 = 실수령 + 총공제 − 지원금   → 선차감만큼 낮아지고
+        //   차감액(잔여 흡수) = 총공제 − 개별항목 → 선차감이 어디에도 안 남는다
+        // 그래서 「정산금액 + 지원 − 공제 = 실수령」 균형이 그대로 유지된다.
+        $totalFee = (int) $cyc['f'] - $get('agency_prededuct');
 
         // 개별 표기 공제 항목들.
         $withholding = $get('withholding');
@@ -277,7 +287,7 @@ final class RiderStatement
                FROM settlement_fee_items fi
                JOIN settlement_rider_cycles c ON c.id=fi.cycle_id
               WHERE c.rider_id=? AND c.settlement_date BETWEEN ? AND ?
-                AND fi.fee_code IN ('agency_fee','advance')
+                AND fi.fee_code IN ('agency_fee','advance','agency_prededuct')
               GROUP BY c.settlement_date, fi.fee_code",
             [$riderId, $from, $to]
         ) as $r) {
@@ -295,11 +305,13 @@ final class RiderStatement
             $d       = (string) $r['d'];
             $agency  = (int) ($feeByDate[$d]['agency_fee'] ?? 0);
             $advance = (int) ($feeByDate[$d]['advance'] ?? 0);
+            $preded  = (int) ($feeByDate[$d]['agency_prededuct'] ?? 0); // 라이더에게 안 보인다
             $net     = (int) $r['n'];
             $rows[] = [
                 'date'    => $d,
                 'orders'  => (int) $r['o'],
-                'gross'   => $net + (int) $r['f'] - (int) $r['s'], // 정산금액(도출) = 순액+공제−지원
+                // 선차감을 공제에서 빼 정산금액을 낮춘다 — 요약과 같은 규칙(위 summary 주석).
+                'gross'   => $net + ((int) $r['f'] - $preded) - (int) $r['s'], // 정산금액(도출) = 순액+공제−지원
                 'agency'  => $agency,
                 'planned' => $net + $advance, // 선지급 차감 전 예정금액
                 'advance' => $advance,

@@ -338,6 +338,7 @@ final class SettlementLedger
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
             'agency_fee'      => '선정산수수료(대행)',
+            'agency_prededuct' => '대리점 선차감',
             'withholding'     => '원천세',
             'employment_ins'  => '고용보험',
             'accident_ins'    => '산재보험',
@@ -475,6 +476,7 @@ final class SettlementLedger
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
             'agency_fee'      => '선정산수수료(대행)',
+            'agency_prededuct' => '대리점 선차감',
             'withholding'     => '원천세',
             'employment_ins'  => '고용보험',
             'accident_ins'    => '산재보험',
@@ -559,6 +561,10 @@ final class SettlementLedger
         'hourly_ins',
         'agency_fee',
         'withholding', 'employment_ins', 'accident_ins',
+        // 대리점 선차감은 **맨 마지막**에 둔다 — 다른 걸 전부 0으로 깎고도 모자랄 때만 이월된다.
+        // 대리점이 먼저 떼기로 한 몫이라 가장 확실히 걷혀야 하고, 목록에서 빠지면 아예 이월도
+        // 안 돼 증발한다(그래서 빼지 않고 마지막에 둔다).
+        'agency_prededuct',
     ];
 
     /**
@@ -678,13 +684,28 @@ final class SettlementLedger
         $agencyFee   = 0;
         $agencyPayer = 'rider';
         if ($riderId > 0) {
+            // ── 대리점 선차감 수수료 (2026-09-06 갑) ──────────────────────────────
+            // 배달 건당 정액을 **라이더 기준액에서 먼저** 뗀다. 뗀 돈은 대리점에 남는다
+            // (라이더 지갑에 net 만 적립되고 대리점 지갑에서 빼가지 않으므로 이체가 없다).
+            //
+            // 갑 지시: 원천세·고용·산재는 **선차감을 뺀 금액 기준**으로 매긴다.
+            // 그래서 buildFeeItems 에 낮춘 과세표준을 넘긴다 — 이걸 안 하면 라이더 명세서의
+            // 정산금액은 1,000원인데 원천세는 1,100원 기준이라 3.3%가 아닌 값이 찍힌다.
+            //
+            // 기존 agency_fee(선정산수수료·대행)는 **그대로** 과세표준에 포함한다(갑 확인).
+            $prededuct = self::predeductForRow($dailyRow, $orgId);
+            if ($prededuct > 0) {
+                $fees[] = ['fee_code' => 'agency_prededuct', 'label' => '대리점 선차감', 'amount' => $prededuct];
+            }
+            $taxBase = max(0, $base - $prededuct);
+
             [$agencyFee, $agencyPayer] = self::agencyFeeForRider($riderId, $orgId);
             if ($agencyFee > 0 && $agencyPayer === 'rider') {
                 $fees[] = ['fee_code' => 'agency_fee', 'label' => '선정산수수료(대행)', 'amount' => $agencyFee];
             }
             $fees = array_merge(
                 $fees,
-                self::buildFeeItems($base, $riderId, (string) ($dailyRow['settlement_date'] ?? ''), $cfg, $orgId)
+                self::buildFeeItems($taxBase, $riderId, (string) ($dailyRow['settlement_date'] ?? ''), $cfg, $orgId)
             );
         } else {
             $emp = self::pctAmount($base, (float) ($cfg['employment_ins_pct'] ?? 0));
@@ -707,6 +728,27 @@ final class SettlementLedger
             'agency_fee'       => $agencyFee,
             'agency_fee_payer' => $agencyPayer,
         ];
+    }
+
+    /**
+     * 대리점 선차감 수수료 — 배달 건당 정액 × 건수 (2026-09-06 갑).
+     *
+     * 기존 `agency_fee`(선정산수수료·대행)와 다르다:
+     *   - agency_fee : 일정산 라이더만 · 본사 귀속 · 라이더 명세서에 보인다
+     *   - 선차감      : **전 라이더** · **대리점 귀속** · 라이더에게는 안 보이고
+     *                   배달 단가가 그만큼 낮은 것처럼 보인다(RiderStatement 참고)
+     *
+     * @param array<string, mixed> $dailyRow
+     */
+    private static function predeductForRow(array $dailyRow, ?int $orgId): int
+    {
+        $orders = (int) ($dailyRow['order_count'] ?? 0);
+        if ($orders < 1) {
+            return 0;
+        }
+        $per = AgencyFeeConfig::prededuct($orgId);
+
+        return $per > 0 ? $orders * $per : 0;
     }
 
     /**

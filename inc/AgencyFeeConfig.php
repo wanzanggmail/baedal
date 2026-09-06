@@ -19,7 +19,41 @@ final class AgencyFeeConfig
             'fee_day_threshold' => 7,
             'fee_per_tx_short'  => 80,
             'fee_per_tx_long'   => 40,
+            // 대리점 선차감 수수료 — 배달 건당 정액, 대리점 귀속(2026-09-06 갑). 0 = 사용 안 함.
+            'prededuct_fee'     => 0,
         ];
+    }
+
+    /** 선차감 컬럼이 마이그레이션됐는지 — 없으면 0(사용 안 함)으로 동작. */
+    public static function predeductReady(): bool
+    {
+        if (!db_table_exists('deduction_global_config')) {
+            return false;
+        }
+
+        return in_array('agency_prededuct_fee', array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field'), true);
+    }
+
+    /**
+     * 대리점 선차감 수수료(배달 건당 정액). org 행 → 전역 → 0 순 폴백.
+     *
+     * 라이더 정산 기준액을 건당 이 금액만큼 낮추고, 그 돈은 **대리점에 남는다**.
+     * 라이더 지갑에 net 만 적립되고 대리점 지갑에서 빼가지 않으므로 별도 이체가 필요 없다.
+     */
+    public static function prededuct(?int $orgId = null): int
+    {
+        if (!self::predeductReady()) {
+            return 0;
+        }
+        $row = null;
+        if ($orgId !== null && $orgId > 0) {
+            $row = db_row('SELECT agency_prededuct_fee v FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId]);
+        }
+        if ($row === null) {
+            $row = db_row('SELECT agency_prededuct_fee v FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+        }
+
+        return max(0, (int) ($row['v'] ?? 0));
     }
 
     public static function tableReady(): bool
@@ -248,6 +282,7 @@ final class AgencyFeeConfig
             'fee_day_threshold' => max(1, (int) ($row['agency_fee_day_threshold'] ?? $d['fee_day_threshold'])),
             'fee_per_tx_short'  => max(0, (int) ($row['agency_fee_short'] ?? $d['fee_per_tx_short'])),
             'fee_per_tx_long'   => max(0, (int) ($row['agency_fee_long'] ?? $d['fee_per_tx_long'])),
+            'prededuct_fee'     => self::prededuct($orgId),
         ];
     }
 
@@ -261,10 +296,15 @@ final class AgencyFeeConfig
             throw new RuntimeException('deduction_global_config 컬럼이 없습니다. php migrate.php 를 실행하세요.');
         }
 
+        $cur = self::get($orgId);
         $cfg = [
             'fee_day_threshold' => max(1, min(365, (int) ($data['fee_day_threshold'] ?? 7))),
             'fee_per_tx_short'  => max(0, (int) ($data['fee_per_tx_short'] ?? 0)),
             'fee_per_tx_long'   => max(0, (int) ($data['fee_per_tx_long'] ?? 0)),
+            // 선차감은 본사만 보내는 값 — 키가 안 오면 기존 값을 지킨다(대리점 저장으로 0이 되면 안 된다).
+            'prededuct_fee'     => array_key_exists('prededuct_fee', $data)
+                ? max(0, (int) $data['prededuct_fee'])
+                : (int) $cur['prededuct_fee'],
         ];
 
         // 본사가 정한 하한 검사 — 전역 기본값(본사 저장)에도 똑같이 건다.
@@ -288,20 +328,31 @@ final class AgencyFeeConfig
             ? db_row('SELECT id FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId])
             : db_row('SELECT id FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
 
+        // 선차감 컬럼은 마이그레이션 전 서버에서도 저장이 깨지지 않게 있을 때만 쓴다.
+        $pd    = self::predeductReady();
+        $pdSet = $pd ? ', agency_prededuct_fee = ?' : '';
+        $pdCol = $pd ? ', agency_prededuct_fee' : '';
+        $pdVal = $pd ? ', ?' : '';
+
         if ($exists) {
+            $args = [$cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']];
+            if ($pd) { $args[] = $cfg['prededuct_fee']; }
+            $args[] = (int) $exists['id'];
             db_execute(
                 'UPDATE deduction_global_config
-                 SET agency_fee_day_threshold = ?, agency_fee_short = ?, agency_fee_long = ?
+                 SET agency_fee_day_threshold = ?, agency_fee_short = ?, agency_fee_long = ?' . $pdSet . '
                  WHERE id = ?',
-                [$cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long'], (int) $exists['id']]
+                $args
             );
         } else {
+            $args = [$hasOrg ? $orgId : null, $cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']];
+            if ($pd) { $args[] = $cfg['prededuct_fee']; }
             db_insert(
                 'INSERT INTO deduction_global_config
                     (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct, agency_fee_pct,
-                     agency_fee_day_threshold, agency_fee_short, agency_fee_long)
-                 VALUES (?, 3.30, 0.80, 0.88, 0, ?, ?, ?)',
-                [$hasOrg ? $orgId : null, $cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']]
+                     agency_fee_day_threshold, agency_fee_short, agency_fee_long' . $pdCol . ')
+                 VALUES (?, 3.30, 0.80, 0.88, 0, ?, ?, ?' . $pdVal . ')',
+                $args
             );
         }
 

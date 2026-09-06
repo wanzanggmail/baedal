@@ -25,6 +25,10 @@ $globalBelowMin = $isHq && $minReady && (
 );
 // 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
 $canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
+// 대리점 선차감(2026-09-06 갑) — 라이더 몫을 줄이는 값이라 **본사만** 정한다.
+// 대리점이 자기 손으로 올릴 수 있으면 라이더 분쟁이 그대로 우리 쪽으로 온다.
+$predeductReady = AgencyFeeConfig::predeductReady();
+$canEditPreded  = $canWrite && $isHq && $predeductReady;
 $readOnlyNote = (!$isAgencySelf && !$isHq);
 ?>
 <!--begin::Toolbar-->
@@ -94,6 +98,23 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 									<?php if ($minimum['fee_per_tx_long'] > 0) : ?><div class="form-text">본사 최저 <strong><?= number_format($minimum['fee_per_tx_long']) ?>원</strong> — 이 아래로는 저장되지 않습니다.</div><?php endif; ?>
 							</div>
 						</div>
+						<?php // ── 대리점 선차감 수수료 (2026-09-06 갑) ── ?>
+						<?php if ($predeductReady) : ?>
+						<div class="separator separator-dashed my-6"></div>
+						<div class="mb-6">
+							<label class="form-label" for="cfg_prededuct">대리점 선차감 수수료 — 배달 건당 (원)
+								<span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></label>
+							<input type="number" class="form-control form-control-solid" id="cfg_prededuct" min="0"
+								value="<?= (int) ($config['prededuct_fee'] ?? 0) ?>" <?= $canEditPreded ? '' : 'readonly' ?> />
+							<div class="form-text">
+								배달 건당 이 금액을 <strong>라이더 정산 기준액에서 먼저 뗍니다.</strong> 뗀 돈은 <strong>대리점에 남습니다</strong>(별도 이체 없음).<br>
+								<strong>라이더에게는 이 항목이 보이지 않습니다</strong> — 명세서·앱에는 그만큼 낮아진 정산금액만 나옵니다.
+								예: 건당 1,100원 · 선차감 100원 → 관리자 1,100원 / 라이더 1,000원.<br>
+								원천세·고용보험·산재보험도 <strong>선차감을 뺀 금액 기준</strong>으로 매깁니다. <strong>0</strong>이면 사용하지 않습니다.
+							</div>
+						</div>
+						<?php endif; ?>
+
 						<?php if ($canWrite) : ?>
 						<button type="button" class="btn btn-primary" id="cfg_save_btn">저장</button>
 						<?php elseif ($readOnlyNote) : ?>
@@ -273,6 +294,12 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				fee_per_tx_short: parseInt(document.getElementById('cfg_fee_short').value, 10) || 0,
 				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
 			};
+			/* 선차감은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을
+			   지키게 한다(키가 오면 0으로 덮여 선차감이 조용히 꺼진다). */
+			var pd = document.getElementById('cfg_prededuct');
+			if (pd && !pd.readOnly) {
+				payload.prededuct_fee = parseInt(pd.value, 10) || 0;
+			}
 			fetch(API, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },

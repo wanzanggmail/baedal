@@ -65,6 +65,11 @@ foreach ($picked as $p) {
     $ratio = $cycleNet > 0 ? min(1.0, (int) $p['amount'] / $cycleNet) : 0.0;
     foreach ($feeItemsByCycle[(int) $p['cycle_id']] ?? [] as $fi) {
         $code = (string) $fi['fee_code'];
+        // 🔒 대리점 선차감(2026-09-06 갑)은 라이더에게 보이지 않는 대리점 몫이라
+        // 공제 목록에 넣지 않는다. 라이더 기준으로는 애초에 그만큼 낮은 단가였다.
+        if ($code === 'agency_prededuct') {
+            continue;
+        }
         $prorated = (int) round((int) $fi['amount'] * $ratio);
         if (!isset($feeAgg[$code])) {
             $feeAgg[$code] = ['label' => (string) $fi['label'], 'amount' => 0];

@@ -111,6 +111,11 @@ final class RiderTaxSummary
         $out['settle_fee'] = (int) ($s['fee'] ?? 0);
         $out['settle_net'] = (int) ($s['net'] ?? 0);
 
+        // 🔒 대리점 선차감(2026-09-06 갑)은 라이더에게 보이지 않는 대리점 몫이라 공제에서 뺀다.
+        // 바로 아래 지급액 = net + fee 이므로, 빼면 지급액도 라이더가 아는 단가 기준이 된다.
+        // 안 빼면 명세서는 1,000원인데 세금 화면만 1,100원으로 떠서 그 자체로 문의가 된다.
+        $out['settle_fee'] -= self::prededucted($riderId, $from, $to);
+
         // ⚠️ 지급액을 `gross_amount + support_amount` 로 구하지 않는다.
         //    정산 계산식이 여러 차례 개정됐고 **기존 사이클은 소급 재계산하지 않아서**,
         //    2026-02~03 구간은 그 합이 fee/net 과 어긋난다(295건 중 123건).
@@ -186,11 +191,17 @@ final class RiderTaxSummary
         //    행 수만큼 중복 합산된다(항목 수가 사이클마다 달라 나눗셈으로 못 되돌린다).
         //    그래서 사이클 합계와 공제 합계를 **따로 구해** 월 키로 합친다.
         $baseRows = db_rows(
-            "SELECT DATE_FORMAT(settlement_date, '%Y-%m') ym,
-                    SUM(net_amount + total_fee_amount) base,
-                    SUM(net_amount) net
-               FROM settlement_rider_cycles
-              WHERE rider_id = ? AND settlement_date BETWEEN ? AND ?
+            // 선차감은 라이더에게 안 보이는 대리점 몫이라 지급액(base)에서 뺀다(2026-09-06 갑).
+            // 사이클당 여러 행일 수 있어 미리 묶은 뒤 LEFT JOIN 한다(중복 합산 방지).
+            "SELECT DATE_FORMAT(c.settlement_date, '%Y-%m') ym,
+                    SUM(c.net_amount + c.total_fee_amount) - COALESCE(SUM(p.pre), 0) base,
+                    SUM(c.net_amount) net
+               FROM settlement_rider_cycles c
+               LEFT JOIN (SELECT cycle_id, SUM(amount) pre
+                            FROM settlement_fee_items
+                           WHERE fee_code = 'agency_prededuct'
+                           GROUP BY cycle_id) p ON p.cycle_id = c.id
+              WHERE c.rider_id = ? AND c.settlement_date BETWEEN ? AND ?
               GROUP BY ym
               ORDER BY ym",
             [$riderId, $from, $to]
@@ -224,5 +235,25 @@ final class RiderTaxSummary
         }
 
         return $out;
+    }
+
+    /**
+     * 기간 내 대리점 선차감 합계 (2026-09-06 갑).
+     *
+     * 라이더에게 보이지 않는 대리점 몫이라 세금 화면의 「지급액」에서 뺀다.
+     * 컬럼이 없던 시절 데이터에는 이 fee_code 자체가 없어 자연히 0 이 나온다.
+     */
+    private static function prededucted(int $riderId, string $from, string $to): int
+    {
+        $row = db_row(
+            "SELECT COALESCE(SUM(fi.amount), 0) v
+               FROM settlement_fee_items fi
+              INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+              WHERE c.rider_id = ? AND c.settlement_date BETWEEN ? AND ?
+                AND fi.fee_code = 'agency_prededuct'",
+            [$riderId, $from, $to]
+        );
+
+        return max(0, (int) ($row['v'] ?? 0));
     }
 }
