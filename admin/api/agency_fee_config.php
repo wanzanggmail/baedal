@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * 대행수수료 설정 API
  * GET  — 현재 설정 + 본사가 정한 최저금액
- * POST { "action": "save", fee_day_threshold, fee_per_tx_short, fee_per_tx_long }
+ * POST { "action": "save_prededuct", prededuct_fee, [agency_id] }  — 대리점 선차감
  *      { "action": "save_min", min_fee_per_tx_short, min_fee_per_tx_long }  — **본사 전용**
  */
 
@@ -186,48 +186,6 @@ if ($action === 'save_prededuct') {
     }
     exit;
 }
-if ($action !== 'save') {
-    $err('action=save 또는 save_min, save_rates', 400);
-}
-
-try {
-    $adminId = (int) ($_SESSION['admin_id'] ?? 0);
-
-    // 선차감은 **라이더 실수령을 직접 줄이는** 값인데 라이더에게는 보이지 않는다.
-    // 나중에 분쟁이 나면 "누가 언제 얼마로 바꿨나"가 그대로 쟁점이 되므로,
-    // 저장 사실만이 아니라 **금액 변화(이전 → 이후)와 대상 조직**까지 남긴다.
-    // 저장 전 값을 먼저 읽는다(대리점 행이 없으면 전역값 — 실제로 적용되던 금액).
-    $predeductBefore = AgencyFeeConfig::prededuct($cfgOrgId);
-
-    $cfg = AgencyFeeConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
-
-    $scopeLabel = '전역 기본값';
-    if ($cfgOrgId !== null && $cfgOrgId > 0) {
-        $orgRow     = db_row('SELECT name FROM organizations WHERE id = ? LIMIT 1', [$cfgOrgId]);
-        $scopeLabel = (string) ($orgRow['name'] ?? ('조직#' . $cfgOrgId));
-    }
-
-    $predeductAfter = (int) ($cfg['prededuct_fee'] ?? 0);
-    $predeductNote  = $predeductBefore === $predeductAfter
-        ? sprintf(' · 선차감 %d원(변경 없음)', $predeductAfter)
-        : sprintf(' · 선차감 %d원 → %d원', $predeductBefore, $predeductAfter);
-
-    AuditLog::record(
-        'deduction.agency_fee.save',
-        'deduction_global_config',
-        sprintf(
-            '[%s] %d일 미만 %d원 / 이상 %d원(건당)%s',
-            $scopeLabel,
-            $cfg['fee_day_threshold'],
-            $cfg['fee_per_tx_short'],
-            $cfg['fee_per_tx_long'],
-            $predeductNote
-        )
-    );
-    echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg], JSON_UNESCAPED_UNICODE);
-} catch (InvalidArgumentException $e) {
-    // 하한 미달 등 입력 문제 — 500이 아니라 사용자에게 그대로 보여줄 메시지다.
-    $err($e->getMessage(), 422);
-} catch (Throwable $e) {
-    $err('저장 실패: ' . $e->getMessage(), 500);
-}
+// 대행수수료 요율 저장(action=save)은 2026-09-07 폐지 — 정산수수료와 통합됐다.
+// 이 화면에 남은 저장 액션은 save_min · save_rates · save_prededuct 셋뿐이다.
+$err('action=save_min, save_rates, save_prededuct 중 하나여야 합니다. (대행수수료 요율은 폐지되고 정산수수료로 통합됐습니다)', 400);

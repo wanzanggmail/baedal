@@ -9,7 +9,8 @@ $level        = admin_org_level();
 $isAgencySelf = $level === Org::LEVEL_AGENCY;
 $isHq         = $level === Org::LEVEL_ADMIN;
 $cfgOrgId     = $isAgencySelf ? admin_org_id() : null;
-$config       = AgencyFeeConfig::get($cfgOrgId);
+// 대행수수료 요율(get())은 2026-09-07 폐지 — 이 화면에 남은 값은 선차감뿐이다.
+$config       = ['prededuct_fee' => AgencyFeeConfig::prededuct($cfgOrgId)];
 $apiUrl       = ADMIN_BASE . '/api/agency_fee_config.php';
 $needsMigrate = !AgencyFeeConfig::tableReady();
 // 🆕 본사가 정한 구간별 최저 건당 금액. 대리점은 이 아래로 저장할 수 없다(API에서도 거부).
@@ -18,11 +19,17 @@ $minimum      = AgencyFeeConfig::minimums();
 $belowMin     = $isHq && $minReady ? AgencyFeeConfig::agenciesBelowMinimum() : [];
 $rates        = AgencyFeeConfig::rates();   // 공제 요율(원천세·고용·산재) — 본사 전용 전역값
 // 전역 기본값이 하한보다 낮으면 **전용 설정이 없는 대리점이 하한을 우회**한다 → 화면에서 바로 보이게.
-$globalCfg      = $isHq ? $config : AgencyFeeConfig::get(null);
-$globalBelowMin = $isHq && $minReady && (
-    ($minimum['fee_per_tx_short'] > 0 && $globalCfg['fee_per_tx_short'] < $minimum['fee_per_tx_short'])
-    || ($minimum['fee_per_tx_long'] > 0 && $globalCfg['fee_per_tx_long'] < $minimum['fee_per_tx_long'])
-);
+// 전역 기본값이 하한보다 낮은지 — 대상이 「정산수수료 배분의 본사 몫」으로 바뀌었다(2026-09-07).
+$globalBelowMin = false;
+if ($isHq && $minReady && db_table_exists('withdrawal_config')) {
+    $gw = db_row('SELECT * FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+    if ($gw !== null) {
+        $gS = (int) ($gw['hq_fee_short'] ?? 0) + (int) ($gw['tax_fee_short'] ?? 0) + (int) ($gw['dev_fee_short'] ?? 0);
+        $gL = (int) ($gw['hq_fee_long'] ?? 0) + (int) ($gw['tax_fee_long'] ?? 0) + (int) ($gw['dev_fee_long'] ?? 0);
+        $globalBelowMin = ($minimum['fee_per_tx_short'] > 0 && $gS < $minimum['fee_per_tx_short'])
+            || ($minimum['fee_per_tx_long'] > 0 && $gL < $minimum['fee_per_tx_long']);
+    }
+}
 // 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
 $canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
 // 대리점 선차감(2026-09-06 갑) — **대리점이 자기 금액을 직접 정한다**(갑 지시:
@@ -76,29 +83,19 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 	<div class="row g-6">
 		<div class="col-xl-7">
 			<div class="card card-flush">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">수수료 정책</h3></div>
+				<div class="card-header pt-5"><h3 class="card-title fw-bold">대리점 선차감</h3></div>
 				<div class="card-body pt-0">
 					<form id="agency_fee_form" class="fs-7">
-						<div class="mb-6">
-							<label class="form-label required" for="cfg_threshold">적립 일수 기준</label>
-							<input type="number" class="form-control form-control-solid" id="cfg_threshold" min="1" max="365"
-								value="<?= (int) $config['fee_day_threshold'] ?>" <?= $canWrite ? '' : 'readonly' ?> required />
-							<div class="form-text">이 값 <strong>미만</strong>이면 짧은 구간, <strong>이상</strong>이면 긴 구간 건당 수수료</div>
+						<?php // ⛔ 대행수수료 요율(적립일수·건당 수수료)은 2026-09-07 폐지 — 정산수수료와 통합.
+						      //    같은 수수료를 두 곳에서 설정하던 것을 하나로 합쳤다. ?>
+						<div class="alert bg-light-warning fs-8 p-4 mb-6">
+							<span class="fw-bold">대행수수료는 정산수수료와 합쳐졌습니다.</span>
+							같은 수수료를 두 이름으로 따로 설정하던 것을 하나로 정리했습니다(2026-09-07).
+							건당 단가·적립일수 기준은 <a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>
+							의 <strong>정산수수료</strong>에서 정합니다 — 주정산 라이더는 출금 신청 시, 일정산 라이더는 일일이체 시
+							<strong>주문 건수 × 단가</strong>로 한 번만 부과됩니다.
 						</div>
-						<div class="row g-4 mb-6">
-							<div class="col-md-6">
-								<label class="form-label required" for="cfg_fee_short">건당 수수료 — 기준 미만 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_short" min="<?= (int) $minimum['fee_per_tx_short'] ?>"
-									value="<?= (int) $config['fee_per_tx_short'] ?>" <?= $canWrite ? '' : 'readonly' ?> required />
-									<?php if ($minimum['fee_per_tx_short'] > 0) : ?><div class="form-text">본사 최저 <strong><?= number_format($minimum['fee_per_tx_short']) ?>원</strong> — 이 아래로는 저장되지 않습니다.</div><?php endif; ?>
-							</div>
-							<div class="col-md-6">
-								<label class="form-label required" for="cfg_fee_long">건당 수수료 — 기준 이상 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_long" min="<?= (int) $minimum['fee_per_tx_long'] ?>"
-									value="<?= (int) $config['fee_per_tx_long'] ?>" <?= $canWrite ? '' : 'readonly' ?> required />
-									<?php if ($minimum['fee_per_tx_long'] > 0) : ?><div class="form-text">본사 최저 <strong><?= number_format($minimum['fee_per_tx_long']) ?>원</strong> — 이 아래로는 저장되지 않습니다.</div><?php endif; ?>
-							</div>
-						</div>
+
 						<?php // ── 대리점 선차감 수수료 (2026-09-06 갑) ── ?>
 						<?php if ($predeductReady) : ?>
 						<div class="separator separator-dashed my-6"></div>
@@ -135,11 +132,12 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 		</div>
 		<div class="col-xl-5">
 			<div class="card card-flush h-100">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">적용 예시</h3></div>
+				<div class="card-header pt-5"><h3 class="card-title fw-bold">이 화면에서 정하는 것</h3></div>
 				<div class="card-body pt-0 fs-7 text-gray-700">
-					<p class="mb-3">적립 5일 → 대행 수수료 <strong><?= (int) $config['fee_per_tx_short'] ?>원</strong> (기준 <?= (int) $config['fee_day_threshold'] ?>일 미만)</p>
-					<p class="mb-3">적립 <?= (int) $config['fee_day_threshold'] ?>일 이상 → 대행 수수료 <strong><?= (int) $config['fee_per_tx_long'] ?>원</strong></p>
-					<p class="mb-0 text-muted">정산 반영 시점의 적립 일수로 판단하며, 반영 후 적립 일수는 +1 됩니다.</p>
+					<p class="mb-2"><strong>대리점 선차감</strong> — 배달 건당, 대리점 몫. 라이더에게는 보이지 않습니다.</p>
+					<p class="mb-2"><strong>공제 요율</strong> — 원천세·고용보험·산재보험(법정요율, 본사 전용).</p>
+					<p class="mb-3"><strong>최저 금액</strong> — 정산수수료 배분에서 <strong>본사 몫(본사+세무대리+개발사)</strong>의 하한.</p>
+					<p class="mb-0 text-muted">건당 단가는 「수수료 설정(관리)」의 정산수수료에서 정합니다.</p>
 				</div>
 			</div>
 		</div>
@@ -177,7 +175,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 					<?php if ($globalBelowMin) : ?>
 					<div class="alert bg-light-danger fs-8 p-4 mb-4">
 						<span class="fw-bold">전역 기본값(<?= number_format((int) $globalCfg['fee_per_tx_short']) ?>원 / <?= number_format((int) $globalCfg['fee_per_tx_long']) ?>원)이 최저보다 낮습니다.</span>
-						전용 설정이 없는 대리점은 이 기본값을 쓰므로 <strong>최저가 사실상 적용되지 않습니다</strong>. 위 「수수료 정책」에서 기본값을 최저 이상으로 올리세요.
+						전용 설정이 없는 대리점은 이 기본값을 쓰므로 <strong>최저가 사실상 적용되지 않습니다</strong>. 「수수료 설정(관리)」의 정산수수료 배분에서 전역 기본값을 최저 이상으로 올리세요.
 					</div>
 					<?php endif; ?>
 					<?php if ($belowMin !== []) : ?>
@@ -276,8 +274,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 					min_fee_per_tx_long: parseInt(document.getElementById('cfg_min_long').value, 10) || 0,
 				}, '최저금액이 저장되었습니다.').then(function (res) {
 					if (!res || !res.minimum) return;
-					document.getElementById('cfg_fee_short').min = res.minimum.fee_per_tx_short;
-					document.getElementById('cfg_fee_long').min = res.minimum.fee_per_tx_long;
+					/* 건당 수수료 입력은 이 화면에서 폐지됐다(2026-09-07) — min 갱신 대상 없음. */
 				});
 			});
 		}
@@ -293,11 +290,12 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			});
 		}
 		document.getElementById('cfg_save_btn').addEventListener('click', function () {
+			/* 대행수수료 요율은 폐지됐다(2026-09-07). 선차감만 전용 액션으로 저장한다. */
+			var pdEl = document.getElementById('cfg_prededuct');
+			if (!pdEl || pdEl.readOnly) { showToast('변경할 수 있는 값이 없습니다.', false); return; }
 			var payload = {
-				action: 'save',
-				fee_day_threshold: parseInt(document.getElementById('cfg_threshold').value, 10) || 7,
-				fee_per_tx_short: parseInt(document.getElementById('cfg_fee_short').value, 10) || 0,
-				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
+				action: 'save_prededuct',
+				prededuct_fee: parseInt(pdEl.value, 10) || 0,
 			};
 			/* 선차감은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을
 			   지키게 한다(키가 오면 0으로 덮여 선차감이 조용히 꺼진다). */

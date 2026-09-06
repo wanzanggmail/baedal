@@ -97,6 +97,7 @@ final class MigrateRunner
         self::migrateTransferBankCodes();
         self::migrateOrgFeeGlobalRow();
         self::migrateAgencyPredeductFee();
+        self::migrateDropAgencyFeeRates();
 
         echo "\n완료.\n";
     }
@@ -144,12 +145,12 @@ final class MigrateRunner
 
         $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
         $adds = [
-            'agency_fee_day_threshold' => "ADD COLUMN agency_fee_day_threshold SMALLINT UNSIGNED NOT NULL DEFAULT 7 COMMENT '적립 일수 기준' AFTER agency_fee_pct",
-            'agency_fee_short'         => "ADD COLUMN agency_fee_short INT NOT NULL DEFAULT 80 COMMENT '기준 미만 건당(원)' AFTER agency_fee_day_threshold",
-            'agency_fee_long'          => "ADD COLUMN agency_fee_long INT NOT NULL DEFAULT 40 COMMENT '기준 이상 건당(원)' AFTER agency_fee_short",
+            // ⛔ agency_fee_day_threshold·agency_fee_short·agency_fee_long 은 2026-09-07 폐지
+            //    (정산수수료와 통합) — 여기서 다시 만들지 않는다. migrateDropAgencyFeeRates() 참고.
             // 🆕 2026-08-15 본사가 정하는 하한. **전역 행(org_id NULL)의 값만 의미가 있다** —
             // 대리점 행에도 컬럼은 생기지만 읽지 않는다(대리점이 자기 하한을 정하면 하한이 아니므로).
-            'agency_fee_min_short'     => "ADD COLUMN agency_fee_min_short INT NOT NULL DEFAULT 0 COMMENT '본사 지정 최저 — 기준 미만 건당(원)' AFTER agency_fee_long",
+            // 2026-09-07 부터 이 하한은 **정산수수료 배분의 본사 몫(본사+세무대리+개발사)** 에 걸린다.
+            'agency_fee_min_short'     => "ADD COLUMN agency_fee_min_short INT NOT NULL DEFAULT 0 COMMENT '본사 지정 최저 — 기준 미만 건당(원)' AFTER agency_fee_pct",
             'agency_fee_min_long'      => "ADD COLUMN agency_fee_min_long INT NOT NULL DEFAULT 0 COMMENT '본사 지정 최저 — 기준 이상 건당(원)' AFTER agency_fee_min_short",
         ];
 
@@ -3657,5 +3658,47 @@ final class MigrateRunner
                 AFTER agency_fee_min_long"
         );
         echo "OK    agency_prededuct_fee 추가(기본 0 = 사용 안 함)\n";
+    }
+
+    /**
+     * 대행수수료 요율 컬럼 폐지 — 정산수수료와 통합 (2026-09-07 갑).
+     *
+     * 갑: "정산수수료랑 대행 수수료랑 같은건데 지금 혼재되어 사용된거 같아" · "합치는게 맞아"
+     *
+     * 2026-08-12 부터 일일정산에도 정산수수료(주문 건수 × 단가)를 부과하면서 대행수수료와
+     * 하는 일이 겹쳤는데, 대행수수료를 걷어내지 않아 **같은 정산분에 두 번** 붙고 있었다.
+     * 이제 `withdrawal_config` 의 정산수수료 하나만 쓴다.
+     *
+     * 남기는 것: `agency_fee_min_short/long`(정산수수료 **본사 몫 하한**으로 계속 쓴다)
+     *            공제 요율(원천세·고용·산재) · `agency_prededuct_fee`(대리점 선차감)
+     * 지우는 것: `agency_fee_day_threshold` · `agency_fee_short` · `agency_fee_long`
+     *
+     * 이미 부과된 `settlement_fee_items.agency_fee` 행은 **그대로 둔다**(소급 안 함, 갑 확정).
+     */
+    private static function migrateDropAgencyFeeRates(): void
+    {
+        echo "== 대행수수료 요율 폐지(정산수수료와 통합) ==\n";
+
+        if (!db_table_exists('deduction_global_config')) {
+            echo "SKIP  deduction_global_config 없음\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
+        $drop = [];
+        foreach (['agency_fee_day_threshold', 'agency_fee_short', 'agency_fee_long'] as $c) {
+            if (in_array($c, $cols, true)) {
+                $drop[] = 'DROP COLUMN ' . $c;
+            }
+        }
+        if ($drop === []) {
+            echo "SKIP  이미 폐지됨\n";
+
+            return;
+        }
+
+        db_execute('ALTER TABLE deduction_global_config ' . implode(', ', $drop));
+        echo 'OK    컬럼 ' . count($drop) . "개 제거(agency_fee_day_threshold·short·long)\n";
     }
 }
