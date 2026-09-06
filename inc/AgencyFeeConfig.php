@@ -16,11 +16,8 @@ final class AgencyFeeConfig
     public static function defaults(): array
     {
         return [
-            'fee_day_threshold' => 7,
-            'fee_per_tx_short'  => 80,
-            'fee_per_tx_long'   => 40,
-            // 대리점 선차감 수수료 — 배달 건당 정액, 대리점 귀속(2026-09-06 갑). 0 = 사용 안 함.
-            'prededuct_fee'     => 0,
+            // 대행수수료 요율은 2026-09-07 폐지(정산수수료와 통합). 남은 건 선차감뿐이다.
+            'prededuct_fee' => 0,
         ];
     }
 
@@ -64,9 +61,9 @@ final class AgencyFeeConfig
 
         $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_global_config'), 'Field');
 
-        return in_array('agency_fee_day_threshold', $cols, true)
-            && in_array('agency_fee_short', $cols, true)
-            && in_array('agency_fee_long', $cols, true);
+        // 2026-09-07: 대행수수료 요율 컬럼(agency_fee_short/long/day_threshold)은 **폐지**됐다.
+        // 이 화면이 지금 다루는 건 공제 요율·최저 금액·선차감이므로 그 기준으로 본다.
+        return in_array('withholding_tax_pct', $cols, true);
     }
 
     /** 최저금액 컬럼이 이미 마이그레이션됐는지 — 없으면 하한 0으로 동작(기존 동작 유지). */
@@ -132,15 +129,25 @@ final class AgencyFeeConfig
             [$minShort, $minLong, (int) $exists['id']]
         );
 
-        $min    = self::minimums();
-        $global = self::get(null);
+        $min = self::minimums();
+
+        // 전역 기본값이 하한보다 낮으면 전용 설정이 없는 대리점이 하한을 우회한다 → 같이 알린다.
+        // 2026-09-07: 하한 대상이 **정산수수료 본사 몫**(본사+세무대리+개발사)으로 바뀌었다.
+        $globalBelow = false;
+        if (db_table_exists('withdrawal_config')) {
+            $g = db_row('SELECT * FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+            if ($g !== null) {
+                $gShort = (int) ($g['hq_fee_short'] ?? 0) + (int) ($g['tax_fee_short'] ?? 0) + (int) ($g['dev_fee_short'] ?? 0);
+                $gLong  = (int) ($g['hq_fee_long'] ?? 0) + (int) ($g['tax_fee_long'] ?? 0) + (int) ($g['dev_fee_long'] ?? 0);
+                $globalBelow = ($min['fee_per_tx_short'] > 0 && $gShort < $min['fee_per_tx_short'])
+                    || ($min['fee_per_tx_long'] > 0 && $gLong < $min['fee_per_tx_long']);
+            }
+        }
 
         return [
-            'min'   => $min,
-            'below' => self::agenciesBelowMinimum(),
-            // 전역 기본값이 하한보다 낮으면 전용 설정이 없는 대리점이 하한을 우회한다 → 같이 알린다.
-            'global_below' => ($min['fee_per_tx_short'] > 0 && $global['fee_per_tx_short'] < $min['fee_per_tx_short'])
-                || ($min['fee_per_tx_long'] > 0 && $global['fee_per_tx_long'] < $min['fee_per_tx_long']),
+            'min'          => $min,
+            'below'        => self::agenciesBelowMinimum(),
+            'global_below' => $globalBelow,
         ];
     }
 
@@ -236,12 +243,29 @@ final class AgencyFeeConfig
             return [];
         }
 
+        // 2026-09-07: 최저 금액이 걸리는 대상이 **정산수수료(withdrawal_config)** 로 바뀌었다.
+        // 대행수수료가 폐지되면서 이 하한은 「정산수수료 배분의 본사 몫(본사+세무대리+개발사)」
+        // 하한으로만 쓰인다. 그래서 그 값을 가진 테이블에서 미달 대리점을 찾는다.
+        if (!db_table_exists('withdrawal_config')) {
+            return [];
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+        foreach (['hq_fee_short', 'hq_fee_long', 'tax_fee_short', 'dev_fee_short'] as $need) {
+            if (!in_array($need, $cols, true)) {
+                return [];
+            }
+        }
+
         return db_rows(
-            'SELECT c.org_id, o.name, c.agency_fee_short, c.agency_fee_long
-               FROM deduction_global_config c
-               JOIN organizations o ON o.id = c.org_id
-              WHERE c.org_id IS NOT NULL
-                AND (c.agency_fee_short < ? OR c.agency_fee_long < ?)
+            'SELECT w.org_id,
+                    o.name,
+                    (w.hq_fee_short + w.tax_fee_short + w.dev_fee_short) AS agency_fee_short,
+                    (w.hq_fee_long  + w.tax_fee_long  + w.dev_fee_long)  AS agency_fee_long
+               FROM withdrawal_config w
+               JOIN organizations o ON o.id = w.org_id
+              WHERE w.org_id IS NOT NULL
+                AND ((w.hq_fee_short + w.tax_fee_short + w.dev_fee_short) < ?
+                  OR (w.hq_fee_long  + w.tax_fee_long  + w.dev_fee_long)  < ?)
               ORDER BY o.name ASC',
             [$min['fee_per_tx_short'], $min['fee_per_tx_long']]
         );
@@ -252,112 +276,19 @@ final class AgencyFeeConfig
      *
      * @return array<string, int>
      */
-    public static function get(?int $orgId = null): array
-    {
-        if (!self::tableReady()) {
-            return self::defaults();
-        }
-
-        $row = null;
-        if ($orgId !== null && $orgId > 0) {
-            $row = db_row(
-                'SELECT agency_fee_day_threshold, agency_fee_short, agency_fee_long
-                   FROM deduction_global_config WHERE org_id = ? LIMIT 1',
-                [$orgId]
-            );
-        }
-        if ($row === null) {
-            $row = db_row(
-                'SELECT agency_fee_day_threshold, agency_fee_short, agency_fee_long
-                   FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1'
-            );
-        }
-        if ($row === null) {
-            return self::defaults();
-        }
-
-        $d = self::defaults();
-
-        return [
-            'fee_day_threshold' => max(1, (int) ($row['agency_fee_day_threshold'] ?? $d['fee_day_threshold'])),
-            'fee_per_tx_short'  => max(0, (int) ($row['agency_fee_short'] ?? $d['fee_per_tx_short'])),
-            'fee_per_tx_long'   => max(0, (int) ($row['agency_fee_long'] ?? $d['fee_per_tx_long'])),
-            'prededuct_fee'     => self::prededuct($orgId),
-        ];
-    }
-
     /**
-     * @param array<string, mixed> $data
-     * @return array<string, int>
+     * ⛔ **대행수수료(선정산수수료) 요율은 2026-09-07 폐지됐다.**
+     *
+     * 갑: "정산수수료랑 대행 수수료랑 같은건데 지금 혼재되어 사용된거 같아" · "합치는게 맞아"
+     *
+     * 2026-08-12 부터 일일정산에도 정산수수료(주문 건수 × 단가)를 부과하면서 이 수수료와
+     * 하는 일이 겹쳤고, 이쪽을 걷어내지 않아 **같은 정산분에 두 번** 붙고 있었다.
+     * 이제 정산수수료(`WithdrawalConfig`) 하나만 쓴다 — 주정산은 출금 신청 시,
+     * 일정산은 일일이체 시, 둘 다 주문 건수 × 단가.
+     *
+     * 이 클래스에 남은 것: 공제 요율(원천세·고용·산재) · 최저 금액(정산수수료 본사 몫 하한)
+     * · 대리점 선차감.
      */
-    public static function save(array $data, ?int $orgId = null, ?int $adminId = null): array
-    {
-        if (!self::tableReady()) {
-            throw new RuntimeException('deduction_global_config 컬럼이 없습니다. php migrate.php 를 실행하세요.');
-        }
-
-        $cur = self::get($orgId);
-        $cfg = [
-            'fee_day_threshold' => max(1, min(365, (int) ($data['fee_day_threshold'] ?? 7))),
-            'fee_per_tx_short'  => max(0, (int) ($data['fee_per_tx_short'] ?? 0)),
-            'fee_per_tx_long'   => max(0, (int) ($data['fee_per_tx_long'] ?? 0)),
-            // 선차감은 본사만 보내는 값 — 키가 안 오면 기존 값을 지킨다(대리점 저장으로 0이 되면 안 된다).
-            'prededuct_fee'     => array_key_exists('prededuct_fee', $data)
-                ? max(0, (int) $data['prededuct_fee'])
-                : (int) $cur['prededuct_fee'],
-        ];
-
-        // 본사가 정한 하한 검사 — 전역 기본값(본사 저장)에도 똑같이 건다.
-        // 기본값이 하한보다 낮으면 전용 설정이 없는 대리점이 하한을 우회하게 되기 때문.
-        $min = self::minimums();
-        $tooLow = [];
-        if ($min['fee_per_tx_short'] > 0 && $cfg['fee_per_tx_short'] < $min['fee_per_tx_short']) {
-            $tooLow[] = sprintf('기준 미만 구간 %d원(최저 %d원)', $cfg['fee_per_tx_short'], $min['fee_per_tx_short']);
-        }
-        if ($min['fee_per_tx_long'] > 0 && $cfg['fee_per_tx_long'] < $min['fee_per_tx_long']) {
-            $tooLow[] = sprintf('기준 이상 구간 %d원(최저 %d원)', $cfg['fee_per_tx_long'], $min['fee_per_tx_long']);
-        }
-        if ($tooLow !== []) {
-            throw new InvalidArgumentException(
-                '본사가 정한 최저 금액보다 낮게 설정할 수 없습니다 — ' . implode(' · ', $tooLow)
-            );
-        }
-
-        $hasOrg = $orgId !== null && $orgId > 0;
-        $exists = $hasOrg
-            ? db_row('SELECT id FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId])
-            : db_row('SELECT id FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
-
-        // 선차감 컬럼은 마이그레이션 전 서버에서도 저장이 깨지지 않게 있을 때만 쓴다.
-        $pd    = self::predeductReady();
-        $pdSet = $pd ? ', agency_prededuct_fee = ?' : '';
-        $pdCol = $pd ? ', agency_prededuct_fee' : '';
-        $pdVal = $pd ? ', ?' : '';
-
-        if ($exists) {
-            $args = [$cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']];
-            if ($pd) { $args[] = $cfg['prededuct_fee']; }
-            $args[] = (int) $exists['id'];
-            db_execute(
-                'UPDATE deduction_global_config
-                 SET agency_fee_day_threshold = ?, agency_fee_short = ?, agency_fee_long = ?' . $pdSet . '
-                 WHERE id = ?',
-                $args
-            );
-        } else {
-            $args = [$hasOrg ? $orgId : null, $cfg['fee_day_threshold'], $cfg['fee_per_tx_short'], $cfg['fee_per_tx_long']];
-            if ($pd) { $args[] = $cfg['prededuct_fee']; }
-            db_insert(
-                'INSERT INTO deduction_global_config
-                    (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct, agency_fee_pct,
-                     agency_fee_day_threshold, agency_fee_short, agency_fee_long' . $pdCol . ')
-                 VALUES (?, 3.30, 0.80, 0.88, 0, ?, ?, ?' . $pdVal . ')',
-                $args
-            );
-        }
-
-        return self::get($orgId);
-    }
 
     /**
      * 선차감 금액만 저장한다 — **대행수수료 값은 건드리지 않는다** (2026-09-06 갑).
@@ -394,34 +325,22 @@ final class AgencyFeeConfig
                 [$amount, (int) $exists['id']]
             );
         } else {
-            $cur   = self::get($orgId);          // 지금 적용되던 대행수수료(전역 상속분)
             $rates = self::rates();
             db_insert(
                 'INSERT INTO deduction_global_config
-                    (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct, agency_fee_pct,
-                     agency_fee_day_threshold, agency_fee_short, agency_fee_long, agency_prededuct_fee)
-                 VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)',
+                    (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct,
+                     agency_fee_pct, agency_prededuct_fee)
+                 VALUES (?, ?, ?, ?, 0, ?)',
                 [
                     $hasOrg ? $orgId : null,
                     $rates['withholding_tax_pct'],
                     $rates['employment_ins_pct'],
                     $rates['industrial_accident_ins_pct'],
-                    $cur['fee_day_threshold'],
-                    $cur['fee_per_tx_short'],
-                    $cur['fee_per_tx_long'],
                     $amount,
                 ]
             );
         }
 
         return $amount;
-    }
-    public static function feeForAccruedDays(int $accruedDays, ?int $orgId = null): int
-    {
-        $cfg = self::get($orgId);
-
-        return $accruedDays < $cfg['fee_day_threshold']
-            ? $cfg['fee_per_tx_short']
-            : $cfg['fee_per_tx_long'];
     }
 }

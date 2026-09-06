@@ -739,8 +739,6 @@ final class SettlementLedger
         //  - 라이더 부담: 라이더 net 에서 공제(fee 항목으로 추가). [기존 동작]
         //  - 대리점 부담: 라이더는 전액 정산받고 공제하지 않는다. 어느 쪽이든 이 금액은 반영 시점에
         //    대리점 지갑 → 본사로 이체된다(createCycleFromDailyRow). 그래서 금액을 함께 돌려준다.
-        $agencyFee   = 0;
-        $agencyPayer = 'rider';
         if ($riderId > 0) {
             // ── 대리점 선차감 수수료 (2026-09-06 갑) ──────────────────────────────
             // 배달 건당 정액을 **라이더 기준액에서 먼저** 뗀다. 뗀 돈은 대리점에 남는다
@@ -757,10 +755,12 @@ final class SettlementLedger
             }
             $taxBase = max(0, $base - $prededuct);
 
-            [$agencyFee, $agencyPayer] = self::agencyFeeForRider($riderId, $orgId);
-            if ($agencyFee > 0 && $agencyPayer === 'rider') {
-                $fees[] = ['fee_code' => 'agency_fee', 'label' => '선정산수수료(대행)', 'amount' => $agencyFee];
-            }
+            // ⛔ 대행수수료(선정산수수료)는 **폐지**했다 (2026-09-07 갑: "정산수수료랑 대행
+            //    수수료랑 같은건데 지금 혼재되어 사용된거 같아" · "합치는게 맞아").
+            //    2026-08-12 부터 일일정산에도 정산수수료(건수×단가)를 부과하면서 하는 일이
+            //    겹쳤는데 이쪽을 안 걷어내 **같은 정산분에 두 번** 붙고 있었다.
+            //    이제 정산수수료 하나만 남는다 — 주정산은 출금 신청 시, 일정산은 일일이체 시.
+            //    (과거에 부과된 agency_fee 행은 그대로 둔다 — 소급하지 않는다.)
             $fees = array_merge(
                 $fees,
                 self::buildFeeItems($taxBase, $riderId, (string) ($dailyRow['settlement_date'] ?? ''), $cfg, $orgId)
@@ -783,8 +783,9 @@ final class SettlementLedger
             'fees'             => $settled['fees'],
             'deferred'         => $settled['deferred'],
             'carry_applied'    => $settled['carry_applied'],
-            'agency_fee'       => $agencyFee,
-            'agency_fee_payer' => $agencyPayer,
+            // 폐지된 대행수수료 자리 — 호출부 호환을 위해 0 으로 남긴다(2026-09-07).
+            'agency_fee'       => 0,
+            'agency_fee_payer' => 'rider',
         ];
     }
 
@@ -807,29 +808,6 @@ final class SettlementLedger
         $per = AgencyFeeConfig::prededuct($orgId);
 
         return $per > 0 ? $orders * $per : 0;
-    }
-
-    /**
-     * 선정산 라이더의 대행수수료와 부담 주체를 계산한다.
-     * 선정산(is_daily_settlement=1)이 아니면 [0, 'rider']. 주정산 라이더는 대행수수료를 내지 않는다
-     * (출금 시 건당 정산수수료만 부담 — 2026-08-08 갑 확정).
-     *
-     * @return array{0:int, 1:string} [금액, 'rider'|'agency']
-     */
-    private static function agencyFeeForRider(int $riderId, ?int $orgId): array
-    {
-        if ($riderId < 1) {
-            return [0, 'rider'];
-        }
-        $rider = db_row('SELECT is_daily_settlement, agency_id FROM riders WHERE id = ? LIMIT 1', [$riderId]);
-        if ($rider === null || (int) ($rider['is_daily_settlement'] ?? 0) !== 1) {
-            return [0, 'rider'];
-        }
-        $wallet   = RiderWallet::get($riderId);
-        $amount   = (int) AgencyFeeConfig::feeForAccruedDays((int) $wallet['accrued_days'], $orgId);
-        $agencyId = ($orgId !== null && $orgId > 0) ? $orgId : (int) ($rider['agency_id'] ?? 0);
-
-        return [$amount, Org::agencyFeePayer($agencyId)];
     }
 
     /**
@@ -956,19 +934,9 @@ final class SettlementLedger
             }
         }
 
-        // 대행수수료(선정산수수료)는 **본사 귀속** — 라이더/대리점 누가 부담하든 반영 시점에
-        // 대리점 지갑 → 본사 지갑으로 이체한다(2026-09-01 갑). 라이더 부담 모드에서는 라이더 net
-        // 이 그만큼 줄어 대리점 지갑에 남은 돈을 올려보내는 것이고, 대리점 부담 모드에서는 대리점이
-        // 자기 지갑에서 부담한다(라이더 net 은 줄지 않는다).
-        $agencyFee = (int) ($composed['agency_fee'] ?? 0);
-        if ($agencyFee > 0 && $orgId !== null && $orgId > 0 && AgencyWallet::tableExists()) {
-            $hqId = Org::hqId();
-            if ($hqId > 0 && $hqId !== $orgId) {
-                $payerNote = (($composed['agency_fee_payer'] ?? 'rider') === 'agency') ? '대리점 부담' : '라이더 부담';
-                AgencyWallet::debit($orgId, $agencyFee, 'agency_fee_up', $cycleId, '대행수수료(' . $payerNote . ')', $adminId);
-                AgencyWallet::credit($hqId, $agencyFee, 'agency_fee_in', $cycleId, '대행수수료 수입 · ' . $payerNote, $adminId);
-            }
-        }
+        // ⛔ 대행수수료 본사 이체도 함께 폐지(2026-09-07) — 위 composeFeesForDailyRow 가
+        //    더는 부과하지 않으므로 올려보낼 금액 자체가 없다. 정산수수료 배분은 출금 시점의
+        //    WithdrawalFeeShare 가 담당한다(본사·총판·세무대리·개발사·대리점).
     }
 
     /**
@@ -979,8 +947,7 @@ final class SettlementLedger
     {
         $items = [];
 
-        // 원천세 대상 여부. (선정산수수료=대행수수료는 부담 주체 분기 때문에 composeFeesForDailyRow
-        // 에서 처리한다 — agencyFeeForRider() 참고.)
+        // 원천세 대상 여부. (대행수수료는 2026-09-07 폐지 — 정산수수료 하나로 합쳐졌다.)
         $rider         = db_row('SELECT withholding_tax_enabled FROM riders WHERE id = ? LIMIT 1', [$riderId]);
         $withholdRider = (int) ($rider['withholding_tax_enabled'] ?? 0) === 1;
 
