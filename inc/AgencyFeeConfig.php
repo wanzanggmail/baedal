@@ -359,6 +359,63 @@ final class AgencyFeeConfig
         return self::get($orgId);
     }
 
+    /**
+     * 선차감 금액만 저장한다 — **대행수수료 값은 건드리지 않는다** (2026-09-06 갑).
+     *
+     * 「수수료 설정(관리)」(본사가 대리점을 골라 여는 화면)에서 쓴다. 그 화면은 대행수수료
+     * 입력칸이 없어서 `save()` 를 쓰면 대행수수료가 기본값으로 덮여 **그 대리점 요율이 조용히
+     * 바뀐다.** 그래서 이 컬럼만 쓰는 경로를 따로 둔다.
+     *
+     * 대상 org 행이 없으면 만든다 — 이때 대행수수료는 **지금 그 대리점에 적용되던 값**
+     * (전역 상속분)을 그대로 복사해 동작이 바뀌지 않게 한다.
+     *
+     * @return int 저장된 금액
+     */
+    public static function savePrededuct(int $amount, ?int $orgId = null): int
+    {
+        if (!self::predeductReady()) {
+            throw new RuntimeException('선차감 컬럼이 없습니다. php migrate.php 를 실행하세요.');
+        }
+        if ($amount < 0) {
+            throw new InvalidArgumentException('선차감 수수료는 0원 이상이어야 합니다.');
+        }
+        if ($amount > 100000) {
+            throw new InvalidArgumentException('선차감 수수료가 너무 큽니다(건당 100,000원 초과).');
+        }
+
+        $hasOrg = $orgId !== null && $orgId > 0;
+        $exists = $hasOrg
+            ? db_row('SELECT id FROM deduction_global_config WHERE org_id = ? LIMIT 1', [$orgId])
+            : db_row('SELECT id FROM deduction_global_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+
+        if ($exists) {
+            db_execute(
+                'UPDATE deduction_global_config SET agency_prededuct_fee = ? WHERE id = ?',
+                [$amount, (int) $exists['id']]
+            );
+        } else {
+            $cur   = self::get($orgId);          // 지금 적용되던 대행수수료(전역 상속분)
+            $rates = self::rates();
+            db_insert(
+                'INSERT INTO deduction_global_config
+                    (org_id, withholding_tax_pct, employment_ins_pct, industrial_accident_ins_pct, agency_fee_pct,
+                     agency_fee_day_threshold, agency_fee_short, agency_fee_long, agency_prededuct_fee)
+                 VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)',
+                [
+                    $hasOrg ? $orgId : null,
+                    $rates['withholding_tax_pct'],
+                    $rates['employment_ins_pct'],
+                    $rates['industrial_accident_ins_pct'],
+                    $cur['fee_day_threshold'],
+                    $cur['fee_per_tx_short'],
+                    $cur['fee_per_tx_long'],
+                    $amount,
+                ]
+            );
+        }
+
+        return $amount;
+    }
     public static function feeForAccruedDays(int $accruedDays, ?int $orgId = null): int
     {
         $cfg = self::get($orgId);
