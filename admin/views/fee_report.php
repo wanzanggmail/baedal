@@ -32,6 +32,8 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $filterTo)) {
 $bucketOf = static function (string $code): string {
     return match ($code) {
         'agency_fee'                                              => 'agency_fee',
+        // 대리점 선차감은 성격이 달라 「기타」에 섞으면 안 된다(대리점 몫·라이더 비노출).
+        'agency_prededuct'                                        => 'prededuct',
         'withholding'                                             => 'withholding',
         'employment_ins', 'accident_ins', 'hourly_ins', 'ins_refund' => 'insurance',
         default                                                   => 'etc',
@@ -149,7 +151,8 @@ if (!$needsMigrate) {
 $rows = [];
 foreach ($agg as $rid => $a) {
     $feeSum = (int) ($a['withdraw_fee'] ?? 0) + (int) ($a['agency_fee'] ?? 0)
-        + (int) ($a['withholding'] ?? 0) + (int) ($a['insurance'] ?? 0) + (int) ($a['etc'] ?? 0);
+        + (int) ($a['withholding'] ?? 0) + (int) ($a['insurance'] ?? 0) + (int) ($a['etc'] ?? 0)
+        + (int) ($a['prededuct'] ?? 0);   // 선차감을 빼먹으면 합계에서 조용히 사라진다
     $rows[] = [
         'rider_id'     => $rid,
         'rider_code'   => (string) ($a['rider_code'] ?? ''),
@@ -160,6 +163,7 @@ foreach ($agg as $rid => $a) {
         'agency_fee'   => (int) ($a['agency_fee'] ?? 0),
         'withholding'  => (int) ($a['withholding'] ?? 0),
         'insurance'    => (int) ($a['insurance'] ?? 0),
+        'prededuct'    => (int) ($a['prededuct'] ?? 0),
         'etc'          => (int) ($a['etc'] ?? 0),
         'debt'         => (int) ($a['debt'] ?? 0),
         'fee_sum'      => $feeSum,
@@ -167,7 +171,7 @@ foreach ($agg as $rid => $a) {
 }
 usort($rows, static fn (array $a, array $b): int => ($b['fee_sum'] + $b['debt']) <=> ($a['fee_sum'] + $a['debt']));
 
-$tot = ['withdraw_fee' => 0, 'agency_fee' => 0, 'withholding' => 0, 'insurance' => 0, 'etc' => 0, 'debt' => 0, 'fee_sum' => 0];
+$tot = ['withdraw_fee' => 0, 'agency_fee' => 0, 'withholding' => 0, 'insurance' => 0, 'prededuct' => 0, 'etc' => 0, 'debt' => 0, 'fee_sum' => 0];
 foreach ($rows as $r) {
     foreach ($tot as $k => $_) {
         $tot[$k] += (int) $r[$k];
@@ -298,6 +302,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 							<th class="min-w-100px text-end">대행수수료</th>
 							<th class="min-w-90px text-end">원천세</th>
 							<th class="min-w-90px text-end">보험료</th>
+							<th class="min-w-90px text-end">선차감<span class="d-block fw-normal fs-9 text-muted">대리점 몫</span></th>
 							<th class="min-w-80px text-end">기타</th>
 							<th class="min-w-110px text-end">수수료 합계</th>
 							<th class="min-w-130px text-end">미수금 차감</th>
@@ -306,7 +311,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 					</thead>
 					<tbody>
 						<?php if ($rows === []) : ?>
-						<tr data-tp-skip><td colspan="9" class="text-center text-muted py-10">해당 기간에 발생한 수수료·차감 내역이 없습니다.</td></tr>
+						<tr data-tp-skip><td colspan="10" class="text-center text-muted py-10">해당 기간에 발생한 수수료·차감 내역이 없습니다.</td></tr>
 						<?php endif; ?>
 						<?php foreach ($rows as $r) : ?>
 						<tr>
@@ -328,6 +333,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 							<td class="text-end"><?= $r['agency_fee'] > 0 ? $fmtWon($r['agency_fee']) : '<span class="text-muted">—</span>' ?></td>
 							<td class="text-end"><?= $r['withholding'] > 0 ? $fmtWon($r['withholding']) : '<span class="text-muted">—</span>' ?></td>
 							<td class="text-end"><?= $r['insurance'] > 0 ? $fmtWon($r['insurance']) : '<span class="text-muted">—</span>' ?></td>
+							<td class="text-end"><?= $r['prededuct'] > 0 ? $fmtWon($r['prededuct']) : '<span class="text-muted">—</span>' ?></td>
 							<td class="text-end"><?= $r['etc'] > 0 ? $fmtWon($r['etc']) : '<span class="text-muted">—</span>' ?></td>
 							<td class="text-end fw-bold text-gray-900"><?= $fmtWon($r['fee_sum']) ?></td>
 							<td class="text-end"><?= $r['debt'] > 0 ? '<span class="text-warning fw-semibold">' . $fmtWon($r['debt']) . '</span>' : '<span class="text-muted">—</span>' ?></td>
@@ -345,6 +351,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 							<td class="text-end"><?= $fmtWon($tot['agency_fee']) ?></td>
 							<td class="text-end"><?= $fmtWon($tot['withholding']) ?></td>
 							<td class="text-end"><?= $fmtWon($tot['insurance']) ?></td>
+							<td class="text-end"><?= $fmtWon($tot['prededuct']) ?></td>
 							<td class="text-end"><?= $fmtWon($tot['etc']) ?></td>
 							<td class="text-end text-gray-900"><?= $fmtWon($tot['fee_sum']) ?></td>
 							<td class="text-end text-warning"><?= $fmtWon($tot['debt']) ?></td>

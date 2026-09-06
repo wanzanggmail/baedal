@@ -1003,6 +1003,26 @@ final class SettlementLedger
         ];
     }
 
+    /**
+     * 원천세 **과세표준** SQL 조각 — `gross + support` 에서 대리점 선차감을 뺀다 (2026-09-06 갑).
+     *
+     * 선차감은 라이더 소득이 아니라 대리점 몫이라 과세표준에서 빠지고, 실제 원천세도 그 기준으로
+     * 계산해 저장한다(composeFeesForDailyRow). 그래서 **지급액을 보여주는 세무 화면들도 같은
+     * 기준을 써야 한다** — 안 그러면 「지급액 11,000원 · 원천세 330원」처럼 3.3%가 아닌 숫자가
+     * 신고 자료에 찍힌다.
+     *
+     * 컬럼이 없던 시절 데이터에는 이 fee_code 자체가 없어 자연히 0 이 빠진다(= 기존 값 그대로).
+     *
+     * @param string $alias settlement_rider_cycles 별칭
+     */
+    public static function taxBaseSqlExpr(string $alias = 'c'): string
+    {
+        $a = $alias !== '' ? $alias . '.' : '';
+
+        return "({$a}gross_amount + {$a}support_amount"
+            . " - COALESCE((SELECT SUM(pfi.amount) FROM settlement_fee_items pfi"
+            . " WHERE pfi.cycle_id = {$a}id AND pfi.fee_code = 'agency_prededuct'), 0))";
+    }
     private static function pctAmount(int $base, float $pct): int
     {
         if ($base <= 0 || $pct <= 0) {

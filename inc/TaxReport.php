@@ -24,6 +24,8 @@ require_once __DIR__ . '/Org.php';
  * 원천세 비대상 라이더를 넣으면 「기사정산원금 × 3.3% = 원금 원천세」가 깨져서 신고 자료로
  * 못 쓴다. 대신 세금신고 유무는 라이더별 체크박스(tax_report_enabled)로 따로 표시한다.
  */
+require_once __DIR__ . '/SettlementLedger.php';   // 과세표준 SQL 조각(선차감 제외)
+
 final class TaxReport
 {
     /**
@@ -107,7 +109,7 @@ final class TaxReport
             "SELECT r.agency_id AS aid,
                     COUNT(DISTINCT c.rider_id) AS riders,
                     COALESCE(SUM(fi.amount), 0) AS wh,
-                    COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base
+                    COALESCE(SUM(" . SettlementLedger::taxBaseSqlExpr('c') . "), 0) AS base
                FROM settlement_fee_items fi
                INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
                INNER JOIN riders r ON r.id = c.rider_id
@@ -182,7 +184,7 @@ final class TaxReport
         // 정산분 — 원천세가 붙은 사이클만
         foreach (db_rows(
             "SELECT c.rider_id AS rid,
-                    COALESCE(SUM(c.gross_amount + c.support_amount), 0) AS base,
+                    COALESCE(SUM(" . SettlementLedger::taxBaseSqlExpr('c') . "), 0) AS base,
                     COALESCE(SUM(fi.amount), 0) AS wh
                FROM settlement_fee_items fi
                INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
