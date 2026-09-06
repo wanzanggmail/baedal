@@ -136,7 +136,7 @@ $agencyOptions   = $isAgencyCreator ? [] : Organization::agencyOptions();
 	<div class="card card-flush mb-8">
 		<div class="card-body py-5">
 			<div class="row g-4 align-items-end">
-				<div class="col-md-4">
+				<div class="col-md-2">
 					<label class="form-label fw-semibold">검색</label>
 					<input type="text" class="form-control form-control-solid" name="q"
 					       placeholder="이름, 로그인ID, 전화"
