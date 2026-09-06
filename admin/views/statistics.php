@@ -61,12 +61,16 @@ $data = [
 				<li class="breadcrumb-item text-gray-900">전사 통계</li>
 			</ul>
 		</div>
-		<form class="d-flex align-items-end gap-2" method="get">
-			<input type="hidden" name="route" value="system/statistics" />
-			<div><label class="form-label fs-8 mb-1">시작</label><input type="date" name="from" value="<?= $esc($from) ?>" class="form-control form-control-sm form-control-solid" /></div>
-			<div><label class="form-label fs-8 mb-1">종료</label><input type="date" name="to" value="<?= $esc($to) ?>" class="form-control form-control-sm form-control-solid" /></div>
-			<button class="btn btn-sm btn-primary" type="submit">조회</button>
-		</form>
+		<?php // 기간 선택은 대시보드와 같은 위젯을 쓴다(2026-09-06 갑) — 「최근 7일」·「이번 달」 같은
+		     // 프리셋이 있어 날짜를 두 번 고르지 않아도 된다. ?>
+		<div class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center gap-2 mt-4 mt-md-0">
+			<?php
+			$periodFrom = $from;
+			$periodTo   = $to;
+			$rangeRoute = 'system/statistics';
+			require INC_PATH . '/dashboard_range_picker.php';
+			?>
+		</div>
 	</div>
 </div>
 <!--end::Toolbar-->
