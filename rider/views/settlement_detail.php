@@ -114,6 +114,24 @@ $detailUrl = static function (string $d): string {
     $support  = (int) ($cycle['support_amount'] ?? 0);
     $feeTotal = (int) ($cycle['total_fee_amount'] ?? 0);
     $net      = (int) ($cycle['net_amount'] ?? 0);
+
+    // 🔒 대리점 선차감(2026-09-06 갑) — 라이더 화면에서는 공제 줄로 보여주지 않고
+    // 정산금액을 그만큼 낮춘다. 아래 $base = $net + $feeTotal 이 곧 정산금액이라,
+    // 목록에서 빼고 합계에서도 빼면 화면 전체가 낮아진 단가 기준으로 딱 떨어진다.
+    $prededucted = 0;
+    foreach ($feeItems as $f) {
+        if ((string) ($f['fee_code'] ?? '') === 'agency_prededuct') {
+            $prededucted += (int) ($f['amount'] ?? 0);
+        }
+    }
+    if ($prededucted > 0) {
+        $feeTotal -= $prededucted;
+        $gross    -= $prededucted;
+        $feeItems  = array_values(array_filter(
+            $feeItems,
+            static fn (array $f): bool => (string) ($f['fee_code'] ?? '') !== 'agency_prededuct'
+        ));
+    }
     $platform = (string) ($cycle['platform'] ?? '');
     $date     = (string) $cycle['settlement_date'];
     $orderCnt = (int) ($cycle['order_count'] ?? 0);

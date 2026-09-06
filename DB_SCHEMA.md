@@ -241,6 +241,8 @@ UNIQUE(`org_id`,`platform`,`kind`), `org_id IS NULL`=전역 기본. 복호화 �
 | `agency_fee_day_threshold`/`_short`/`_long` | 선정산수수료(대행수수료) 구간 — 대리점이 설정하되 아래 하한 이상만 |
 | `agency_fee_min_short`/`_min_long` | 🆕(2026-08-15) **본사가 정한 구간별 최저 건당 금액**. ⚠️ **전역 행(`org_id IS NULL`)의 값만 의미가 있다** — 대리점 행에도 컬럼은 생기지만 읽지 않는다(대리점이 자기 하한을 정하면 하한이 아니므로). `0`이면 하한 없음 |
 
+🆕 **(2026-09-06 갑) `agency_prededuct_fee`** — 대리점 선차감 수수료(배달 **건당 정액**, 기본 0=사용 안 함). 라이더 정산 기준액에서 먼저 떼고 그 돈은 **이체 없이 대리점에 남는다**(라이더 지갑에 net 만 적립되므로). `settlement_fee_items.fee_code = 'agency_prededuct'` 로 원장에 남아 관리자·감사에는 보이지만 **라이더 화면에는 전부 감춘다**(명세서·앱·알림톡·원천징수 내역). **원천세·고용·산재 과세표준은 선차감을 뺀 금액**(기존 `agency_fee` 는 과세표준에 포함). 설정은 「대행수수료 설정」 화면 — **대리점이 자기 행(`org_id`)을, 본사가 전역 행(`org_id IS NULL`)을** 저장한다(org 행 → 전역 → 0 폴백). `AgencyFeeConfig::prededuct()`.
+
 **최저금액 동작** — `AgencyFeeConfig::minimums()`가 전역 행에서 읽고, `save()`가 하한 미만이면 `InvalidArgumentException`으로 **거부**한다(조용히 올려주지 않음 — 대리점이 자기가 뭘 설정했는지 착각하면 안 되므로). 하한은 **전역 기본값에도 걸린다**(기본값이 하한보다 낮으면 전용 설정이 없는 대리점이 하한을 우회하기 때문). 하한을 올려도 **이미 낮게 설정된 대리점 행은 그대로 둔다**(남의 요율을 말없이 바꾸지 않음) — `agenciesBelowMinimum()`이 그 목록을 돌려주고 본사 화면에 경고로 뜬다. 저장 API는 `action:'save_min'`, **본사 전용**.
 
 ### `withdrawal_config` — 정산수수료(구 이체수수료) 정책 + 3분할 배분 설정

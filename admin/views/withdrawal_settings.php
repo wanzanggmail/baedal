@@ -49,6 +49,10 @@ $pgFee = $pgFeeReady
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 // 본사 몫 하한값은 「대행수수료 설정」의 최저 금액(구간별)을 그대로 쓴다 — 별도 필드 없음.
 $agencyMin    = AgencyFeeConfig::minimums(); // ['fee_per_tx_short'=>int, 'fee_per_tx_long'=>int]
+// 대리점 선차감(2026-09-06 갑) — 여기서도 대리점을 골라 바로 정할 수 있게 한다.
+// 값이 없는 대리점은 전역 상속분이 보인다(저장하면 그 값으로 자기 행이 생긴다).
+$predeductReady = AgencyFeeConfig::predeductReady();
+$predeductFee   = $predeductReady ? AgencyFeeConfig::prededuct($cfgOrgId) : 0;
 $agencyFeeUrl = admin_url('deduction/agency-fee');
 $listUrl = admin_url('withdrawal/list');
 $settingsBaseUrl = admin_url('withdrawal/settings');
@@ -175,6 +179,22 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 								value="<?= (int) $config['transfer_fee'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
 							<div class="form-text fs-9">펌뱅킹 이체(일일이체·출금신청·출금대행)가 <strong>일어날 때마다</strong> 라이더에게 부과하는 정액입니다. 실지급액에서 빠져 <strong>본사로 귀속</strong>됩니다. 정산수수료를 뗀 뒤에도 지급액이 남을 때만 부과됩니다.</div>
 						</div>
+
+						<?php if ($predeductReady) : ?>
+						<div class="mb-6" style="max-width:320px">
+							<label class="form-label" for="cfg_prededuct">대리점 선차감 수수료 — 배달 건당 (원)
+								<span class="badge badge-light-<?= $targetAgency !== null ? 'primary' : 'warning' ?> fs-8 ms-1"><?= $targetAgency !== null
+									? htmlspecialchars((string) $targetAgency['name'], ENT_QUOTES, 'UTF-8') : '전역 기본값' ?></span></label>
+							<input type="number" class="form-control form-control-solid" id="cfg_prededuct" min="0" step="10"
+								value="<?= (int) $predeductFee ?>"<?= $isAgencySelf ? ' disabled' : '' ?> />
+							<div class="form-text fs-9">
+								배달 건당 이 금액을 <strong>라이더 정산 기준액에서 먼저</strong> 뗍니다. 뗀 돈은 <strong>대리점에 남습니다</strong>(별도 이체 없음).
+								<strong>라이더에게는 보이지 않습니다</strong> — 명세서·앱에는 그만큼 낮아진 정산금액만 나옵니다.
+								원천세·고용·산재도 선차감을 뺀 금액 기준입니다. <strong>0</strong>이면 사용 안 함.
+								<?php if ($targetAgency === null) : ?><br><span class="text-warning fw-semibold">전역 기본값</span> — 자기 설정이 있는 대리점에는 적용되지 않습니다.<?php endif; ?>
+							</div>
+						</div>
+						<?php endif; ?>
 
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
@@ -306,6 +326,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 	(function () {
 		var API = <?= json_encode($apiUrl, JSON_UNESCAPED_UNICODE) ?>;
 		var PG_API = <?= json_encode(ADMIN_BASE . '/api/pg_fee_config.php', JSON_UNESCAPED_UNICODE) ?>;
+		var FEE_API = <?= json_encode(ADMIN_BASE . '/api/agency_fee_config.php', JSON_UNESCAPED_UNICODE) ?>;
 		var TARGET_AGENCY_ID = <?= $targetAgency !== null ? (int) $targetAgency['id'] : 0 ?>;
 		var toast = document.getElementById('wd_cfg_toast');
 		var toastMsg = document.getElementById('wd_cfg_toast_msg');
@@ -401,6 +422,26 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			});
 		}
 
+		/* 선차감은 저장 엔드포인트가 다르다(deduction_global_config). 대행수수료 값을 덮지 않도록
+		   전용 액션(save_prededuct)을 쓴다 — 이 화면엔 대행수수료 입력칸이 없어서 save 를 쓰면
+		   그 대리점 요율이 조용히 기본값으로 바뀐다. */
+		function savePrededuct() {
+			var el = document.getElementById('cfg_prededuct');
+			if (!el || el.disabled) { return Promise.resolve(); }
+			return fetch(FEE_API, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify({
+					action: 'save_prededuct',
+					agency_id: TARGET_AGENCY_ID,
+					prededuct_fee: parseInt(el.value, 10) || 0
+				})
+			}).then(function (r) { return r.json(); }).then(function (res) {
+				if (!res.ok) { throw new Error(res.message || '선차감 저장 실패'); }
+			});
+		}
+
 		var saveBtn = document.getElementById('cfg_save_btn');
 		if (!saveBtn) return; // 조회 전용(총판)이면 저장 버튼이 아예 없다.
 		saveBtn.addEventListener('click', function () {
@@ -456,7 +497,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '저장 실패');
-					return savePlatformFee().then(function () {
+					return savePlatformFee().then(savePrededuct).then(function () {
 						showToast(res.message || '저장되었습니다.', true);
 					});
 				})

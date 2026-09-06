@@ -143,21 +143,85 @@ if ($action === 'save_rates') {
     exit;
 }
 
+// 선차감만 저장 — 「수수료 설정(관리)」(본사가 대리점을 골라 여는 화면)에서 온다.
+// 대행수수료 입력칸이 없는 화면이라 save 를 쓰면 그 대리점 요율이 조용히 덮인다(savePrededuct 주석 참고).
+// 본사는 `agency_id` 로 대상 대리점을 지정할 수 있고, 대리점은 자기 것만 저장한다.
+if ($action === 'save_prededuct') {
+    $targetOrgId = $cfgOrgId;
+    if ($isHq && array_key_exists('agency_id', $body)) {
+        $wanted = (int) $body['agency_id'];
+        if ($wanted > 0) {
+            $org = db_row('SELECT id, name, level FROM organizations WHERE id = ? LIMIT 1', [$wanted]);
+            if ($org === null || (string) $org['level'] !== Org::LEVEL_AGENCY) {
+                $err('대리점을 찾을 수 없습니다.', 404);
+            }
+            $targetOrgId = (int) $org['id'];
+        } else {
+            $targetOrgId = null; // 0 = 전역 기본값
+        }
+    }
+
+    try {
+        $before = AgencyFeeConfig::prededuct($targetOrgId);
+        $after  = AgencyFeeConfig::savePrededuct((int) ($body['prededuct_fee'] ?? 0), $targetOrgId);
+
+        $scope = '전역 기본값';
+        if ($targetOrgId !== null && $targetOrgId > 0) {
+            $o     = db_row('SELECT name FROM organizations WHERE id = ? LIMIT 1', [$targetOrgId]);
+            $scope = (string) ($o['name'] ?? ('조직#' . $targetOrgId));
+        }
+        // 라이더 실수령을 줄이는 값이라 금액 변화를 그대로 남긴다(분쟁 대비).
+        AuditLog::record(
+            'deduction.prededuct.save',
+            'deduction_global_config',
+            $before === $after
+                ? sprintf('[%s] 선차감 %d원(변경 없음)', $scope, $after)
+                : sprintf('[%s] 선차감 %d원 → %d원', $scope, $before, $after)
+        );
+        echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'prededuct_fee' => $after], JSON_UNESCAPED_UNICODE);
+    } catch (InvalidArgumentException $e) {
+        $err($e->getMessage(), 422);
+    } catch (Throwable $e) {
+        $err('저장 실패: ' . $e->getMessage(), 500);
+    }
+    exit;
+}
 if ($action !== 'save') {
     $err('action=save 또는 save_min, save_rates', 400);
 }
 
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
+
+    // 선차감은 **라이더 실수령을 직접 줄이는** 값인데 라이더에게는 보이지 않는다.
+    // 나중에 분쟁이 나면 "누가 언제 얼마로 바꿨나"가 그대로 쟁점이 되므로,
+    // 저장 사실만이 아니라 **금액 변화(이전 → 이후)와 대상 조직**까지 남긴다.
+    // 저장 전 값을 먼저 읽는다(대리점 행이 없으면 전역값 — 실제로 적용되던 금액).
+    $predeductBefore = AgencyFeeConfig::prededuct($cfgOrgId);
+
     $cfg = AgencyFeeConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
+
+    $scopeLabel = '전역 기본값';
+    if ($cfgOrgId !== null && $cfgOrgId > 0) {
+        $orgRow     = db_row('SELECT name FROM organizations WHERE id = ? LIMIT 1', [$cfgOrgId]);
+        $scopeLabel = (string) ($orgRow['name'] ?? ('조직#' . $cfgOrgId));
+    }
+
+    $predeductAfter = (int) ($cfg['prededuct_fee'] ?? 0);
+    $predeductNote  = $predeductBefore === $predeductAfter
+        ? sprintf(' · 선차감 %d원(변경 없음)', $predeductAfter)
+        : sprintf(' · 선차감 %d원 → %d원', $predeductBefore, $predeductAfter);
+
     AuditLog::record(
         'deduction.agency_fee.save',
         'deduction_global_config',
         sprintf(
-            '%d일 미만 %d원 / 이상 %d원(건당)',
+            '[%s] %d일 미만 %d원 / 이상 %d원(건당)%s',
+            $scopeLabel,
             $cfg['fee_day_threshold'],
             $cfg['fee_per_tx_short'],
-            $cfg['fee_per_tx_long']
+            $cfg['fee_per_tx_long'],
+            $predeductNote
         )
     );
     echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg], JSON_UNESCAPED_UNICODE);
