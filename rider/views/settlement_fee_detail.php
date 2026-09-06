@@ -21,6 +21,25 @@ if ($cycle === null) {
 }
 
 $fees = $cycle['fees'] ?? [];
+
+// 🔒 대리점 선차감(2026-09-06 갑) — 라이더에게는 보이지 않는 대리점 몫이다.
+// 공제 줄에서 빼고 정산금액·수수료 합계를 그만큼 낮춰, 라이더 눈에는 처음부터
+// 그만큼 낮은 단가였던 것처럼 보이게 한다. 지갑 적립(net)은 그대로라
+// 「정산금액 − 수수료 합계 = 지갑 적립」 이 그대로 맞아떨어진다.
+$prededucted = 0;
+foreach ($fees as $f) {
+    if ((string) ($f['fee_code'] ?? '') === 'agency_prededuct') {
+        $prededucted += (int) ($f['amount'] ?? 0);
+    }
+}
+if ($prededucted > 0) {
+    $fees = array_values(array_filter(
+        $fees,
+        static fn (array $f): bool => (string) ($f['fee_code'] ?? '') !== 'agency_prededuct'
+    ));
+    $cycle['gross_amount']     = (int) $cycle['gross_amount'] - $prededucted;
+    $cycle['total_fee_amount'] = (int) $cycle['total_fee_amount'] - $prededucted;
+}
 ?>
 <div class="mb-3">
 	<a href="<?= htmlspecialchars($listUrl, ENT_QUOTES, 'UTF-8') ?>" class="fs-7 fw-semibold">← 수수료 내역</a>

@@ -265,7 +265,9 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 		</div>
 		<div class="card-body pt-2">
 			<?php foreach ($recentCycles as $c) : ?>
-			<a href="<?= $esc(rider_url('settlement/fees')) ?>" class="rider-home-cycle text-decoration-none">
+			<?php // 눌린 항목의 **그 날짜** 정산 상세로 보낸다. 예전엔 전부 목록(settlement/fees)으로
+			      // 걸려 있어 어느 줄을 눌러도 같은 화면이 떴다. ?>
+			<a href="<?= $esc(rider_url('settlement/detail') . (str_contains(rider_url('settlement/detail'), '?') ? '&' : '?') . 'date=' . urlencode((string) $c['settlement_date'])) ?>" class="rider-home-cycle text-decoration-none">
 				<div class="min-w-0">
 					<div class="rider-home-cycle-date"><?= $esc((string) $c['settlement_date']) ?></div>
 					<div class="rider-home-cycle-sub text-truncate">

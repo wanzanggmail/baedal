@@ -389,7 +389,52 @@ final class SettlementLedger
             $params
         );
 
-        return array_map([self::class, 'mapCycleRow'], $rows);
+        $out = array_map([self::class, 'mapCycleRow'], $rows);
+
+        // 🔒 대리점 선차감(2026-09-06 갑) — **이 메서드는 라이더 앱 전용**이라 여기서 빼준다.
+        // 라이더에게는 안 보이는 대리점 몫이므로 공제 합계·정산금액에서 제외한다(순액은 그대로).
+        return self::stripPrededuct($out);
+    }
+
+    /**
+     * 라이더에게 보여줄 사이클 배열에서 선차감을 걷어낸다.
+     *
+     * `total_fee_amount` 와 `gross_amount` 를 함께 낮춰 「정산금액 − 공제 = 실지급」 이
+     * 그대로 성립하게 한다(순액 net_amount 는 손대지 않는다).
+     *
+     * @param list<array<string, mixed>> $cycles
+     * @return list<array<string, mixed>>
+     */
+    private static function stripPrededuct(array $cycles): array
+    {
+        if ($cycles === [] || !db_table_exists('settlement_fee_items')) {
+            return $cycles;
+        }
+        $ids = array_values(array_filter(array_map(static fn ($c): int => (int) ($c['id'] ?? 0), $cycles)));
+        if ($ids === []) {
+            return $cycles;
+        }
+        $ph  = implode(',', array_fill(0, count($ids), '?'));
+        $pre = [];
+        foreach (db_rows(
+            "SELECT cycle_id, COALESCE(SUM(amount),0) v FROM settlement_fee_items
+              WHERE cycle_id IN ({$ph}) AND fee_code = 'agency_prededuct' GROUP BY cycle_id",
+            $ids
+        ) as $r) {
+            $pre[(int) $r['cycle_id']] = (int) $r['v'];
+        }
+        if ($pre === []) {
+            return $cycles;
+        }
+        foreach ($cycles as $i => $c) {
+            $p = $pre[(int) ($c['id'] ?? 0)] ?? 0;
+            if ($p > 0) {
+                $cycles[$i]['gross_amount']     = max(0, (int) ($c['gross_amount'] ?? 0) - $p);
+                $cycles[$i]['total_fee_amount'] = max(0, (int) ($c['total_fee_amount'] ?? 0) - $p);
+            }
+        }
+
+        return $cycles;
     }
 
     /**
@@ -425,13 +470,23 @@ final class SettlementLedger
             return $empty;
         }
 
+        // 🔒 대리점 선차감은 라이더에게 안 보이는 대리점 몫이라 공제·정산금액에서 뺀다
+        // (2026-09-06 갑). 이 메서드는 **라이더 앱 전용**이다. 순액(net)은 그대로 둔다.
+        $pre = (int) (db_row(
+            "SELECT COALESCE(SUM(fi.amount), 0) v
+               FROM settlement_fee_items fi
+               INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+              WHERE {$where} AND fi.fee_code = 'agency_prededuct'",
+            $params
+        )['v'] ?? 0);
+
         return [
             'count'   => (int) $row['cnt'],
             'orders'  => (int) $row['orders'],
-            'gross'   => (int) $row['gross'],
+            'gross'   => max(0, (int) $row['gross'] - $pre),
             'support' => (int) $row['support'],
             'payout'  => (int) $row['payout'],
-            'fee'     => (int) $row['fee'],
+            'fee'     => max(0, (int) $row['fee'] - $pre),
             'net'     => (int) $row['net'],
         ];
     }
@@ -468,6 +523,9 @@ final class SettlementLedger
                FROM settlement_fee_items fi
                INNER JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
               WHERE {$where}
+                -- 🔒 대리점 선차감은 라이더에게 안 보이는 대리점 몫이라 공제 목록에서 뺀다
+                --    (2026-09-06 갑). 이 메서드는 라이더 앱 전용이다.
+                AND fi.fee_code <> 'agency_prededuct'
               GROUP BY fi.fee_code
               ORDER BY amount DESC",
             $params
