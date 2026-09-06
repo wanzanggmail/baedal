@@ -95,6 +95,7 @@ final class MigrateRunner
         self::migrateTaxFeeShare();
         self::migrateDeveloperOrg();
         self::migrateTransferBankCodes();
+        self::migrateOrgFeeGlobalRow();
 
         echo "\n완료.\n";
     }
@@ -3565,5 +3566,56 @@ final class MigrateRunner
 
         echo $addT > 0 ? "OK    transfer_bank {$addT}건 추가\n" : "SKIP  transfer_bank (모두 있음)\n";
         echo $addB > 0 ? "OK    bank {$addB}건 추가(증권사·저축은행 계좌 등록 가능)\n" : "SKIP  bank (모두 있음)\n";
+    }
+
+    /**
+     * 플랫폼 수수료에 **전역 기본값** 자리를 만든다 (2026-09-06 갑).
+     *
+     * 갑: "플랫폼 수수료 전역설정하는 화면이 없네.
+     *      수수료 설정(관리) 화면에서 전역 기본값이 이 내용이 안나와"
+     *
+     * `org_fee_config` 는 `org_id` 가 **PRIMARY KEY** 라 NULL 을 넣을 수 없었다.
+     * 그래서 전역 행 자체가 만들어질 수 없었고, 대리점 행이 없으면 코드에 박힌 1.00%
+     * 로 떨어졌다 — 화면에서 바꿀 방법이 없는 값이었다.
+     *
+     * 이미 같은 문제를 겪은 `withdrawal_config` 와 **같은 모양**으로 맞춘다:
+     *   대리키 id 를 PK 로, org_id 는 NULL 허용 + UNIQUE(전역 행은 org_id IS NULL).
+     */
+    private static function migrateOrgFeeGlobalRow(): void
+    {
+        echo "== 플랫폼 수수료 전역 기본값 ==\n";
+
+        if (!db_table_exists('org_fee_config')) {
+            echo "SKIP  org_fee_config 없음\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM org_fee_config'), 'Field');
+        if (!in_array('id', $cols, true)) {
+            // PK 교체 — AUTO_INCREMENT 컬럼은 키가 있어야 하므로 한 문장에서 함께 처리한다.
+            db_execute(
+                'ALTER TABLE org_fee_config
+                    DROP PRIMARY KEY,
+                    ADD COLUMN id INT UNSIGNED NOT NULL AUTO_INCREMENT FIRST,
+                    ADD PRIMARY KEY (id),
+                    MODIFY COLUMN org_id INT UNSIGNED NULL COMMENT \'대상 조직. NULL = 전역 기본값\',
+                    ADD UNIQUE KEY uq_ofc_org (org_id)'
+            );
+            echo "OK    org_fee_config PK 교체(id) · org_id NULL 허용\n";
+        } else {
+            echo "SKIP  org_fee_config 구조 (이미 전환됨)\n";
+        }
+
+        // 전역 행 — 없으면 만든다. 값은 기존 코드 기본값(1%)과 같게 둬서 동작이 바뀌지 않게.
+        if (db_row('SELECT id FROM org_fee_config WHERE org_id IS NULL LIMIT 1') === null) {
+            db_insert(
+                'INSERT INTO org_fee_config (org_id, pg_service_fee_pct, hq_pct, distributor_pct, agency_pct)
+                 VALUES (NULL, 1.00, 1.00, 1.00, 1.00)'
+            );
+            echo "OK    전역 기본값 행 생성(본사·총판·대리점 각 1.00%)\n";
+        } else {
+            echo "SKIP  전역 기본값 행 (이미 있음)\n";
+        }
     }
 }

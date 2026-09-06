@@ -41,7 +41,11 @@ $firmIsMock = FirmBankingGatewayFactory::isMock();
 // 「수수료 설정」은 전 대리점 비교용 읽기 전용으로 돌렸다.
 require_once INC_PATH . '/PgFeeConfig.php';
 $pgFeeReady = PgFeeConfig::tableExists();
-$pgFee      = ($pgFeeReady && $cfgOrgId !== null) ? PgFeeConfig::breakdownForAgency($cfgOrgId) : null;
+// 전역 기본값($cfgOrgId === null)일 때도 보여준다(2026-09-06 갑) — 예전엔 여기서 null 이 돼
+// 플랫폼 수수료 블록이 통째로 숨었고, 그래서 **전역 기본값을 볼 수도 고칠 수도 없었다.**
+$pgFee = $pgFeeReady
+    ? ($cfgOrgId !== null ? PgFeeConfig::breakdownForAgency($cfgOrgId) : PgFeeConfig::globalBreakdown())
+    : null;
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 // 본사 몫 하한값은 「대행수수료 설정」의 최저 금액(구간별)을 그대로 쓴다 — 별도 필드 없음.
 $agencyMin    = AgencyFeeConfig::minimums(); // ['fee_per_tx_short'=>int, 'fee_per_tx_long'=>int]
@@ -247,6 +251,10 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<div class="text-muted fs-8 mb-4">
 							라이더에게 자금을 조달(PG 카드결제)할 때 붙는 수수료를 본사·총판·대리점이 나눠 갖습니다.
 							결제 시점의 요율이 그대로 저장되므로 나중에 값을 바꿔도 과거 내역은 변하지 않습니다.
+							<?php if ($targetAgency === null) : ?>
+							<div class="mt-2 text-gray-700"><span class="fw-bold">여기는 전역 기본값입니다.</span>
+								대리점별로 따로 정하지 않은 곳에 이 값이 적용됩니다.</div>
+							<?php endif; ?>
 						</div>
 						<div class="row g-4 mb-3">
 							<div class="col-md-4">
@@ -356,7 +364,9 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 		// 묶되, 편집 가능한 상태가 아니면 아무것도 보내지 않고 즉시 성공 처리한다.
 		function savePlatformFee() {
 			var hq = document.getElementById('cfg_pf_hq');
-			if (!hq || hq.disabled || TARGET_AGENCY_ID < 1) { return Promise.resolve(); }
+			/* TARGET_AGENCY_ID 가 0 이면 전역 기본값 저장이다 — 예전엔 여기서 걸러져
+			   전역 값을 저장할 방법이 아예 없었다(2026-09-06). */
+			if (!hq || hq.disabled) { return Promise.resolve(); }
 			return fetch(PG_API, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
