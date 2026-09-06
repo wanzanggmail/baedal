@@ -238,11 +238,71 @@ $firstCat = SystemCode::CATEGORIES[0] ?? 'bank';
 					.then(function (r) { return r.json(); })
 					.then(function (res) {
 						if (!res.ok) throw new Error(res.message || '삭제 실패');
-						location.reload();
+						showToast(res.message || '삭제되었습니다.', true);
+						refreshTable(activeTabCat(), null);
 					})
 					.catch(function (e) { showToast(e.message || '삭제 실패', false); });
 			}
 		});
+
+		/**
+		 * 저장·삭제 뒤 **그 탭의 표만** 다시 그린다.
+		 *
+		 * 예전엔 location.reload() 로 페이지를 통째로 새로 고쳤다. 그러면 첫 탭
+		 * (은행 코드)으로 돌아가고 스크롤도 맨 위로 튀어서, 방금 고친 줄을 다시
+		 * 찾아가야 했다 — 코드가 60건 넘는 탭에서는 확인 자체가 일이었다.
+		 * GET ?category= 가 이미 있어서 서버는 그대로 두고 화면만 바꾼다.
+		 */
+		function esc(v) {
+			return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+			});
+		}
+
+		function rowHtml(row) {
+			var active = !!row.active;
+			return '<tr class="' + (active ? '' : 'opacity-50') + ' code-row-flash" data-id="' + Number(row.id) + '">'
+				+ '<td class="font-monospace fw-bold">' + esc(row.code) + '</td>'
+				+ '<td>' + esc(row.label) + '</td>'
+				+ '<td>' + Number(row.sort_order || 0) + '</td>'
+				+ '<td>' + (active
+					? '<span class="badge badge-light-success">사용</span>'
+					: '<span class="badge badge-light-dark">중지</span>') + '</td>'
+				+ '<td class="text-end">'
+				+ '<button type="button" class="btn btn-sm btn-light-primary btn-code-edit" data-json="'
+					+ esc(JSON.stringify(row)) + '">수정</button> '
+				+ '<button type="button" class="btn btn-sm btn-light-danger btn-code-del" data-id="'
+					+ Number(row.id) + '" data-label="' + esc(row.label) + '">삭제</button>'
+				+ '</td></tr>';
+		}
+
+		/** @param {string} cat  @param {number|null} focusId 방금 저장한 행 — 잠깐 강조한다 */
+		function refreshTable(cat, focusId) {
+			var tbody = document.querySelector('.codes_tbody[data-cat="' + cat + '"]');
+			if (!tbody) { location.reload(); return; }   // 탭을 못 찾으면 예전처럼 통째로
+
+			return fetch(API + '?category=' + encodeURIComponent(cat), { headers: { 'Accept': 'application/json' } })
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) throw new Error(res.message || '목록을 불러오지 못했습니다.');
+					var rows = res.rows || [];
+					tbody.innerHTML = rows.length
+						? rows.map(rowHtml).join('')
+						: '<tr><td colspan="5" class="text-center text-muted py-8">등록된 코드가 없습니다.</td></tr>';
+
+					if (focusId) {
+						var tr = tbody.querySelector('tr[data-id="' + Number(focusId) + '"]');
+						if (tr) {
+							tr.classList.add('bg-light-success');
+							tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+							setTimeout(function () { tr.classList.remove('bg-light-success'); }, 1600);
+						}
+					}
+				})
+				.catch(function (e) {
+					showToast(e.message || '목록 새로고침 실패 — 화면을 새로 고쳐 주세요.', false);
+				});
+		}
 
 		document.getElementById('code_save_btn').addEventListener('click', function () {
 			var id = document.getElementById('code_modal_id').value;
@@ -275,7 +335,9 @@ $firstCat = SystemCode::CATEGORIES[0] ?? 'bank';
 					var modalEl = document.getElementById('kt_code_modal');
 					var inst = bootstrap.Modal.getInstance(modalEl);
 					if (inst) inst.hide();
-					location.reload();
+					showToast(res.message || '저장되었습니다.', true);
+					/* 저장한 코드가 속한 탭을 갱신한다 — 모달에서 카테고리를 바꿨을 수도 있다. */
+					refreshTable(cat, res.row && res.row.id ? res.row.id : null);
 				})
 				.catch(function (e) { showToast(e.message || '저장 실패', false); });
 		});
