@@ -7,6 +7,7 @@ require_once __DIR__ . '/RiderWallet.php';
 require_once __DIR__ . '/WithdrawalConfig.php';
 require_once __DIR__ . '/WithdrawalCycles.php';
 require_once __DIR__ . '/WithdrawalFeeShare.php';
+require_once __DIR__ . '/Org.php';                 // 수수료 부담 주체(2026-09-08)
 
 /**
  * 일일정산(선정산) 지급 — LOGIC §5.4 2단계.
@@ -78,8 +79,12 @@ final class DailyPayout
             $fee        = min($balance, max(0, (int) $feeCalc['total']));
             // 이체 수수료(본사 귀속)도 실지급에서 빠지므로 목록에 미리 반영한다.
             $transferFee = (int) (WithdrawalConfig::get($aid)['transfer_fee'] ?? 0);
-            if ($balance - $fee - $transferFee <= 0) {
+            // 부담 주체(2026-09-08) — 대리점이 대신 내면 라이더 지급액에서 빼지 않는다.
+            $riderFee    = Org::settleFeePayer($aid) === 'agency' ? 0 : $fee;
+            $riderTrans  = Org::transferFeePayer($aid) === 'agency' ? 0 : $transferFee;
+            if ($balance - $riderFee - $riderTrans <= 0) {
                 $transferFee = 0; // 지급액이 안 남으면 이체가 일어나지 않아 수수료도 없음
+                $riderTrans  = 0;
             }
 
             return [
@@ -92,7 +97,7 @@ final class DailyPayout
                 'fee'          => $fee,
                 'transfer_fee' => $transferFee,
                 'order_count'  => $orderCount,
-                'payout'       => $balance - $fee - $transferFee,
+                'payout'       => $balance - $riderFee - $riderTrans,
                 'accrued_days' => (int) $r['accrued_days'],
                 'bank_label'   => (string) ($r['bank_label'] ?? ''),
                 'has_bank'     => $hasBank,
@@ -159,7 +164,13 @@ final class DailyPayout
         $fee    = min($balance, max(0, (int) $feeCalc['total']));
         // 이체 수수료 — 펌뱅킹 이체 1건당 정액(본사 귀속, 2026-09-01 갑). 일일이체도 부과한다.
         $transferFee = (int) (WithdrawalConfig::get($agencyId)['transfer_fee'] ?? 0);
-        $amount = $balance - $fee - $transferFee;
+        // 부담 주체(2026-09-08 갑) — 대리점이 대신 내주면 라이더는 그만큼 더 받는다.
+        // 받는 쪽(배분·본사)에게 가는 금액은 아래 distribute·chargeTransferFee 에서 그대로 나간다.
+        $settlePayer = Org::settleFeePayer($agencyId);
+        $transPayer  = Org::transferFeePayer($agencyId);
+        $riderFee    = $settlePayer === 'agency' ? 0 : $fee;
+        $riderTrans  = $transPayer === 'agency' ? 0 : $transferFee;
+        $amount = $balance - $riderFee - $riderTrans;
         if ($amount <= 0) {
             throw new InvalidArgumentException(sprintf(
                 '%s: 정산수수료(%s원)·이체수수료(%s원)를 빼면 지급액이 남지 않습니다. (잔액 %s원)',
@@ -204,13 +215,14 @@ final class DailyPayout
             throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
         }
 
-        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $transferFee, $orderCount, $shortOrders, $longOrders, $rider, $adminId, $res): void {
+        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $transferFee, $settlePayer, $transPayer, $orderCount, $shortOrders, $longOrders, $rider, $adminId, $res): void {
             $reqId = db_insert(
                 "INSERT INTO withdrawal_requests
                     (rider_id, agency_id, kind, amount, gross_amount, withhold_other, withhold_transfer_fee,
+                     settle_fee_payer, transfer_fee_payer,
                      bank_code, bank_account, account_holder,
                      status, note, requested_at, completed_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
+                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
                 [
                     $riderId,
                     $agencyId,
@@ -218,6 +230,8 @@ final class DailyPayout
                     $balance,
                     $fee,
                     $transferFee,
+                    $settlePayer,
+                    $transPayer,
                     (string) $rider['bank_code'],
                     (string) $rider['bank_account'],
                     (string) ($rider['account_holder'] ?: $rider['name']),

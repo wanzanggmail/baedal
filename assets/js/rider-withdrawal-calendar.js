@@ -130,6 +130,9 @@
 				if (!d.ok) throw new Error(d.message || '계산 실패');
 				setText('wdConsume', '₩ ' + won(d.consume_amount));
 				setText('wdFee', '− ₩ ' + won(d.fee_per_tx));
+				/* 대리점이 대신 내주면 0 으로 내려온다 — 그 줄은 감춘다(2026-09-08). */
+				var feeRow = document.getElementById('wdFeeRow');
+				if (feeRow) { feeRow.classList.toggle('d-none', !(d.fee_per_tx > 0)); }
 				setText('wdTransferFee', '− ₩ ' + won(d.transfer_fee || 0));
 				var tfRow = document.getElementById('wdTransferFeeRow');
 				if (tfRow) { tfRow.classList.toggle('d-none', !(d.transfer_fee > 0)); }

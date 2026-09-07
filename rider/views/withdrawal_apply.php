@@ -137,14 +137,17 @@ $csrfToken = $_SESSION['rider_wd_csrf'];
 				<span class="text-gray-600 fs-7">선택 정산액</span>
 				<span class="fw-bold" id="wdConsume">₩ <?= number_format((int) ($preview['consume_amount'] ?? 0)) ?></span>
 			</div>
-			<div class="d-flex justify-content-between mb-2">
+			<?php // 대리점이 대신 내주면 라이더 부담은 0 이라 줄을 감춘다(2026-09-08 갑). ?>
+			<?php $wdRiderFee = (int) ($preview['rider_fee'] ?? $preview['fee_per_tx'] ?? 0); ?>
+			<div class="d-flex justify-content-between mb-2<?= $wdRiderFee > 0 ? '' : ' d-none' ?>" id="wdFeeRow">
 				<span class="text-gray-600 fs-7 fw-semibold">정산수수료</span>
-				<span class="text-danger fw-semibold" id="wdFee">− ₩ <?= number_format((int) ($preview['fee_per_tx'] ?? 0)) ?></span>
+				<span class="text-danger fw-semibold" id="wdFee">− ₩ <?= number_format($wdRiderFee) ?></span>
 			</div>
 			<div class="fs-8 text-gray-600" id="wdFeeDetail"></div>
-				<div class="d-flex justify-content-between mb-2<?= (int) ($preview['transfer_fee'] ?? 0) > 0 ? '' : ' d-none' ?>" id="wdTransferFeeRow">
+				<?php $wdRiderTrans = (int) ($preview['rider_transfer_fee'] ?? $preview['transfer_fee'] ?? 0); ?>
+				<div class="d-flex justify-content-between mb-2<?= $wdRiderTrans > 0 ? '' : ' d-none' ?>" id="wdTransferFeeRow">
 					<span class="text-gray-600 fs-7 fw-semibold">이체수수료</span>
-					<span class="text-danger fw-semibold" id="wdTransferFee">− ₩ <?= number_format((int) ($preview['transfer_fee'] ?? 0)) ?></span>
+					<span class="text-danger fw-semibold" id="wdTransferFee">− ₩ <?= number_format($wdRiderTrans) ?></span>
 				</div>
 			<div class="border-top pt-3 mt-2 d-flex justify-content-between align-items-center">
 				<span class="fw-bold text-gray-800">실지급 예정액</span>

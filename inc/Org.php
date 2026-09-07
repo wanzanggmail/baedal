@@ -276,22 +276,53 @@ final class Org
     }
 
     /**
-     * 대행수수료 부담 주체 — 대리점별 설정(2026-09-01 갑). 'rider'(기본) | 'agency'.
+     * **정산수수료** 부담 주체 — 대리점별 설정. 'rider'(기본) | 'agency'.
+     *
+     * 컬럼 이름은 `agency_fee_payer` 그대로지만 **뜻이 바뀌었다**(2026-09-08 갑):
+     * 원래는 폐지된 대행수수료용이었고, 대행수수료가 정산수수료로 통합되면서
+     * 이 플래그도 정산수수료 부담 주체로 되살렸다.
+     *
+     * `agency` 면 정산수수료를 라이더 지급액에서 빼지 않고 **대리점 지갑에서** 낸다.
+     * 수수료를 받는 쪽(본사·총판·세무대리·개발사·대리점)의 몫은 어느 쪽이든 똑같다.
+     *
      * 컬럼이 아직 없거나 값이 이상하면 안전하게 'rider'(기존 동작).
      */
+    public static function settleFeePayer(int $orgId): string
+    {
+        return self::feePayer($orgId, 'agency_fee_payer');
+    }
+
+    /**
+     * **이체 수수료** 부담 주체 — 대리점별 설정(2026-09-08 갑). 'rider'(기본) | 'agency'.
+     *
+     * `agency` 면 펌뱅킹 이체 수수료를 라이더 지급액에서 빼지 않고 대리점이 낸다.
+     * 본사로 가는 금액은 어느 쪽이든 같다.
+     */
+    public static function transferFeePayer(int $orgId): string
+    {
+        return self::feePayer($orgId, 'transfer_fee_payer');
+    }
+
+    /** @deprecated 2026-09-08 — settleFeePayer() 로 이름이 바뀌었다(대행수수료 → 정산수수료). */
     public static function agencyFeePayer(int $orgId): string
+    {
+        return self::settleFeePayer($orgId);
+    }
+
+    /** 부담 주체 컬럼 공통 조회. 컬럼이 없으면 'rider'. */
+    private static function feePayer(int $orgId, string $column): string
     {
         if ($orgId < 1 || !db_table_exists('organizations')) {
             return 'rider';
         }
-        static $hasCol = null;
-        if ($hasCol === null) {
-            $hasCol = in_array('agency_fee_payer', array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field'), true);
+        static $cols = null;
+        if ($cols === null) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
         }
-        if (!$hasCol) {
+        if (!in_array($column, $cols, true)) {
             return 'rider';
         }
-        $v = (string) (db_row('SELECT agency_fee_payer FROM organizations WHERE id = ? LIMIT 1', [$orgId])['agency_fee_payer'] ?? 'rider');
+        $v = (string) (db_row("SELECT {$column} v FROM organizations WHERE id = ? LIMIT 1", [$orgId])['v'] ?? 'rider');
 
         return $v === 'agency' ? 'agency' : 'rider';
     }

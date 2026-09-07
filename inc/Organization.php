@@ -80,7 +80,7 @@ final class Organization
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     o.ceo_name, o.ceo_phone, o.ceo_birth,
                     o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
-                    o.agency_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
+                    o.agency_fee_payer, o.transfer_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -174,7 +174,7 @@ final class Organization
                     o.contact_name, o.contact_phone, o.memo, o.is_active, o.created_at,
                     o.ceo_name, o.ceo_phone, o.ceo_birth,
                     o.biz_name, o.biz_reg_no, o.biz_type, o.biz_category, o.biz_address,
-                    o.agency_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
+                    o.agency_fee_payer, o.transfer_fee_payer, o.stmt_weekly_enabled, o.stmt_daily_alimtalk,
                     p.name AS parent_name,
                     (SELECT COUNT(*) FROM admins  a WHERE a.org_id    = o.id) AS account_count,
                     (SELECT COUNT(*) FROM admins  a4 WHERE a4.org_id = o.id AND a4.is_active = 1) AS active_account_count,
@@ -363,12 +363,16 @@ final class Organization
         $extraParam = [];
         $orgCols    = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
         $isAgency   = (string) (Org::find($id)['level'] ?? '') === Org::LEVEL_AGENCY;
-        if (array_key_exists('agency_fee_payer', $data)
-            && in_array('agency_fee_payer', $orgCols, true)
-            && $isAgency
-        ) {
-            $extraSql     = ', agency_fee_payer = ?';
-            $extraParam[] = ((string) $data['agency_fee_payer'] === 'agency') ? 'agency' : 'rider';
+        // 수수료 부담 주체 2종 — 대리점에만 저장한다(2026-09-08).
+        // agency_fee_payer 는 이름만 옛 대행수수료이고 지금은 **정산수수료** 부담 주체다.
+        foreach (['agency_fee_payer', 'transfer_fee_payer'] as $payerCol) {
+            if (array_key_exists($payerCol, $data)
+                && in_array($payerCol, $orgCols, true)
+                && $isAgency
+            ) {
+                $extraSql    .= ", {$payerCol} = ?";
+                $extraParam[] = ((string) $data[$payerCol] === 'agency') ? 'agency' : 'rider';
+            }
         }
         foreach (['stmt_weekly_enabled', 'stmt_daily_alimtalk'] as $flagCol) {
             if (array_key_exists($flagCol, $data) && in_array($flagCol, $orgCols, true) && $isAgency) {
