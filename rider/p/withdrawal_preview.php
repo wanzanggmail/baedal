@@ -47,8 +47,10 @@ echo json_encode([
     'to'                => $to,
     'balance'           => (int) $p['balance'],
     'reserve_amount'    => (int) $p['reserve_amount'],
-    'fee_per_tx'        => (int) $p['fee_per_tx'],
-    'transfer_fee'      => (int) ($p['transfer_fee'] ?? 0),
+    // 대리점이 대신 내주는 수수료는 라이더에게 0 으로 내려간다(2026-09-08 갑).
+    // 화면·JS 가 이 키를 그대로 쓰므로 여기서 갈아끼우면 아래는 손댈 게 없다.
+    'fee_per_tx'        => (int) ($p['rider_fee'] ?? $p['fee_per_tx']),
+    'transfer_fee'      => (int) ($p['rider_transfer_fee'] ?? $p['transfer_fee'] ?? 0),
     'consume_amount'    => (int) $p['consume_amount'],
     'payout_amount'     => (int) $p['payout_amount'],
     'can_apply'         => (bool) $p['can_apply'],

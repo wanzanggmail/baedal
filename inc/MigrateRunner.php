@@ -98,6 +98,7 @@ final class MigrateRunner
         self::migrateOrgFeeGlobalRow();
         self::migrateAgencyPredeductFee();
         self::migrateDropAgencyFeeRates();
+        self::migrateFeePayerFlags();
 
         echo "\n완료.\n";
     }
@@ -3700,5 +3701,59 @@ final class MigrateRunner
 
         db_execute('ALTER TABLE deduction_global_config ' . implode(', ', $drop));
         echo 'OK    컬럼 ' . count($drop) . "개 제거(agency_fee_day_threshold·short·long)\n";
+    }
+
+    /**
+     * 수수료 부담 주체 — 대리점이 라이더 대신 내줄 수 있게 (2026-09-08 갑).
+     *
+     * 갑: "대행수수료 처럼 이체 수수료도 대리점이 부담할수 있도록 체크박스 넣어서 만들어줘"
+     *     "그럼 대행 수수료가 아니라 정산 수수료네 ... 체크박스 체크하면 정산 수수료를 대리점이 부담"
+     *
+     * 기존 `organizations.agency_fee_payer` 는 폐지된 대행수수료용이라 2026-09-07 이후
+     * **아무 데서도 읽지 않는 죽은 값**이었다. 컬럼을 새로 만들지 않고 **의미만 정산수수료로
+     * 되살린다**(값 모양이 같고, 이미 켜둔 대리점의 의도도 "수수료를 대리점이 부담"으로 동일).
+     *
+     * 이체 수수료용으로 `transfer_fee_payer` 를 새로 추가한다.
+     *
+     * 부담 주체는 **출금 시점에 `withdrawal_requests` 에 박아둔다** — 나중에 설정을 바꿔도
+     * 과거 출금의 정산이 흔들리면 안 되기 때문이다(PG 요율을 결제 시점에 저장하는 것과 같은 이유).
+     */
+    private static function migrateFeePayerFlags(): void
+    {
+        echo "== 수수료 부담 주체(정산수수료·이체수수료) ==\n";
+
+        if (db_table_exists('organizations')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM organizations'), 'Field');
+            if (in_array('transfer_fee_payer', $cols, true)) {
+                echo "SKIP  organizations.transfer_fee_payer (이미 있음)\n";
+            } else {
+                db_execute(
+                    "ALTER TABLE organizations
+                        ADD COLUMN transfer_fee_payer ENUM('rider','agency') NOT NULL DEFAULT 'rider'
+                            COMMENT '이체 수수료 부담 주체. agency = 대리점이 대신 부담'
+                        AFTER agency_fee_payer"
+                );
+                echo "OK    organizations.transfer_fee_payer 추가(기본 rider)\n";
+            }
+        }
+
+        if (db_table_exists('withdrawal_requests')) {
+            $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_requests'), 'Field');
+            $add  = [];
+            if (!in_array('settle_fee_payer', $cols, true)) {
+                $add[] = "ADD COLUMN settle_fee_payer ENUM('rider','agency') NOT NULL DEFAULT 'rider'"
+                       . " COMMENT '이 출금의 정산수수료 부담 주체(신청 시점 고정)'";
+            }
+            if (!in_array('transfer_fee_payer', $cols, true)) {
+                $add[] = "ADD COLUMN transfer_fee_payer ENUM('rider','agency') NOT NULL DEFAULT 'rider'"
+                       . " COMMENT '이 출금의 이체 수수료 부담 주체(신청 시점 고정)'";
+            }
+            if ($add === []) {
+                echo "SKIP  withdrawal_requests 부담 주체 컬럼 (이미 있음)\n";
+            } else {
+                db_execute('ALTER TABLE withdrawal_requests ' . implode(', ', $add));
+                echo 'OK    withdrawal_requests 부담 주체 컬럼 ' . count($add) . "개 추가(기본 rider)\n";
+            }
+        }
     }
 }

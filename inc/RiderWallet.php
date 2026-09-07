@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/WithdrawalConfig.php';
+require_once __DIR__ . '/Org.php';              // 수수료 부담 주체(2026-09-08)
 
 /**
  * 라이더 지갑 (누적 잔액·적립 일수 — 정산 반영은 추후 일원화)
@@ -162,14 +163,24 @@ final class RiderWallet
             $consume = ($toDate !== null && $toDate !== '') ? 0 : $afterReserve;
         }
 
-        // 이체 수수료 — 펌뱅킹 이체 1건당 정액(본사 귀속). 실지급액에서 뺀다(2026-09-01 갑).
-        // 정산수수료·이체수수료를 다 빼고도 라이더에게 갈 게 남을 때만 부과한다(=이체가 실제로 일어남).
+        // 이체 수수료 — 펌뱅킹 이체 1건당 정액(본사 귀속, 2026-09-01 갑).
         $transferFee = (int) ($cfg['transfer_fee'] ?? 0);
-        if ($consume - $fee - $transferFee > 0) {
-            $payout = $consume - $fee - $transferFee;
+
+        // 부담 주체(2026-09-08 갑) — 대리점이 대신 내주면 **라이더 지급액에서 빼지 않는다**.
+        // 받는 쪽(본사·총판·세무대리·개발사·대리점)에게 가는 금액은 어느 쪽이든 같고,
+        // 재원만 라이더 지급액 → 대리점 지갑으로 바뀐다.
+        $settlePayer   = Org::settleFeePayer($orgId ?? 0);
+        $transferPayer = Org::transferFeePayer($orgId ?? 0);
+        $riderFee      = $settlePayer === 'agency' ? 0 : $fee;
+        $riderTransfer = $transferPayer === 'agency' ? 0 : $transferFee;
+
+        // 라이더가 부담하는 몫을 빼고도 갈 게 남을 때만 이체가 일어난다.
+        if ($consume - $riderFee - $riderTransfer > 0) {
+            $payout = $consume - $riderFee - $riderTransfer;
         } else {
-            $payout      = 0;   // 수수료를 빼면 남는 게 없음 → 이체 불가
-            $transferFee = 0;   // 이체가 안 일어나니 이체 수수료도 부과하지 않음
+            $payout        = 0;   // 남는 게 없음 → 이체 불가
+            $transferFee   = 0;   // 이체가 안 일어나니 이체 수수료도 부과하지 않음
+            $riderTransfer = 0;
         }
 
         return [
@@ -181,6 +192,11 @@ final class RiderWallet
             'fee_day_threshold' => (int) $cfg['fee_day_threshold'],
             'after_reserve'     => $afterReserve,
             'transfer_fee'      => $transferFee,  // 이 출금에 실제 부과할 이체 수수료(불가 시 0)
+            // 부담 주체(2026-09-08) — 'agency' 면 그 수수료는 라이더 지급액에서 빠지지 않는다.
+            'settle_fee_payer'   => $settlePayer,
+            'transfer_fee_payer' => $transferPayer,
+            'rider_fee'          => $riderFee,       // 라이더가 실제로 부담하는 정산수수료
+            'rider_transfer_fee' => $riderTransfer,  // 라이더가 실제로 부담하는 이체 수수료
             'payout_amount'     => $payout,
             'can_apply'         => $payout > 0,
             // ── 신규: 수수료 구간 내역 + 사이클 선택 결과 ──

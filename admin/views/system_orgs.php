@@ -346,13 +346,21 @@ foreach ($agencyByParent as $orphans) {
 							<label class="form-label" for="org_memo">메모</label>
 							<textarea class="form-control form-control-solid" id="org_memo" rows="2" maxlength="500" placeholder="내부 관리용 메모 (계약 정보, 특이사항 등)"></textarea>
 						</div>
-						<?php // 대행수수료 부담 주체 — 대리점에만 해당. 체크 시 라이더 대신 대리점 지갑에서 부담. ?>
+						<?php // 수수료 부담 주체 — 대리점에만 해당. 체크 시 라이더 대신 대리점 지갑에서 부담.
+						      // 2026-09-08: 위 항목은 폐지된 「대행수수료」가 아니라 **정산수수료** 기준으로 되살렸다. ?>
 						<div class="mb-5 d-none" id="org_agency_fee_wrap">
-							<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+							<label class="form-check form-switch form-check-custom form-check-solid align-items-start mb-4">
 								<input class="form-check-input me-3 mt-1" type="checkbox" id="org_agency_pays_fee" />
 								<span class="d-flex flex-column">
-									<span class="fw-semibold text-gray-800">대행수수료를 <strong>대리점이 부담</strong></span>
-									<span class="text-muted fs-8">체크하면 <strong>선정산수수료(대행)</strong>를 라이더 정산에서 빼지 않고 <strong>대리점 지갑에서 차감</strong>합니다(라이더는 전액 정산, 수수료는 본사 귀속). 미체크 시 기존대로 라이더가 부담합니다.</span>
+									<span class="fw-semibold text-gray-800">정산수수료를 <strong>대리점이 부담</strong></span>
+									<span class="text-muted fs-8">체크하면 <strong>정산수수료</strong>(배달 건당)를 라이더 지급액에서 빼지 않고 <strong>대리점 지갑에서</strong> 냅니다. 라이더는 전액 받고, 본사·총판·세무대리·개발사 몫은 그대로 나갑니다. 미체크 시 기존대로 라이더가 부담합니다.</span>
+								</span>
+							</label>
+							<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+								<input class="form-check-input me-3 mt-1" type="checkbox" id="org_agency_pays_transfer" />
+								<span class="d-flex flex-column">
+									<span class="fw-semibold text-gray-800">이체 수수료를 <strong>대리점이 부담</strong></span>
+									<span class="text-muted fs-8">체크하면 <strong>이체 수수료</strong>(펌뱅킹 이체 1건당)를 라이더 지급액에서 빼지 않고 <strong>대리점 지갑에서</strong> 냅니다. 본사로 가는 금액은 그대로입니다. 미체크 시 기존대로 라이더가 부담합니다.</span>
 								</span>
 							</label>
 						</div>
@@ -787,6 +795,9 @@ foreach ($agencyByParent as $orphans) {
 					if (afw) {
 						afw.classList.toggle('d-none', !isAgency);
 						$('org_agency_pays_fee').checked = isAgency && row.agency_fee_payer === 'agency';
+						if ($('org_agency_pays_transfer')) {
+							$('org_agency_pays_transfer').checked = isAgency && row.transfer_fee_payer === 'agency';
+						}
 					}
 					var sw = $('org_stmt_wrap');
 					if (sw) {
@@ -824,6 +835,7 @@ foreach ($agencyByParent as $orphans) {
 				biz_category: $('org_biz_category').value.trim(),
 				biz_address: $('org_biz_address').value.trim(),
 				agency_fee_payer: ($('org_agency_pays_fee') && $('org_agency_pays_fee').checked) ? 'agency' : 'rider',
+				transfer_fee_payer: ($('org_agency_pays_transfer') && $('org_agency_pays_transfer').checked) ? 'agency' : 'rider',
 				stmt_weekly_enabled: ($('org_stmt_weekly') && $('org_stmt_weekly').checked) ? 1 : 0,
 				stmt_daily_alimtalk: ($('org_stmt_daily_alimtalk') && $('org_stmt_daily_alimtalk').checked) ? 1 : 0
 			};
