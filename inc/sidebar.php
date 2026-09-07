@@ -128,6 +128,8 @@ if (!function_exists('stmt_menu_visible')) {
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'settlement/upload', 'settlement/upload-detail', 'settlement/history',
 										    'settlement/order-details', 'settlement/fee-report', 'settlement/withholding',
+										    // 「정산명세서 발급」이 빠져 있어 이 화면에 들어가면 폴더가 닫혀 보였다(2026-09-07).
+										    'settlement/statement',
 										]) ?>">
 											<span class="menu-link">
 												<span class="menu-icon">

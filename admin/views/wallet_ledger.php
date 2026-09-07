@@ -153,8 +153,7 @@ $net = $sum['credit'] - $sum['debit'];
 		<i class="ki-duotone ki-wallet fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 		<div class="fs-7 text-gray-800">
 			본사·총판·대리점 지갑(<code>agency_wallets</code>)의 입출금 원장입니다.
-			PG 정산 조달, 플랫폼 수수료 수입, 라이더 지급, 자체 인출, 리스 수수료 이동, 수동 조정이 모두 여기에 쌓입니다.
-			본사·총판은 하위 조직 지갑까지 조회할 수 있습니다.
+			PG 정산 조달, 플랫폼 수수료 수입, 라이더 지급, 자체 인출, 리스 수수료 이동, 수동 조정이 모두 여기에 쌓입니다.			
 		</div>
 	</div>
 
