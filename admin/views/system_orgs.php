@@ -736,7 +736,7 @@ foreach ($agencyByParent as $orphans) {
 		function syncParent() {
 			var lvl = $('org_level').value;
 			$('org_parent_wrap').classList.toggle('d-none', lvl !== 'agency');
-			// 대행수수료 부담 주체·정산서 기능 스위치는 대리점에만 노출
+			// 수수료 부담 주체·정산서 기능 스위치는 대리점에만 노출
 			var afw = $('org_agency_fee_wrap');
 			if (afw) { afw.classList.toggle('d-none', lvl !== 'agency'); }
 			var sw = $('org_stmt_wrap');

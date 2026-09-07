@@ -12,7 +12,7 @@ final class RolePermission
     public const AREAS = [
         'dashboard'  => '대시보드',
         'settlement' => '정산 업로드',
-        'deduction'  => '차감·수수료(대행수수료/미수금)',
+        'deduction'  => '차감·수수료(선차감·요율/미수금)',
         'promotion'  => '프로모션',
         'withdrawal' => '출금',
         // 'content'(콘텐츠)는 2026-09-06 갑 지시로 **본사 최고관리자·개발사 전용**이 되어

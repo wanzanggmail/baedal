@@ -199,21 +199,21 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<div class="separator separator-dashed my-6"></div>
 						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
 						<div class="text-muted fs-8 mb-4">
-							위에서 라이더에게 받은 대행수수료(정산수수료)를 본사·총판·대리점이 나눠 갖습니다.
+							위에서 라이더에게 받은 정산수수료를 본사·총판·대리점이 나눠 갖습니다.
 							<strong>본사·총판 몫 모두 배달 건당 정액(원)</strong>이며, <strong>기준 미만/기준 이상</strong> 두 구간에 각각 다르게 매길 수 있습니다.
-							<strong>대리점 몫 = 대행수수료 − 본사 − 총판</strong>(나머지 전부)입니다.
+							<strong>대리점 몫 = 정산수수료 − 본사 − 총판</strong>(나머지 전부)입니다.
 						</div>
-						<?php // 본사 몫 하한 = 「대행수수료 설정」의 최저 금액(구간별). 여기서 값을 만들지 않고 참조만 한다. ?>
+						<?php // 본사 몫 하한 = 「수수료 설정」의 최저 금액(구간별). 여기서 값을 만들지 않고 참조만 한다. ?>
 						<div class="alert bg-light-info d-flex flex-column p-4 mb-4 fs-8" id="cfg_min_ref"
 							data-min-short="<?= (int) $agencyMin['fee_per_tx_short'] ?>" data-min-long="<?= (int) $agencyMin['fee_per_tx_long'] ?>">
-							<div class="fw-semibold text-gray-800 mb-1">본사 몫(건당) 하한 — <span class="text-primary">대행수수료 최저 금액</span> 적용</div>
+							<div class="fw-semibold text-gray-800 mb-1">본사 몫(건당) 하한 — <span class="text-primary">정산수수료 최저 금액</span> 적용</div>
 							<?php // 2026-09-06 갑: 하한이 걸리는 「본사 몫」은 본사+세무대리+개발사 **합계**다. ?>
 							<div class="text-gray-700 mb-1">하한은 <strong>본사 + 세무대리 + 개발사 합계</strong>에 걸립니다. 셋을 어떻게 나누든 합계만 최저 금액 이상이면 됩니다.</div>
 							<?php if ((int) $agencyMin['fee_per_tx_short'] > 0 || (int) $agencyMin['fee_per_tx_long'] > 0) : ?>
 							<div class="text-gray-700">기준 미만 <strong><?= number_format((int) $agencyMin['fee_per_tx_short']) ?>원</strong> · 기준 이상 <strong><?= number_format((int) $agencyMin['fee_per_tx_long']) ?>원</strong> 미만으로는 저장할 수 없습니다.</div>
 							<div class="text-gray-700 mt-1">지금 합계 — 기준 미만 <strong id="cfg_hqsum_short">–</strong> · 기준 이상 <strong id="cfg_hqsum_long">–</strong></div>
 							<?php else : ?>
-							<div class="text-gray-700">현재 대행수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
+							<div class="text-gray-700">현재 정산수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
 							<?php endif; ?>
 							<a href="<?= htmlspecialchars($agencyFeeUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary mt-1">수수료 설정(본사 기본값)에서 관리 →</a>
 						</div>
@@ -222,7 +222,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 								<thead>
 									<tr class="fw-semibold fs-8 text-muted">
 										<th class="min-w-90px">구간</th>
-										<th class="min-w-90px text-end">대행수수료<br>(건당)</th>
+										<th class="min-w-90px text-end">정산수수료<br>(건당)</th>
 										<th class="min-w-110px">본사 몫 (원/건)</th>
 										<th class="min-w-110px">총판 몫 (원/건)</th>
 										<th class="min-w-110px">세무대리 몫 (원/건)<br><span class="fw-normal fs-9">본사 하한에 포함</span></th>
@@ -262,7 +262,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						</div>
 						<div class="form-text fs-9 mb-6" id="cfg_share_hint">
 							세무대리·개발사 몫은 <strong>각 조직 지갑으로 실제 이체</strong>됩니다. 뗴는 순서는 <strong>세무대리 → 개발사 → 본사 → 총판 → 대리점(나머지)</strong>이며,
-							대리점 몫이 0보다 작아지면 대리점은 0원이 되고 대행수수료까지만 가져갑니다.
+							대리점 몫이 0보다 작아지면 대리점은 0원이 되고 정산수수료까지만 가져갑니다.
 						</div>
 						<?php if ($isAgencySelf) : ?>
 						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
@@ -353,7 +353,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			});
 		}
 
-		// 정산수수료 배분 — 대리점 몫(자동)을 실시간으로 보여준다. 대리점 몫 = 대행수수료 − 본사 − 총판.
+		// 정산수수료 배분 — 대리점 몫(자동)을 실시간으로 보여준다. 대리점 몫 = 정산수수료 − 본사 − 총판.
 		(function () {
 			var feeShortEl = document.getElementById('cfg_fee_short');
 			var feeLongEl  = document.getElementById('cfg_fee_long');
@@ -366,7 +366,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				var agency = fee - hq - dist - (tax || 0) - (dev || 0);
 				if (agency < 0) {
 					out.innerHTML = '<span class="text-danger">0</span>';
-					out.title = '세무대리+개발사+본사+총판이 대행수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
+					out.title = '세무대리+개발사+본사+총판이 정산수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
 				} else {
 					out.textContent = agency.toLocaleString();
 					out.title = '';
@@ -422,9 +422,8 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			});
 		}
 
-		/* 선차감은 저장 엔드포인트가 다르다(deduction_global_config). 대행수수료 값을 덮지 않도록
-		   전용 액션(save_prededuct)을 쓴다 — 이 화면엔 대행수수료 입력칸이 없어서 save 를 쓰면
-		   그 대리점 요율이 조용히 기본값으로 바뀐다. */
+		/* 선차감은 저장 엔드포인트가 다르다(deduction_global_config). 다른 값을 덮지 않도록
+		   컬럼 하나만 쓰는 전용 액션(save_prededuct)을 쓴다. */
 		function savePrededuct() {
 			var el = document.getElementById('cfg_prededuct');
 			if (!el || el.disabled) { return Promise.resolve(); }
@@ -457,7 +456,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.
 			var hqShortEl = document.getElementById('cfg_hq_short');
 			if (hqShortEl && !hqShortEl.disabled) {
-				// 하한은 「대행수수료 설정」의 최저 금액(구간별)을 참조. 서버도 막지만 저장 전에 알려준다.
+				// 하한은 「수수료 설정」의 정산수수료 최저 금액(구간별)을 참조. 서버도 막지만 저장 전에 알려준다.
 				var ref     = document.getElementById('cfg_min_ref');
 				var minS    = ref ? (parseInt(ref.getAttribute('data-min-short'), 10) || 0) : 0;
 				var minL    = ref ? (parseInt(ref.getAttribute('data-min-long'), 10) || 0) : 0;
@@ -470,7 +469,7 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				var sumS = hqShort + taxS + devS;
 				var sumL = hqLong + taxL + devL;
 				if ((minS > 0 && sumS < minS) || (minL > 0 && sumL < minL)) {
-					showToast('본사+세무대리+개발사 합계(건당)는 대행수수료 최저 금액(미만 ' + minS.toLocaleString()
+					showToast('본사+세무대리+개발사 합계(건당)는 정산수수료 최저 금액(미만 ' + minS.toLocaleString()
 						+ '원 / 이상 ' + minL.toLocaleString() + '원)보다 낮을 수 없습니다. 현재 합계 '
 						+ sumS.toLocaleString() + '원 / ' + sumL.toLocaleString() + '원', false);
 					return;

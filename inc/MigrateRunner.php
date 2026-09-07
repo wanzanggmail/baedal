@@ -99,6 +99,7 @@ final class MigrateRunner
         self::migrateAgencyPredeductFee();
         self::migrateDropAgencyFeeRates();
         self::migrateFeePayerFlags();
+        self::migrateDropDeadAgencyFeeColumns();
 
         echo "\n완료.\n";
     }
@@ -3754,6 +3755,47 @@ final class MigrateRunner
                 db_execute('ALTER TABLE withdrawal_requests ' . implode(', ', $add));
                 echo 'OK    withdrawal_requests 부담 주체 컬럼 ' . count($add) . "개 추가(기본 rider)\n";
             }
+        }
+    }
+
+    /**
+     * 대행수수료가 남기고 간 **죽은 컬럼** 정리 (2026-09-08 갑 전수 점검).
+     *
+     * 갑: "대행수수료로 되어 있거나 대행수수료 관련 기능들이 들어가 있는 부분이 있는지 전수 검사"
+     *
+     * 두 컬럼 모두 **읽는 코드가 하나도 없고 값도 전부 0** 인 것을 확인하고 지운다:
+     *   - `withdrawal_requests.withhold_agency_fee` : 대행수수료를 출금 때 따로 떼던 시절의 자리.
+     *     실제로 쓰인 적이 없다(0 아닌 행 0개).
+     *   - `deduction_global_config.agency_fee_pct`  : 대행수수료를 **비율**로 매기던 초기 설계.
+     *     건당 정액으로 바뀌면서 버려졌다(전부 0).
+     *
+     * 남기는 것: `agency_fee_min_short/long` — 이름만 옛 대행수수료이고 지금은
+     * **정산수수료 본사 몫 하한**으로 살아 있다.
+     */
+    private static function migrateDropDeadAgencyFeeColumns(): void
+    {
+        echo "== 대행수수료 잔재 컬럼 정리 ==\n";
+
+        foreach ([
+            ['withdrawal_requests',     'withhold_agency_fee'],
+            ['deduction_global_config', 'agency_fee_pct'],
+        ] as [$table, $col]) {
+            if (!db_table_exists($table)) {
+                continue;
+            }
+            $cols = array_column(db_rows("SHOW COLUMNS FROM `{$table}`"), 'Field');
+            if (!in_array($col, $cols, true)) {
+                echo "SKIP  {$table}.{$col} (이미 없음)\n";
+                continue;
+            }
+            // 값이 남아 있으면 지우지 않는다 — 쓰이고 있었다는 뜻이므로 사람이 봐야 한다.
+            $used = (int) db_row("SELECT COUNT(*) n FROM `{$table}` WHERE `{$col}` <> 0")['n'];
+            if ($used > 0) {
+                echo "SKIP  {$table}.{$col} — 0 아닌 값 {$used}건이 있어 지우지 않음\n";
+                continue;
+            }
+            db_execute("ALTER TABLE `{$table}` DROP COLUMN `{$col}`");
+            echo "OK    {$table}.{$col} 제거(전부 0·미사용)\n";
         }
     }
 }

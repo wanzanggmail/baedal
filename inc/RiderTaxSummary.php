@@ -37,7 +37,7 @@ final class RiderTaxSummary
      */
     private const LABELS = [
         'hourly_ins'      => '시간제 보험',
-        'agency_fee'      => '선정산수수료(대행)',
+        'agency_fee'      => '정산수수료',
         'excel_deduction' => '차감내역(사고·오배달 등)',
     ];
 

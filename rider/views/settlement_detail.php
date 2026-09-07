@@ -19,7 +19,7 @@ $platformLabels = ['baemin' => '배달의민족', 'coupang' => '쿠팡이츠', '
 $feeLabels = [
     'hourly_ins'      => '시간제보험',
     'excel_deduction' => '차감내역',
-    'agency_fee'      => '대행수수료',
+    'agency_fee'      => '정산수수료',
     'withholding'     => '원천세',
     'employment_ins'  => '고용보험',
     'accident_ins'    => '산재보험',

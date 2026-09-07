@@ -204,7 +204,7 @@ final class WithdrawalConfig
         }
         if ($tooLow !== []) {
             throw new InvalidArgumentException(
-                '본사 몫(본사+세무대리+개발사 합계, 건당)은 대행수수료 최저 금액보다 낮을 수 없습니다 — '
+                '본사 몫(본사+세무대리+개발사 합계, 건당)은 정산수수료 최저 금액보다 낮을 수 없습니다 — '
                 . implode(' · ', $tooLow)
             );
         }

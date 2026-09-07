@@ -118,7 +118,7 @@ final class Statistics
         }
         $labels = [
             'wd_fee_in'       => '정산수수료',
-            'agency_fee_in'   => '대행수수료',
+            'agency_fee_in'   => '정산수수료',
             'pg_fee_in'       => '플랫폼수수료',
             'transfer_fee_in' => '이체수수료',
             'lease_fee_in'    => '리스수수료',

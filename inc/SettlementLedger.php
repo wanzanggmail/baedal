@@ -337,7 +337,7 @@ final class SettlementLedger
         // 미수금(대여금·리스·선지급)은 수수료가 아니라 원금 상환 차감 — 화면에서 구분 표기용
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
-            'agency_fee'      => '선정산수수료(대행)',
+            'agency_fee'      => '정산수수료',
             'agency_prededuct' => '대리점 선차감',
             'withholding'     => '원천세',
             'employment_ins'  => '고용보험',
@@ -533,7 +533,7 @@ final class SettlementLedger
 
         $debtCodes = ['loan', 'lease', 'advance', 'rental'];
         $canonical = [
-            'agency_fee'      => '선정산수수료(대행)',
+            'agency_fee'      => '정산수수료',
             'agency_prededuct' => '대리점 선차감',
             'withholding'     => '원천세',
             'employment_ins'  => '고용보험',
@@ -1063,7 +1063,7 @@ final class SettlementLedger
             'withholding'    => '원천세(수동)',
             'employment_ins' => '고용보험(수동)',
             'accident_ins'   => '산재보험(수동)',
-            'agency_fee'      => '선정산수수료(수동)',
+            'agency_fee'      => '정산수수료(수동)',
             'hourly_ins'      => '시간제 보험',
             'vat'             => '부가세',
             'excel_deduction' => '차감내역',

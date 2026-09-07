@@ -214,7 +214,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 		<i class="ki-duotone ki-information-5 fs-2hx text-primary me-4"><span class="path1"></span><span class="path2"></span><span class="path3"></span></i>
 		<div class="fs-7 text-gray-800">
 			라이더별 공제를 <strong>발생 시점 2가지</strong>로 나눠 집계합니다 —
-			<strong>출금 시점</strong>(정산수수료, 출금 신청일 기준)과 <strong>정산 반영 시점</strong>(대행수수료·원천세·보험료, 정산일 기준).
+			<strong>출금 시점</strong>(정산수수료, 출금 신청일 기준)과 <strong>정산 반영 시점</strong>(원천세·보험료·선차감, 정산일 기준).
 			<span class="d-block mt-1 text-gray-700">
 				⚠️ <strong>미수금(대여금·리스·선지급)</strong>은 수수료가 아니라 <strong>원금 상환 차감</strong>이라 수수료 합계와 분리해 표시합니다.
 				<br>리스는 걷은 금액을 본사·총판·대리점이 나눠 갖는데, 그 배분 실적은
@@ -248,7 +248,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 				<div class="card-body py-6">
 					<div class="text-gray-500 fw-semibold fs-7 mb-1">수수료 합계</div>
 					<div class="fw-bold fs-3 text-gray-900"><?= $fmtWon($tot['fee_sum']) ?></div>
-					<div class="text-muted fs-8 mt-1">대행수수료 <?= $fmtWon($tot['agency_fee']) ?> 포함</div>
+					<div class="text-muted fs-8 mt-1">구 정산수수료(정산반영분) <?= $fmtWon($tot['agency_fee']) ?> 포함</div>
 				</div>
 			</div>
 		</div>
@@ -299,7 +299,7 @@ $fmtWon    = static fn (int $n): string => number_format($n) . '원';
 						<tr class="fw-bold text-muted fs-7 bg-light">
 							<th class="min-w-140px">라이더</th>
 							<th class="min-w-110px text-end">출금 수수료</th>
-							<th class="min-w-100px text-end">대행수수료</th>
+							<th class="min-w-100px text-end">정산수수료<span class="d-block fw-normal fs-9 text-muted">정산반영분·구</span></th>
 							<th class="min-w-90px text-end">원천세</th>
 							<th class="min-w-90px text-end">보험료</th>
 							<th class="min-w-90px text-end">선차감<span class="d-block fw-normal fs-9 text-muted">대리점 몫</span></th>

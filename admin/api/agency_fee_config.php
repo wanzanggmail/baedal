@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * 대행수수료 설정 API
+ * 수수료 설정 API — 대리점 선차감 · 공제 요율 · 정산수수료 최저 금액
  * GET  — 현재 설정 + 본사가 정한 최저금액
  * POST { "action": "save_prededuct", prededuct_fee, [agency_id] }  — 대리점 선차감
  *      { "action": "save_min", min_fee_per_tx_short, min_fee_per_tx_long }  — **본사 전용**
@@ -49,7 +49,7 @@ if ($method === 'POST' && !$isAgency && !$isHq) {
     http_response_code(403);
     echo json_encode([
         'ok'      => false,
-        'message' => '총판 계정은 대행수수료 기본값을 변경할 수 없습니다. (조회만 가능 — 전역 기본은 본사, 대리점별 설정은 해당 대리점이 관리)',
+        'message' => '총판 계정은 이 설정을 변경할 수 없습니다. (조회만 가능 — 전역 기본은 본사, 대리점별 설정은 해당 대리점이 관리)',
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -95,7 +95,7 @@ if ($action === 'save_min') {
         AuditLog::record(
             'deduction.agency_fee.min',
             'deduction_global_config',
-            sprintf('대행수수료 최저 — 기준 미만 %d원 / 이상 %d원', $r['min']['fee_per_tx_short'], $r['min']['fee_per_tx_long'])
+            sprintf('정산수수료 최저 — 기준 미만 %d원 / 이상 %d원', $r['min']['fee_per_tx_short'], $r['min']['fee_per_tx_long'])
         );
         $msg = '최저금액이 저장되었습니다.';
         if ($r['below'] !== []) {
@@ -144,7 +144,7 @@ if ($action === 'save_rates') {
 }
 
 // 선차감만 저장 — 「수수료 설정(관리)」(본사가 대리점을 골라 여는 화면)에서 온다.
-// 대행수수료 입력칸이 없는 화면이라 save 를 쓰면 그 대리점 요율이 조용히 덮인다(savePrededuct 주석 참고).
+// 요율 입력칸이 없는 화면이라 예전 save 를 쓰면 값이 조용히 덮였다(savePrededuct 주석 참고).
 // 본사는 `agency_id` 로 대상 대리점을 지정할 수 있고, 대리점은 자기 것만 저장한다.
 if ($action === 'save_prededuct') {
     $targetOrgId = $cfgOrgId;
