@@ -116,9 +116,12 @@ $agencyRows      = $isAgencyLevel ? [] : SettlementExcelConfig::listAgencyRows()
 				</div>
 			</div>
 		</div>
+		<?php // 관리자만 보이면 된다 ?>
+		<?php if ($isHq) : ?>
 		<div class="col-xl-5">
 			<?php require INC_PATH . '/settlement_excel_requirements_card.php'; ?>
 		</div>
+		<?php endif; ?>
 	</div>
 	<?php else : ?>
 	<!-- 본사·총판 계정: 전역 기본 + 스코프 내 대리점 리스트 -->

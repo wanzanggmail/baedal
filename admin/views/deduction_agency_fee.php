@@ -88,13 +88,13 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 					<form id="agency_fee_form" class="fs-7">
 						<?php // ⛔ 대행수수료 요율(적립일수·건당 수수료)은 2026-09-07 폐지 — 정산수수료와 통합.
 						      //    같은 수수료를 두 곳에서 설정하던 것을 하나로 합쳤다. ?>
-						<div class="alert bg-light-warning fs-8 p-4 mb-6">
+						<!-- <div class="alert bg-light-warning fs-8 p-4 mb-6">
 							<span class="fw-bold">대행수수료는 정산수수료와 합쳐졌습니다.</span>
 							같은 수수료를 두 이름으로 따로 설정하던 것을 하나로 정리했습니다(2026-09-07).
 							건당 단가·적립일수 기준은 <a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>
 							의 <strong>정산수수료</strong>에서 정합니다 — 주정산 라이더는 출금 신청 시, 일정산 라이더는 일일이체 시
 							<strong>주문 건수 × 단가</strong>로 한 번만 부과됩니다.
-						</div>
+						</div> -->
 
 						<?php // ── 대리점 선차감 수수료 (2026-09-06 갑) ── ?>
 						<?php if ($predeductReady) : ?>
@@ -135,9 +135,9 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">이 화면에서 정하는 것</h3></div>
 				<div class="card-body pt-0 fs-7 text-gray-700">
 					<p class="mb-2"><strong>대리점 선차감</strong> — 배달 건당, 대리점 몫. 라이더에게는 보이지 않습니다.</p>
-					<p class="mb-2"><strong>공제 요율</strong> — 원천세·고용보험·산재보험(법정요율, 본사 전용).</p>
+					<!-- <p class="mb-2"><strong>공제 요율</strong> — 원천세·고용보험·산재보험(법정요율, 본사 전용).</p>
 					<p class="mb-3"><strong>최저 금액</strong> — 정산수수료 배분에서 <strong>본사 몫(본사+세무대리+개발사)</strong>의 하한.</p>
-					<p class="mb-0 text-muted">건당 단가는 「수수료 설정(관리)」의 정산수수료에서 정합니다.</p>
+					<p class="mb-0 text-muted">건당 단가는 「수수료 설정(관리)」의 정산수수료에서 정합니다.</p> -->
 				</div>
 			</div>
 		</div>
