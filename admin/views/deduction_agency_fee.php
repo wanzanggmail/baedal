@@ -69,9 +69,8 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-wallet fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 		<div class="fs-7 text-gray-800">
-			정산 반영 시 차감되는 <strong>대행 수수료</strong>는 정산액 비율이 아니라 <strong>건당 정액</strong>입니다.
-			라이더 <strong>적립 일수</strong>(<code>rider_wallets.accrued_days</code>)가 기준 미만이면 짧은 구간, 이상이면 긴 구간 금액이 적용됩니다.
-			(출금 수수료와 동일한 구간 방식, 금액은 이 화면에서 별도 설정)
+			이 화면에서는 <strong>대리점 선차감</strong>·<strong>공제 요율</strong>·<strong>정산수수료 최저 금액</strong>을 정합니다.
+			<strong>정산수수료</strong>의 건당 단가·배분은 <a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>에서 정합니다.
 		</div>
 	</div>
 
@@ -147,14 +146,14 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 		<div class="col-12">
 			<div class="card card-flush border border-warning">
 				<div class="card-header pt-5">
-					<h3 class="card-title fw-bold">대행수수료 최저 금액 <span class="badge badge-light-warning ms-2">본사 전용</span></h3>
+					<h3 class="card-title fw-bold">정산수수료 최저 금액 <span class="badge badge-light-warning ms-2">본사 전용</span></h3>
 				</div>
 				<div class="card-body pt-0 fs-7">
 					<?php if (!$minReady) : ?>
 					<div class="alert alert-warning mb-0">최저금액 컬럼이 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
 					<?php else : ?>
 					<div class="text-gray-700 mb-5">
-						대리점은 여기서 정한 금액 <strong>아래로 대행수수료를 설정할 수 없습니다</strong>(저장 시 거부).
+						여기서 정한 금액 <strong>아래로는 정산수수료 본사 몫(본사+세무대리+개발사)을 설정할 수 없습니다</strong>(저장 시 거부).
 						<strong>0</strong>이면 하한 없음. 전역 기본값에도 똑같이 걸리므로, 하한보다 낮은 기본값은 저장되지 않습니다.
 					</div>
 					<div class="row g-4 mb-5">
@@ -290,7 +289,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			});
 		}
 		document.getElementById('cfg_save_btn').addEventListener('click', function () {
-			/* 대행수수료 요율은 폐지됐다(2026-09-07). 선차감만 전용 액션으로 저장한다. */
+			/* 요율 설정은 정산수수료로 통합됐다(2026-09-07). 이 화면은 선차감만 저장한다. */
 			var pdEl = document.getElementById('cfg_prededuct');
 			if (!pdEl || pdEl.readOnly) { showToast('변경할 수 있는 값이 없습니다.', false); return; }
 			var payload = {
