@@ -122,6 +122,18 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				</div>
 			</div>
 		</div>
+		<div class="col-xl-5">
+			<div class="card card-flush h-100">
+				<div class="card-header pt-5"><h3 class="card-title fw-bold">이 화면에서 정하는 것</h3></div>
+				<div class="card-body pt-0 fs-7 text-gray-700">
+					<p class="mb-2"><strong>대리점 선차감</strong> — 배달 건당, 대리점 몫. 라이더에게는 보이지 않습니다.</p>
+					<p class="mb-2"><strong>정산수수료 추가금</strong> — 배달 건당,본사 및 총판, 대리점 몫. </p>
+					<!-- <p class="mb-2"><strong>공제 요율</strong> — 원천세·고용보험·산재보험(법정요율, 본사 전용).</p>
+					<p class="mb-3"><strong>최저 금액</strong> — 정산수수료 배분에서 <strong>본사 몫(본사+세무대리+개발사)</strong>의 하한.</p>
+					<p class="mb-0 text-muted">건당 단가는 「수수료 설정(관리)」의 정산수수료에서 정합니다.</p> -->
+				</div>
+			</div>
+		</div>
 		<?php // ── 정산수수료 추가금 (2026-09-08 갑) ── ?>
 		<div class="col-12">
 			<div class="card card-flush">
@@ -133,15 +145,14 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				<div class="card-body pt-0 fs-7">
 					<div class="text-muted fs-8 mb-4">
 						라이더가 내는 정산수수료는 <strong>전역 고정분 + 추가분</strong>입니다.
-						여기서는 <strong>총판 추가금</strong>과 <strong>대리점 추가금</strong>만 정합니다 —
-						본사·세무대리·개발사 몫은 <a href="<?= htmlspecialchars($feeMgmtUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>에서 본사가 고정합니다.
+						여기서는 <strong>총판 추가금</strong>과 <strong>대리점 추가금</strong>만 정합니다 
 					</div>
 					<div class="table-responsive mb-2">
 						<table class="table table-row-bordered align-middle gy-2 mb-0">
 							<thead>
 								<tr class="fw-semibold fs-8 text-muted">
 									<th class="min-w-80px">구간</th>
-									<th class="min-w-110px text-end">전역 고정<br><span class="fw-normal fs-9">본사+세무+개발</span></th>
+									<th class="min-w-110px text-end">전역 고정</th>
 									<th class="min-w-110px">총판 추가 (원/건)</th>
 									<th class="min-w-110px">대리점 추가 (원/건)</th>
 									<th class="min-w-100px text-end">합계<br>(라이더 부담)</th>
@@ -174,17 +185,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			</div>
 		</div>
 
-		<div class="col-xl-5">
-			<div class="card card-flush h-100">
-				<div class="card-header pt-5"><h3 class="card-title fw-bold">이 화면에서 정하는 것</h3></div>
-				<div class="card-body pt-0 fs-7 text-gray-700">
-					<p class="mb-2"><strong>대리점 선차감</strong> — 배달 건당, 대리점 몫. 라이더에게는 보이지 않습니다.</p>
-					<!-- <p class="mb-2"><strong>공제 요율</strong> — 원천세·고용보험·산재보험(법정요율, 본사 전용).</p>
-					<p class="mb-3"><strong>최저 금액</strong> — 정산수수료 배분에서 <strong>본사 몫(본사+세무대리+개발사)</strong>의 하한.</p>
-					<p class="mb-0 text-muted">건당 단가는 「수수료 설정(관리)」의 정산수수료에서 정합니다.</p> -->
-				</div>
-			</div>
-		</div>
+
 
 		<?php // 「정산수수료 최저 금액」 카드는 2026-09-08 폐지 — 총액이 전역고정+추가분의 합이라
 		      //    대리점이 본사 몫을 깎을 방법 자체가 없어졌다(하한을 둘 이유가 사라짐). ?>
