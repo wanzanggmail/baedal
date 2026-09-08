@@ -7,6 +7,7 @@ declare(strict_types=1);
  * GET  — 현재 설정
  * POST { "action": "save_prededuct", prededuct_fee, [agency_id] }  — 대리점 선차감
  *      { "action": "save_rates", ... }  — 공제 요율, **본사 전용**
+ *      { "action": "save_addons", dist_fee_short/long, agency_add_short/long, [agency_id] } — 정산수수료 추가금
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
@@ -158,5 +159,56 @@ if ($action === 'save_prededuct') {
     }
     exit;
 }
-// 남은 저장 액션은 save_rates · save_prededuct 둘뿐이다.
-$err('action=save_rates 또는 save_prededuct 여야 합니다. (요율은 정산수수료로 통합, 최저 금액은 2026-09-08 폐지)', 400);
+// 정산수수료 추가금(총판·대리점) — 대리점이 자기 값을, 본사가 전역 기본값이나 지정 대리점을 저장(2026-09-08 갑).
+// 전역 고정분(본사·세무대리·개발사)은 여기서 못 만진다 — 「수수료 설정(관리)」의 전역 기본값에서만 바꾼다.
+if ($action === 'save_addons') {
+    $targetOrgId = $cfgOrgId;
+    if ($isHq && array_key_exists('agency_id', $body)) {
+        $wanted = (int) $body['agency_id'];
+        if ($wanted > 0) {
+            $org = db_row('SELECT id, name, level FROM organizations WHERE id = ? LIMIT 1', [$wanted]);
+            if ($org === null || (string) $org['level'] !== Org::LEVEL_AGENCY) {
+                $err('대리점을 찾을 수 없습니다.', 404);
+            }
+            $targetOrgId = (int) $org['id'];
+        } else {
+            $targetOrgId = null;
+        }
+    }
+
+    try {
+        require_once INC_PATH . '/WithdrawalConfig.php';
+        $before = WithdrawalConfig::get($targetOrgId);
+        $after  = WithdrawalConfig::saveAddons($body, $targetOrgId, (int) ($_SESSION['admin_id'] ?? 0));
+
+        $scope = '전역 기본값';
+        if ($targetOrgId !== null && $targetOrgId > 0) {
+            $o     = db_row('SELECT name FROM organizations WHERE id = ? LIMIT 1', [$targetOrgId]);
+            $scope = (string) ($o['name'] ?? ('조직#' . $targetOrgId));
+        }
+        // 라이더가 내는 총액이 바뀌는 값이라 변화를 그대로 남긴다.
+        AuditLog::record(
+            'withdrawal.fee_addons',
+            'withdrawal_config',
+            sprintf(
+                '[%s] 총판 추가 %d/%d → %d/%d · 대리점 추가 %d/%d → %d/%d (총액 %d/%d → %d/%d)',
+                $scope,
+                $before['dist_fee_short'], $before['dist_fee_long'],
+                $after['dist_fee_short'], $after['dist_fee_long'],
+                $before['agency_add_short'], $before['agency_add_long'],
+                $after['agency_add_short'], $after['agency_add_long'],
+                $before['fee_per_tx_short'], $before['fee_per_tx_long'],
+                $after['fee_per_tx_short'], $after['fee_per_tx_long']
+            )
+        );
+        echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $after], JSON_UNESCAPED_UNICODE);
+    } catch (InvalidArgumentException $e) {
+        $err($e->getMessage(), 422);
+    } catch (Throwable $e) {
+        $err('저장 실패: ' . $e->getMessage(), 500);
+    }
+    exit;
+}
+
+// 남은 저장 액션은 save_rates · save_prededuct · save_addons 셋이다.
+$err('action=save_rates · save_prededuct · save_addons 중 하나여야 합니다.', 400);

@@ -16,6 +16,13 @@ $needsMigrate = !AgencyFeeConfig::tableReady();
 // 최저 금액(하한)은 2026-09-08 폐지 — 총액이 「전역고정 + 추가분」의 합이라
 // 대리점이 본사 몫을 깎을 방법 자체가 없어졌다.
 $rates        = AgencyFeeConfig::rates();   // 공제 요율(원천세·고용·산재) — 본사 전용 전역값
+// 정산수수료 추가금(2026-09-08 갑) — 대리점이 자기 값을 여기서 정한다.
+// 전역 고정분(본사·세무대리·개발사)은 여기서 못 만진다 — 「수수료 설정(관리)」 전역 기본값에서만.
+require_once INC_PATH . '/WithdrawalConfig.php';
+$wdCfg      = WithdrawalConfig::get($cfgOrgId);
+$fixedShort = (int) $wdCfg['hq_fee_short'] + (int) $wdCfg['tax_fee_short'] + (int) $wdCfg['dev_fee_short'];
+$fixedLong  = (int) $wdCfg['hq_fee_long'] + (int) $wdCfg['tax_fee_long'] + (int) $wdCfg['dev_fee_long'];
+$feeMgmtUrl = admin_url('withdrawal/settings');
 // 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
 $canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
 // 대리점 선차감(2026-09-06 갑) — **대리점이 자기 금액을 직접 정한다**(갑 지시:
@@ -115,6 +122,58 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				</div>
 			</div>
 		</div>
+		<?php // ── 정산수수료 추가금 (2026-09-08 갑) ── ?>
+		<div class="col-12">
+			<div class="card card-flush">
+				<div class="card-header pt-5">
+					<h3 class="card-title fw-bold">정산수수료 추가금
+						<?php if ($isHq) : ?><span class="badge badge-light-warning fs-8 ms-2">전역 기본값</span>
+						<?php elseif ($isAgencySelf) : ?><span class="badge badge-light-primary fs-8 ms-2">우리 대리점</span><?php endif; ?></h3>
+				</div>
+				<div class="card-body pt-0 fs-7">
+					<div class="text-muted fs-8 mb-4">
+						라이더가 내는 정산수수료는 <strong>전역 고정분 + 추가분</strong>입니다.
+						여기서는 <strong>총판 추가금</strong>과 <strong>대리점 추가금</strong>만 정합니다 —
+						본사·세무대리·개발사 몫은 <a href="<?= htmlspecialchars($feeMgmtUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>에서 본사가 고정합니다.
+					</div>
+					<div class="table-responsive mb-2">
+						<table class="table table-row-bordered align-middle gy-2 mb-0">
+							<thead>
+								<tr class="fw-semibold fs-8 text-muted">
+									<th class="min-w-80px">구간</th>
+									<th class="min-w-110px text-end">전역 고정<br><span class="fw-normal fs-9">본사+세무+개발</span></th>
+									<th class="min-w-110px">총판 추가 (원/건)</th>
+									<th class="min-w-110px">대리점 추가 (원/건)</th>
+									<th class="min-w-100px text-end">합계<br>(라이더 부담)</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php foreach ([['short', '기준 미만', $fixedShort], ['long', '기준 이상', $fixedLong]] as [$b, $bLabel, $fixed]) : ?>
+								<tr>
+									<td class="fw-semibold"><?= $bLabel ?></td>
+									<td class="text-end text-gray-700" id="add_fixed_<?= $b ?>" data-fixed="<?= (int) $fixed ?>"><?= number_format((int) $fixed) ?>원</td>
+									<td><input type="number" class="form-control form-control-solid form-control-sm" id="add_dist_<?= $b ?>" min="0"
+										value="<?= (int) ($wdCfg['dist_fee_' . $b] ?? 0) ?>" <?= $canWrite ? '' : 'readonly' ?> /></td>
+									<td><input type="number" class="form-control form-control-solid form-control-sm" id="add_agency_<?= $b ?>" min="0"
+										value="<?= (int) ($wdCfg['agency_add_' . $b] ?? 0) ?>" <?= $canWrite ? '' : 'readonly' ?> /></td>
+									<td class="text-end fw-bold fs-6" id="add_total_<?= $b ?>">–</td>
+								</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+					<div class="form-text fs-9 mb-4">
+						추가금을 올리면 <strong>라이더가 내는 정산수수료가 그만큼 늘어납니다.</strong>
+						총판 추가금은 총판 지갑으로, 대리점 추가금은 대리점 몫으로 갑니다.
+						<?php if ($isHq) : ?><br><span class="text-warning fw-semibold">여기 값은 전역 기본값입니다</span> — 자기 설정을 따로 저장한 대리점에는 적용되지 않습니다.<?php endif; ?>
+					</div>
+					<?php if ($canWrite) : ?>
+					<button type="button" class="btn btn-primary" id="cfg_addons_save_btn">추가금 저장</button>
+					<?php endif; ?>
+				</div>
+			</div>
+		</div>
+
 		<div class="col-xl-5">
 			<div class="card card-flush h-100">
 				<div class="card-header pt-5"><h3 class="card-title fw-bold">이 화면에서 정하는 것</h3></div>
@@ -200,6 +259,39 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				.catch(function (e) { showToast(e.message || '저장 실패', false); });
 		}
 		/* 최저금액 저장은 2026-09-08 폐지 — 하한 장치 자체가 없어졌다. */
+
+		/* 정산수수료 추가금 — 합계를 입력하는 동안 바로 보여주고, 저장은 전용 액션으로. */
+		(function () {
+			function intv(id) { var e = document.getElementById(id); return e ? (parseInt(e.value, 10) || 0) : 0; }
+			function recompute() {
+				['short', 'long'].forEach(function (b) {
+					var fx = document.getElementById('add_fixed_' + b);
+					var base = fx ? (parseInt(fx.getAttribute('data-fixed'), 10) || 0) : 0;
+					var out = document.getElementById('add_total_' + b);
+					if (out) { out.textContent = (base + intv('add_dist_' + b) + intv('add_agency_' + b)).toLocaleString() + '원'; }
+				});
+			}
+			['short', 'long'].forEach(function (b) {
+				['dist', 'agency'].forEach(function (p) {
+					var el = document.getElementById('add_' + p + '_' + b);
+					if (el) { el.addEventListener('input', recompute); }
+				});
+			});
+			recompute();
+
+			var btn = document.getElementById('cfg_addons_save_btn');
+			if (btn) {
+				btn.addEventListener('click', function () {
+					send({
+						action: 'save_addons',
+						dist_fee_short: intv('add_dist_short'),
+						dist_fee_long: intv('add_dist_long'),
+						agency_add_short: intv('add_agency_short'),
+						agency_add_long: intv('add_agency_long'),
+					}, '추가금이 저장되었습니다.');
+				});
+			}
+		})();
 		var ratesBtn = document.getElementById('cfg_rates_save_btn');
 		if (ratesBtn) {
 			ratesBtn.addEventListener('click', function () {
