@@ -13,23 +13,9 @@ $cfgOrgId     = $isAgencySelf ? admin_org_id() : null;
 $config       = ['prededuct_fee' => AgencyFeeConfig::prededuct($cfgOrgId)];
 $apiUrl       = ADMIN_BASE . '/api/agency_fee_config.php';
 $needsMigrate = !AgencyFeeConfig::tableReady();
-// 🆕 본사가 정한 구간별 최저 건당 금액. 대리점은 이 아래로 저장할 수 없다(API에서도 거부).
-$minReady     = AgencyFeeConfig::minimumReady();
-$minimum      = AgencyFeeConfig::minimums();
-$belowMin     = $isHq && $minReady ? AgencyFeeConfig::agenciesBelowMinimum() : [];
+// 최저 금액(하한)은 2026-09-08 폐지 — 총액이 「전역고정 + 추가분」의 합이라
+// 대리점이 본사 몫을 깎을 방법 자체가 없어졌다.
 $rates        = AgencyFeeConfig::rates();   // 공제 요율(원천세·고용·산재) — 본사 전용 전역값
-// 전역 기본값이 하한보다 낮으면 **전용 설정이 없는 대리점이 하한을 우회**한다 → 화면에서 바로 보이게.
-// 전역 기본값이 하한보다 낮은지 — 대상이 「정산수수료 배분의 본사 몫」으로 바뀌었다(2026-09-07).
-$globalBelowMin = false;
-if ($isHq && $minReady && db_table_exists('withdrawal_config')) {
-    $gw = db_row('SELECT * FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
-    if ($gw !== null) {
-        $gS = (int) ($gw['hq_fee_short'] ?? 0) + (int) ($gw['tax_fee_short'] ?? 0) + (int) ($gw['dev_fee_short'] ?? 0);
-        $gL = (int) ($gw['hq_fee_long'] ?? 0) + (int) ($gw['tax_fee_long'] ?? 0) + (int) ($gw['dev_fee_long'] ?? 0);
-        $globalBelowMin = ($minimum['fee_per_tx_short'] > 0 && $gS < $minimum['fee_per_tx_short'])
-            || ($minimum['fee_per_tx_long'] > 0 && $gL < $minimum['fee_per_tx_long']);
-    }
-}
 // 총판은 저장 불가 — 저장 대상이 전역 기본값이라 하위 대리점 전체에 영향이 가기 때문(API에서도 차단).
 $canWrite     = admin_can_write('deduction') && ($isAgencySelf || $isHq);
 // 대리점 선차감(2026-09-06 갑) — **대리점이 자기 금액을 직접 정한다**(갑 지시:
@@ -69,7 +55,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-wallet fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span><span class="path3"></span><span class="path4"></span></i>
 		<div class="fs-7 text-gray-800">
-			이 화면에서는 <strong>대리점 선차감</strong>·<strong>공제 요율</strong>·<strong>정산수수료 최저 금액</strong>을 정합니다.
+			이 화면에서는 <strong>대리점 선차감</strong>과 <strong>공제 요율</strong>(원천세·고용·산재)을 정합니다.
 			<strong>정산수수료</strong>의 건당 단가·배분은 <a href="<?= htmlspecialchars(admin_url('withdrawal/settings'), ENT_QUOTES, 'UTF-8') ?>" class="link-primary fw-semibold">수수료 설정(관리)</a>에서 정합니다.
 		</div>
 	</div>
@@ -141,58 +127,8 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 			</div>
 		</div>
 
-		<?php // 최저금액은 본사 전용 — 대리점이 자기 하한을 정하면 하한이 아니게 된다. ?>
-		<?php if ($isHq) : ?>
-		<div class="col-12">
-			<div class="card card-flush border border-warning">
-				<div class="card-header pt-5">
-					<h3 class="card-title fw-bold">정산수수료 최저 금액 <span class="badge badge-light-warning ms-2">본사 전용</span></h3>
-				</div>
-				<div class="card-body pt-0 fs-7">
-					<?php if (!$minReady) : ?>
-					<div class="alert alert-warning mb-0">최저금액 컬럼이 없습니다. 서버에서 <code>php migrate.php</code> 를 실행하세요.</div>
-					<?php else : ?>
-					<div class="text-gray-700 mb-5">
-						여기서 정한 금액 <strong>아래로는 정산수수료 본사 몫(본사+세무대리+개발사)을 설정할 수 없습니다</strong>(저장 시 거부).
-						<strong>0</strong>이면 하한 없음. 전역 기본값에도 똑같이 걸리므로, 하한보다 낮은 기본값은 저장되지 않습니다.
-					</div>
-					<div class="row g-4 mb-5">
-						<div class="col-md-4">
-							<label class="form-label" for="cfg_min_short">최저 — 기준 미만 구간 (원)</label>
-							<input type="number" class="form-control form-control-solid" id="cfg_min_short" min="0" value="<?= (int) $minimum['fee_per_tx_short'] ?>" <?= $canWrite ? '' : 'readonly' ?> />
-						</div>
-						<div class="col-md-4">
-							<label class="form-label" for="cfg_min_long">최저 — 기준 이상 구간 (원)</label>
-							<input type="number" class="form-control form-control-solid" id="cfg_min_long" min="0" value="<?= (int) $minimum['fee_per_tx_long'] ?>" <?= $canWrite ? '' : 'readonly' ?> />
-						</div>
-						<?php if ($canWrite) : ?>
-						<div class="col-md-4 d-flex align-items-end">
-							<button type="button" class="btn btn-warning" id="cfg_min_save_btn">최저금액 저장</button>
-						</div>
-						<?php endif; ?>
-					</div>
-					<?php if ($globalBelowMin) : ?>
-					<div class="alert bg-light-danger fs-8 p-4 mb-4">
-						<span class="fw-bold">전역 기본값(<?= number_format((int) $globalCfg['fee_per_tx_short']) ?>원 / <?= number_format((int) $globalCfg['fee_per_tx_long']) ?>원)이 최저보다 낮습니다.</span>
-						전용 설정이 없는 대리점은 이 기본값을 쓰므로 <strong>최저가 사실상 적용되지 않습니다</strong>. 「수수료 설정(관리)」의 정산수수료 배분에서 전역 기본값을 최저 이상으로 올리세요.
-					</div>
-					<?php endif; ?>
-					<?php if ($belowMin !== []) : ?>
-					<div class="alert bg-light-danger fs-8 p-4 mb-0">
-						<div class="fw-bold mb-2">현재 최저보다 낮게 설정해둔 대리점 <?= count($belowMin) ?>곳</div>
-						<div class="text-gray-700 mb-2">하한을 올려도 <strong>기존 설정은 그대로 둡니다</strong>(남의 요율을 말없이 바꾸지 않음). 해당 대리점이 다음에 저장할 때 하한 이상으로 올려야 합니다.</div>
-						<ul class="mb-0 ps-4">
-							<?php foreach ($belowMin as $b) : ?>
-							<li><?= htmlspecialchars((string) $b['name'], ENT_QUOTES, 'UTF-8') ?> — 미만 <?= number_format((int) $b['agency_fee_short']) ?>원 / 이상 <?= number_format((int) $b['agency_fee_long']) ?>원</li>
-							<?php endforeach; ?>
-						</ul>
-					</div>
-					<?php endif; ?>
-					<?php endif; ?>
-				</div>
-			</div>
-		</div>
-		<?php endif; ?>
+		<?php // 「정산수수료 최저 금액」 카드는 2026-09-08 폐지 — 총액이 전역고정+추가분의 합이라
+		      //    대리점이 본사 몫을 깎을 방법 자체가 없어졌다(하한을 둘 이유가 사라짐). ?>
 
 		<?php // 공제 요율 — 법정요율이라 대리점이 협상할 값이 아니다(본사 전용, 전역 1벌). ?>
 		<?php if ($isHq) : ?>
@@ -263,20 +199,7 @@ $readOnlyNote = (!$isAgencySelf && !$isHq);
 				})
 				.catch(function (e) { showToast(e.message || '저장 실패', false); });
 		}
-		// 최저금액 저장(본사 전용) — 저장 후 아래 입력칸의 min 속성을 갱신해 곧바로 반영되게 한다.
-		var minBtn = document.getElementById('cfg_min_save_btn');
-		if (minBtn) {
-			minBtn.addEventListener('click', function () {
-				send({
-					action: 'save_min',
-					min_fee_per_tx_short: parseInt(document.getElementById('cfg_min_short').value, 10) || 0,
-					min_fee_per_tx_long: parseInt(document.getElementById('cfg_min_long').value, 10) || 0,
-				}, '최저금액이 저장되었습니다.').then(function (res) {
-					if (!res || !res.minimum) return;
-					/* 건당 수수료 입력은 이 화면에서 폐지됐다(2026-09-07) — min 갱신 대상 없음. */
-				});
-			});
-		}
+		/* 최저금액 저장은 2026-09-08 폐지 — 하한 장치 자체가 없어졌다. */
 		var ratesBtn = document.getElementById('cfg_rates_save_btn');
 		if (ratesBtn) {
 			ratesBtn.addEventListener('click', function () {

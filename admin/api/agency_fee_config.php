@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 /**
- * 수수료 설정 API — 대리점 선차감 · 공제 요율 · 정산수수료 최저 금액
- * GET  — 현재 설정 + 본사가 정한 최저금액
+ * 수수료 설정 API — 대리점 선차감 · 공제 요율
+ * GET  — 현재 설정
  * POST { "action": "save_prededuct", prededuct_fee, [agency_id] }  — 대리점 선차감
- *      { "action": "save_min", min_fee_per_tx_short, min_fee_per_tx_long }  — **본사 전용**
+ *      { "action": "save_rates", ... }  — 공제 요율, **본사 전용**
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
@@ -61,8 +61,6 @@ if ($method === 'GET') {
             'config'       => AgencyFeeConfig::get($cfgOrgId),
             'table_ready'  => AgencyFeeConfig::tableReady(),
             'scope'        => $cfgOrgId !== null ? 'agency' : 'global',
-            'minimum'      => AgencyFeeConfig::minimums(),
-            'min_ready'    => AgencyFeeConfig::minimumReady(),
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         $err('조회 실패: ' . $e->getMessage(), 500);
@@ -84,34 +82,8 @@ $body = str_contains($ct, 'application/json')
 
 $action = trim((string) ($body['action'] ?? 'save'));
 
-// 최저금액은 **본사만** 정한다. 대리점이 자기 하한을 정하면 하한이 아니게 되고,
-// 총판은 위에서 이미 쓰기가 막혀 있다.
-if ($action === 'save_min') {
-    if (!$isHq) {
-        $err('최저금액은 본사만 설정할 수 있습니다.', 403);
-    }
-    try {
-        $r = AgencyFeeConfig::saveMinimums($body);
-        AuditLog::record(
-            'deduction.agency_fee.min',
-            'deduction_global_config',
-            sprintf('정산수수료 최저 — 기준 미만 %d원 / 이상 %d원', $r['min']['fee_per_tx_short'], $r['min']['fee_per_tx_long'])
-        );
-        $msg = '최저금액이 저장되었습니다.';
-        if ($r['below'] !== []) {
-            $msg .= sprintf(' ⚠️ 이미 최저보다 낮게 설정된 대리점 %d곳이 있습니다(기존 설정은 그대로 두었습니다).', count($r['below']));
-        }
-        if ($r['global_below']) {
-            $msg .= ' ⚠️ 전역 기본값이 최저보다 낮습니다 — 전용 설정이 없는 대리점이 최저를 우회합니다.';
-        }
-        echo json_encode(['ok' => true, 'message' => $msg, 'minimum' => $r['min'], 'below' => $r['below']], JSON_UNESCAPED_UNICODE);
-    } catch (InvalidArgumentException $e) {
-        $err($e->getMessage(), 422);
-    } catch (Throwable $e) {
-        $err('저장 실패: ' . $e->getMessage(), 500);
-    }
-    exit;
-}
+// 최저금액 저장(save_min)은 2026-09-08 폐지 — 총액이 「전역고정 + 추가분」의 합이라
+// 대리점이 본사 몫을 깎을 방법이 없어져 하한을 둘 이유가 사라졌다.
 
 // 공제 요율(원천세·고용·산재)도 **본사만** 정한다 — 법정요율이라 대리점이 바꿀 값이 아니다.
 if ($action === 'save_rates') {
@@ -186,6 +158,5 @@ if ($action === 'save_prededuct') {
     }
     exit;
 }
-// 대행수수료 요율 저장(action=save)은 2026-09-07 폐지 — 정산수수료와 통합됐다.
-// 이 화면에 남은 저장 액션은 save_min · save_rates · save_prededuct 셋뿐이다.
-$err('action=save_min, save_rates, save_prededuct 중 하나여야 합니다. (대행수수료 요율은 폐지되고 정산수수료로 통합됐습니다)', 400);
+// 남은 저장 액션은 save_rates · save_prededuct 둘뿐이다.
+$err('action=save_rates 또는 save_prededuct 여야 합니다. (요율은 정산수수료로 통합, 최저 금액은 2026-09-08 폐지)', 400);
