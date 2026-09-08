@@ -100,6 +100,7 @@ final class MigrateRunner
         self::migrateDropAgencyFeeRates();
         self::migrateFeePayerFlags();
         self::migrateDropDeadAgencyFeeColumns();
+        self::migrateFeeShareAdditive();
 
         echo "\n완료.\n";
     }
@@ -3797,5 +3798,80 @@ final class MigrateRunner
             db_execute("ALTER TABLE `{$table}` DROP COLUMN `{$col}`");
             echo "OK    {$table}.{$col} 제거(전부 0·미사용)\n";
         }
+    }
+
+    /**
+     * 정산수수료 구조 전환 — **전역 고정 + 대리점 추가분** (2026-09-08 갑).
+     *
+     * 갑: "본사, 개발, 세무대리의 수수료 금액을 전역으로 고정시킬꺼야.
+     *      그리고 대리점에서 추가로 받을 금액을 설정할수 있게 하고"
+     *      "대리점에서 대리점, 총판 추가 금액을 설정할수 있도록 할께" · "추가분도 구분을 해야해"
+     *
+     * ── 왜 바꾸나 ────────────────────────────────────────────────────────────
+     * 예전엔 **총액(`fee_per_tx_*`)을 따로 정하고 거기서 본사·세무·개발·총판을 뗀 나머지가
+     * 대리점 몫**이었다. 둘을 따로 설정하니 서로 어긋날 수 있었고, 실제로 어긋나 있었다 —
+     * 대리점 21곳이 총액 80원인데 배분 합은 88원이라 본사가 73원 대신 65원만 받고
+     * 대리점 몫은 0으로 눌렸다(절단 로직이 총액까지만 떼기 때문).
+     *
+     * 이제 **총액을 합에서 만든다**:
+     *     총액 = 전역고정(본사+세무대리+개발사) + 총판 추가 + 대리점 추가
+     * 정의상 어긋날 수가 없고, 「최저 금액」 하한 장치도 필요 없어진다
+     * (하한은 대리점이 본사 몫을 깎지 못하게 하려던 것인데, 이제 깎을 수가 없다).
+     *
+     * ── 컬럼 ────────────────────────────────────────────────────────────────
+     * 새로: `agency_add_short/long`  — 대리점이 추가로 받을 금액(구간별)
+     * 재사용: `dist_fee_short/long`  — 뜻이 「총판 몫」에서 「총판 추가금」으로 바뀌었다(값은 같다)
+     * 전역 전용: `hq_fee_*`·`tax_fee_*`·`dev_fee_*` — **전역 행만 읽는다.**
+     *            대리점 행에도 컬럼은 남지만 더는 보지 않는다(과거 값 보존용).
+     * 파생: `fee_per_tx_short/long` — 이제 입력값이 아니라 위 합이다. 조회 시 계산해 돌려준다.
+     *
+     * 갑 지시로 **대리점 추가분은 0에서 시작**한다 → 전 대리점 총액이 전역고정과 같아진다.
+     */
+    private static function migrateFeeShareAdditive(): void
+    {
+        echo "== 정산수수료: 전역 고정 + 대리점 추가분 ==\n";
+
+        if (!db_table_exists('withdrawal_config')) {
+            echo "SKIP  withdrawal_config 없음\n";
+
+            return;
+        }
+
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_config'), 'Field');
+        $add  = [];
+        if (!in_array('agency_add_short', $cols, true)) {
+            $add[] = "ADD COLUMN agency_add_short INT NOT NULL DEFAULT 0"
+                   . " COMMENT '대리점 추가금 — 기준 미만 건당(원)' AFTER dist_fee_long";
+        }
+        if (!in_array('agency_add_long', $cols, true)) {
+            $add[] = "ADD COLUMN agency_add_long INT NOT NULL DEFAULT 0"
+                   . " COMMENT '대리점 추가금 — 기준 이상 건당(원)' AFTER agency_add_short";
+        }
+        if ($add === []) {
+            echo "SKIP  agency_add_short/long (이미 있음)\n";
+        } else {
+            db_execute('ALTER TABLE withdrawal_config ' . implode(', ', $add));
+            echo 'OK    agency_add_short/long 추가(기본 0 — 갑 지시)' . "\n";
+        }
+
+        // 총액 컬럼을 파생값으로 맞춰둔다. 조회는 WithdrawalConfig::get() 이 항상 다시 계산하지만,
+        // DB 값만 보는 리포트·수기 조회가 있어 저장값도 어긋나지 않게 해둔다.
+        $g = db_row('SELECT * FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+        if ($g === null) {
+            echo "SKIP  전역 기본값 행 없음\n";
+
+            return;
+        }
+        $fixShort = (int) $g['hq_fee_short'] + (int) $g['tax_fee_short'] + (int) $g['dev_fee_short'];
+        $fixLong  = (int) $g['hq_fee_long'] + (int) $g['tax_fee_long'] + (int) $g['dev_fee_long'];
+
+        $n = db_execute(
+            'UPDATE withdrawal_config
+                SET fee_per_tx_short = ? + dist_fee_short + agency_add_short,
+                    fee_per_tx_long  = ? + dist_fee_long  + agency_add_long,
+                    updated_at = NOW()',
+            [$fixShort, $fixLong]
+        );
+        printf("OK    총액 재계산 %d행 (전역고정 %d/%d + 총판추가 + 대리점추가)\n", $n, $fixShort, $fixLong);
     }
 }

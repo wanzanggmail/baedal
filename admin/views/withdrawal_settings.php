@@ -48,7 +48,7 @@ $pgFee = $pgFeeReady
     : null;
 $apiUrl  = ADMIN_BASE . '/api/withdrawal_config.php';
 // 본사 몫 하한값은 「대행수수료 설정」의 최저 금액(구간별)을 그대로 쓴다 — 별도 필드 없음.
-$agencyMin    = AgencyFeeConfig::minimums(); // ['fee_per_tx_short'=>int, 'fee_per_tx_long'=>int]
+// 최저 금액(하한) 장치는 2026-09-08 폐지 — 총액이 합에서 나오므로 대리점이 본사 몫을 깎을 수 없다.
 // 대리점 선차감(2026-09-06 갑) — 여기서도 대리점을 골라 바로 정할 수 있게 한다.
 // 값이 없는 대리점은 전역 상속분이 보인다(저장하면 그 값으로 자기 행이 생긴다).
 $predeductReady = AgencyFeeConfig::predeductReady();
@@ -160,16 +160,19 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 								value="<?= (int) $config['fee_day_threshold'] ?>" required />
 							<div class="form-text">정산일로부터 이 일수 <strong>미만</strong>인 주문은 짧은 구간 단가, <strong>이상</strong>이면 긴 구간 단가(건당)</div>
 						</div>
+						<?php // 건당 수수료는 2026-09-08 부터 **파생값**이다 — 아래 「정산수수료 구성」의 합.
+						      //    입력칸으로 두면 그 합과 어긋날 수 있어(예전에 실제로 어긋났다) 읽기 전용으로 보여준다. ?>
 						<div class="row g-4 mb-6">
 							<div class="col-md-6">
-								<label class="form-label required" for="cfg_fee_short">건당 수수료 — 기준 미만 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_short" min="0"
-									value="<?= (int) $config['fee_per_tx_short'] ?>" required />
+								<label class="form-label">건당 수수료 — 기준 미만 (원)</label>
+								<div class="form-control form-control-solid bg-light fw-bold fs-5"><?= number_format((int) $config['fee_per_tx_short']) ?></div>
 							</div>
 							<div class="col-md-6">
-								<label class="form-label required" for="cfg_fee_long">건당 수수료 — 기준 이상 (원)</label>
-								<input type="number" class="form-control form-control-solid" id="cfg_fee_long" min="0"
-									value="<?= (int) $config['fee_per_tx_long'] ?>" required />
+								<label class="form-label">건당 수수료 — 기준 이상 (원)</label>
+								<div class="form-control form-control-solid bg-light fw-bold fs-5"><?= number_format((int) $config['fee_per_tx_long']) ?></div>
+							</div>
+							<div class="col-12">
+								<div class="form-text">아래 <strong>「정산수수료 구성」</strong>의 합입니다. 바꾸려면 그 표에서 조정하세요.</div>
 							</div>
 						</div>
 
@@ -197,72 +200,61 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 						<?php endif; ?>
 
 						<div class="separator separator-dashed my-6"></div>
-						<h4 class="fw-bold fs-6 mb-2">정산수수료 배분 <span class="badge badge-light-danger fs-8 ms-1">본사만 설정</span></h4>
+						<h4 class="fw-bold fs-6 mb-2">정산수수료 구성</h4>
 						<div class="text-muted fs-8 mb-4">
-							위에서 라이더에게 받은 정산수수료를 본사·총판·대리점이 나눠 갖습니다.
-							<strong>본사·총판 몫 모두 배달 건당 정액(원)</strong>이며, <strong>기준 미만/기준 이상</strong> 두 구간에 각각 다르게 매길 수 있습니다.
-							<strong>대리점 몫 = 정산수수료 − 본사 − 총판</strong>(나머지 전부)입니다.
-						</div>
-						<?php // 본사 몫 하한 = 「수수료 설정」의 최저 금액(구간별). 여기서 값을 만들지 않고 참조만 한다. ?>
-						<div class="alert bg-light-info d-flex flex-column p-4 mb-4 fs-8" id="cfg_min_ref"
-							data-min-short="<?= (int) $agencyMin['fee_per_tx_short'] ?>" data-min-long="<?= (int) $agencyMin['fee_per_tx_long'] ?>">
-							<div class="fw-semibold text-gray-800 mb-1">본사 몫(건당) 하한 — <span class="text-primary">정산수수료 최저 금액</span> 적용</div>
-							<?php // 2026-09-06 갑: 하한이 걸리는 「본사 몫」은 본사+세무대리+개발사 **합계**다. ?>
-							<div class="text-gray-700 mb-1">하한은 <strong>본사 + 세무대리 + 개발사 합계</strong>에 걸립니다. 셋을 어떻게 나누든 합계만 최저 금액 이상이면 됩니다.</div>
-							<?php if ((int) $agencyMin['fee_per_tx_short'] > 0 || (int) $agencyMin['fee_per_tx_long'] > 0) : ?>
-							<div class="text-gray-700">기준 미만 <strong><?= number_format((int) $agencyMin['fee_per_tx_short']) ?>원</strong> · 기준 이상 <strong><?= number_format((int) $agencyMin['fee_per_tx_long']) ?>원</strong> 미만으로는 저장할 수 없습니다.</div>
-							<div class="text-gray-700 mt-1">지금 합계 — 기준 미만 <strong id="cfg_hqsum_short">–</strong> · 기준 이상 <strong id="cfg_hqsum_long">–</strong></div>
-							<?php else : ?>
-							<div class="text-gray-700">현재 정산수수료 최저 금액이 <strong>0(하한 없음)</strong>입니다.</div>
-							<?php endif; ?>
-							<a href="<?= htmlspecialchars($agencyFeeUrl, ENT_QUOTES, 'UTF-8') ?>" class="link-primary mt-1">수수료 설정(본사 기본값)에서 관리 →</a>
+							라이더가 내는 정산수수료는 <strong>전역 고정분 + 추가분</strong>의 합입니다(2026-09-08 개편).
+							예전처럼 총액을 따로 정하지 않으므로 <strong>총액과 배분이 어긋날 수 없습니다.</strong>
+							<div class="mt-2 font-monospace text-gray-800">
+								정산수수료(건당) = 본사 + 세무대리 + 개발사 <span class="text-muted">(전역 고정)</span>
+								&nbsp;+&nbsp; 총판 추가 &nbsp;+&nbsp; 대리점 추가 <span class="text-muted">(대리점이 설정)</span>
+							</div>
 						</div>
 						<div class="table-responsive mb-2">
 							<table class="table table-row-bordered align-middle gy-2 mb-0">
 								<thead>
 									<tr class="fw-semibold fs-8 text-muted">
-										<th class="min-w-90px">구간</th>
-										<th class="min-w-90px text-end">정산수수료<br>(건당)</th>
-										<th class="min-w-110px">본사 몫 (원/건)</th>
-										<th class="min-w-110px">총판 몫 (원/건)</th>
-										<th class="min-w-110px">세무대리 몫 (원/건)<br><span class="fw-normal fs-9">본사 하한에 포함</span></th>
-										<th class="min-w-110px">개발사 몫 (원/건)<br><span class="fw-normal fs-9">본사 하한에 포함</span></th>
-										<th class="min-w-90px text-end">대리점 몫<br>(자동)</th>
+										<th class="min-w-80px">구간</th>
+										<th class="min-w-100px">본사<br><span class="fw-normal fs-9 text-danger">전역 고정</span></th>
+										<th class="min-w-100px">세무대리<br><span class="fw-normal fs-9 text-danger">전역 고정</span></th>
+										<th class="min-w-100px">개발사<br><span class="fw-normal fs-9 text-danger">전역 고정</span></th>
+										<th class="min-w-100px">총판 추가<br><span class="fw-normal fs-9 text-primary">대리점 설정</span></th>
+										<th class="min-w-100px">대리점 추가<br><span class="fw-normal fs-9 text-primary">대리점 설정</span></th>
+										<th class="min-w-90px text-end">합계<br>(라이더 부담)</th>
 									</tr>
 								</thead>
 								<tbody>
+									<?php
+									// 전역 고정 3칸은 **전역 기본값 화면에서만** 편집한다. 대리점을 고르고 들어오면
+									// 읽기 전용 — 대리점이 본사 몫을 만질 수 있으면 「전역 고정」이 아니게 된다.
+									$fixedRO = ($targetAgency !== null || $isAgencySelf) ? ' disabled' : '';
+									$addRO   = $isAgencySelf ? ' disabled' : '';
+									foreach ([['short', '기준 미만'], ['long', '기준 이상']] as [$b, $bLabel]) : ?>
 									<tr>
-										<td class="fw-semibold">기준 미만</td>
-										<td class="text-end" id="cfg_fee_short_ref"><?= number_format((int) $config['fee_per_tx_short']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_short" min="0"
-											value="<?= (int) $config['hq_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_short" min="0"
-											value="<?= (int) $config['dist_fee_short'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_tax_short" min="0"
-											value="<?= (int) ($config['tax_fee_short'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dev_short" min="0"
-											value="<?= (int) ($config['dev_fee_short'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td class="text-end fw-semibold" id="cfg_agency_short">–</td>
+										<td class="fw-semibold"><?= $bLabel ?></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_<?= $b ?>" min="0"
+											value="<?= (int) ($config['hq_fee_' . $b] ?? 0) ?>"<?= $fixedRO ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_tax_<?= $b ?>" min="0"
+											value="<?= (int) ($config['tax_fee_' . $b] ?? 0) ?>"<?= $fixedRO ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dev_<?= $b ?>" min="0"
+											value="<?= (int) ($config['dev_fee_' . $b] ?? 0) ?>"<?= $fixedRO ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_<?= $b ?>" min="0"
+											value="<?= (int) ($config['dist_fee_' . $b] ?? 0) ?>"<?= $addRO ?> /></td>
+										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_add_<?= $b ?>" min="0"
+											value="<?= (int) ($config['agency_add_' . $b] ?? 0) ?>"<?= $addRO ?> /></td>
+										<td class="text-end fw-bold fs-6" id="cfg_total_<?= $b ?>">–</td>
 									</tr>
-									<tr>
-										<td class="fw-semibold">기준 이상</td>
-										<td class="text-end" id="cfg_fee_long_ref"><?= number_format((int) $config['fee_per_tx_long']) ?>원</td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_hq_long" min="0"
-											value="<?= (int) $config['hq_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dist_long" min="0"
-											value="<?= (int) $config['dist_fee_long'] ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_tax_long" min="0"
-											value="<?= (int) ($config['tax_fee_long'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td><input type="number" class="form-control form-control-solid form-control-sm" id="cfg_dev_long" min="0"
-											value="<?= (int) ($config['dev_fee_long'] ?? 0) ?>"<?= $isAgencySelf ? ' disabled' : '' ?> /></td>
-										<td class="text-end fw-semibold" id="cfg_agency_long">–</td>
-									</tr>
+									<?php endforeach; ?>
 								</tbody>
 							</table>
 						</div>
 						<div class="form-text fs-9 mb-6" id="cfg_share_hint">
-							세무대리·개발사 몫은 <strong>각 조직 지갑으로 실제 이체</strong>됩니다. 뗴는 순서는 <strong>세무대리 → 개발사 → 본사 → 총판 → 대리점(나머지)</strong>이며,
-							대리점 몫이 0보다 작아지면 대리점은 0원이 되고 정산수수료까지만 가져갑니다.
+							세무대리·개발사 몫은 <strong>각 조직 지갑으로 실제 이체</strong>됩니다.
+							<?php if ($targetAgency !== null) : ?>
+							<br><span class="text-danger fw-semibold">본사·세무대리·개발사 몫은 전역 고정</span>이라 여기서는 못 바꿉니다 —
+							대상을 <strong>「전역 기본값」</strong>으로 바꿔 수정하세요. 이 화면에서는 <strong>총판 추가·대리점 추가</strong>만 저장됩니다.
+							<?php else : ?>
+							<br>여기서 정한 <strong>전역 고정분은 모든 대리점에 그대로 적용</strong>됩니다. 추가분은 대리점별로 따로 정합니다.
+							<?php endif; ?>
 						</div>
 						<?php if ($isAgencySelf) : ?>
 						<div class="alert bg-light-secondary fs-8 p-3 mb-6">배분 설정은 본사가 관리합니다. 조회만 가능합니다.</div>
@@ -353,49 +345,25 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 			});
 		}
 
-		// 정산수수료 배분 — 대리점 몫(자동)을 실시간으로 보여준다. 대리점 몫 = 정산수수료 − 본사 − 총판.
+		// 정산수수료 구성 — 합계(라이더 부담)를 입력하는 동안 바로 보여준다.
+		// 총액은 다섯 칸의 합이라 어긋날 수가 없다(2026-09-08 개편).
 		(function () {
-			var feeShortEl = document.getElementById('cfg_fee_short');
-			var feeLongEl  = document.getElementById('cfg_fee_long');
-			var outShort = document.getElementById('cfg_agency_short');
-			var outLong  = document.getElementById('cfg_agency_long');
-			if (!outShort || !outLong) { return; }
 			function intv(id) { var e = document.getElementById(id); return e ? (parseInt(e.value, 10) || 0) : 0; }
-			function refShow(id, val) { var e = document.getElementById(id); if (e) { e.textContent = val.toLocaleString() + '원'; } }
-			function render(out, fee, hq, dist, tax, dev) {
-				var agency = fee - hq - dist - (tax || 0) - (dev || 0);
-				if (agency < 0) {
-					out.innerHTML = '<span class="text-danger">0</span>';
-					out.title = '세무대리+개발사+본사+총판이 정산수수료를 넘어 대리점 몫은 0원으로 막힙니다.';
-				} else {
-					out.textContent = agency.toLocaleString();
-					out.title = '';
-				}
-			}
-			/* 하한은 본사+세무대리+개발사 **합계**에 걸린다(2026-09-06 갑). 저장 눌러야 알 수
-			   있으면 답답하니, 합계와 미달 여부를 입력하는 동안 바로 보여준다. */
-			var minRef  = document.getElementById('cfg_min_ref');
-			var MIN_S   = minRef ? (parseInt(minRef.getAttribute('data-min-short'), 10) || 0) : 0;
-			var MIN_L   = minRef ? (parseInt(minRef.getAttribute('data-min-long'), 10) || 0) : 0;
-			function sumShow(id, sum, min) {
-				var e = document.getElementById(id);
-				if (!e) { return; }
-				e.textContent = sum.toLocaleString() + '원';
-				var low = min > 0 && sum < min;
-				e.className = low ? 'text-danger' : 'text-success';
-				e.title = low ? '최저 ' + min.toLocaleString() + '원에 미달합니다.' : '';
-			}
+			var PARTS = ['hq', 'tax', 'dev', 'dist', 'add'];
 			function recompute() {
-				var fs = intv('cfg_fee_short'), fl = intv('cfg_fee_long');
-				refShow('cfg_fee_short_ref', fs);
-				refShow('cfg_fee_long_ref', fl);
-				sumShow('cfg_hqsum_short', intv('cfg_hq_short') + intv('cfg_tax_short') + intv('cfg_dev_short'), MIN_S);
-				sumShow('cfg_hqsum_long',  intv('cfg_hq_long')  + intv('cfg_tax_long')  + intv('cfg_dev_long'),  MIN_L);
-				render(outShort, fs, intv('cfg_hq_short'), intv('cfg_dist_short'), intv('cfg_tax_short'), intv('cfg_dev_short'));
-				render(outLong,  fl, intv('cfg_hq_long'),  intv('cfg_dist_long'),  intv('cfg_tax_long'),  intv('cfg_dev_long'));
+				['short', 'long'].forEach(function (b) {
+					var sum = 0;
+					PARTS.forEach(function (p) { sum += intv('cfg_' + p + '_' + b); });
+					var out = document.getElementById('cfg_total_' + b);
+					if (out) { out.textContent = sum.toLocaleString() + '원'; }
+				});
 			}
-			['cfg_fee_short','cfg_fee_long','cfg_hq_short','cfg_dist_short','cfg_hq_long','cfg_dist_long','cfg_tax_short','cfg_tax_long','cfg_dev_short','cfg_dev_long']
-				.forEach(function (id) { var e = document.getElementById(id); if (e) { e.addEventListener('input', recompute); } });
+			['short', 'long'].forEach(function (b) {
+				PARTS.forEach(function (p) {
+					var el = document.getElementById('cfg_' + p + '_' + b);
+					if (el) { el.addEventListener('input', recompute); }
+				});
+			});
 			recompute();
 		})();
 
@@ -448,40 +416,29 @@ $needsMigrate = !db_table_exists('withdrawal_config');
 				action: 'save',
 				reserve_amount: parseInt(document.getElementById('cfg_reserve').value, 10) || 0,
 				fee_day_threshold: parseInt(document.getElementById('cfg_threshold').value, 10) || 7,
-				fee_per_tx_short: parseInt(document.getElementById('cfg_fee_short').value, 10) || 0,
-				fee_per_tx_long: parseInt(document.getElementById('cfg_fee_long').value, 10) || 0,
 				auto_transfer_on_request: document.getElementById('cfg_auto_transfer').checked ? 1 : 0,
 			};
 			if (TARGET_AGENCY_ID > 0) { payload.agency_id = TARGET_AGENCY_ID; }
-			// 배분 설정은 본사만 보낸다 — 대리점이 저장할 땐 키를 아예 빼서 서버가 기존 값을 유지하게 한다.
-			var hqShortEl = document.getElementById('cfg_hq_short');
-			if (hqShortEl && !hqShortEl.disabled) {
-				// 하한은 「수수료 설정」의 정산수수료 최저 금액(구간별)을 참조. 서버도 막지만 저장 전에 알려준다.
-				var ref     = document.getElementById('cfg_min_ref');
-				var minS    = ref ? (parseInt(ref.getAttribute('data-min-short'), 10) || 0) : 0;
-				var minL    = ref ? (parseInt(ref.getAttribute('data-min-long'), 10) || 0) : 0;
-				var num     = function (id) { return parseInt((document.getElementById(id) || {}).value, 10) || 0; };
-				var hqShort = parseInt(hqShortEl.value, 10) || 0;
-				var hqLong  = num('cfg_hq_long');
-				var taxS = num('cfg_tax_short'), taxL = num('cfg_tax_long');
-				var devS = num('cfg_dev_short'), devL = num('cfg_dev_long');
-				/* 하한은 본사 단독이 아니라 본사+세무대리+개발사 합계에 걸린다(2026-09-06 갑). */
-				var sumS = hqShort + taxS + devS;
-				var sumL = hqLong + taxL + devL;
-				if ((minS > 0 && sumS < minS) || (minL > 0 && sumL < minL)) {
-					showToast('본사+세무대리+개발사 합계(건당)는 정산수수료 최저 금액(미만 ' + minS.toLocaleString()
-						+ '원 / 이상 ' + minL.toLocaleString() + '원)보다 낮을 수 없습니다. 현재 합계 '
-						+ sumS.toLocaleString() + '원 / ' + sumL.toLocaleString() + '원', false);
-					return;
-				}
-				payload.hq_fee_short   = hqShort;
-				payload.hq_fee_long    = hqLong;
-				payload.dist_fee_short = num('cfg_dist_short');
-				payload.tax_fee_short = taxS;
-				payload.tax_fee_long = taxL;
-				payload.dev_fee_short = devS;
-				payload.dev_fee_long = devL;
-				payload.dist_fee_long  = num('cfg_dist_long');
+
+			/* 정산수수료 구성(2026-09-08 개편) — 총액은 서버가 합에서 만든다. 여기서 안 보낸다.
+			   전역 고정 3칸은 disabled 면 아예 빼서 서버가 기존 값을 지키게 한다(대리점 저장 시).
+			   추가분 2칸은 편집 가능할 때만 보낸다. */
+			var num = function (id) { return parseInt((document.getElementById(id) || {}).value, 10) || 0; };
+			var hqEl = document.getElementById('cfg_hq_short');
+			if (hqEl && !hqEl.disabled) {
+				payload.hq_fee_short  = num('cfg_hq_short');
+				payload.hq_fee_long   = num('cfg_hq_long');
+				payload.tax_fee_short = num('cfg_tax_short');
+				payload.tax_fee_long  = num('cfg_tax_long');
+				payload.dev_fee_short = num('cfg_dev_short');
+				payload.dev_fee_long  = num('cfg_dev_long');
+			}
+			var addEl = document.getElementById('cfg_add_short');
+			if (addEl && !addEl.disabled) {
+				payload.dist_fee_short   = num('cfg_dist_short');
+				payload.dist_fee_long    = num('cfg_dist_long');
+				payload.agency_add_short = num('cfg_add_short');
+				payload.agency_add_long  = num('cfg_add_long');
 			}
 			// 이체 수수료도 본사 전용 — 편집 가능할 때만 보낸다.
 			var tfEl = document.getElementById('cfg_transfer_fee');
