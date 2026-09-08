@@ -423,15 +423,17 @@ final class SettlementLedger
         ) as $r) {
             $pre[(int) $r['cycle_id']] = (int) $r['v'];
         }
-        if ($pre === []) {
-            return $cycles;
-        }
+        // 선차감이 없어도 역산은 해야 한다 — 구 사이클의 어긋남은 선차감과 무관하다.
         foreach ($cycles as $i => $c) {
-            $p = $pre[(int) ($c['id'] ?? 0)] ?? 0;
-            if ($p > 0) {
-                $cycles[$i]['gross_amount']     = max(0, (int) ($c['gross_amount'] ?? 0) - $p);
-                $cycles[$i]['total_fee_amount'] = max(0, (int) ($c['total_fee_amount'] ?? 0) - $p);
-            }
+            $p   = $pre[(int) ($c['id'] ?? 0)] ?? 0;
+            $fee = max(0, (int) ($c['total_fee_amount'] ?? 0) - $p);
+            $net = (int) ($c['net_amount'] ?? 0);
+            $sup = (int) ($c['support_amount'] ?? 0);
+
+            $cycles[$i]['total_fee_amount'] = $fee;
+            // 정산금액은 sumForRider 와 **같은 규칙**으로 역산한다(위 주석 참고) — 구 사이클에서
+            // 원장 gross 를 그대로 쓰면 라이더 화면끼리 숫자가 어긋난다.
+            $cycles[$i]['gross_amount'] = max(0, $net + $fee - $sup);
         }
 
         return $cycles;
@@ -480,14 +482,23 @@ final class SettlementLedger
             $params
         )['v'] ?? 0);
 
+        $fee     = max(0, (int) $row['fee'] - $pre);
+        $net     = (int) $row['net'];
+        $support = (int) $row['support'];
+
+        // ⚠️ 정산금액은 **원장의 gross_amount 를 그대로 쓰지 않는다.**
+        // 산식이 여러 차례 개정됐고 기존 사이클은 소급 재계산하지 않아, 초기 구간에서는
+        // gross+support−fee 가 net 과 어긋난다(실측 128건). 라이더 화면(명세서·수수료 내역)은
+        // 전부 **net+fee 로 역산**해 보여주므로, 이 집계도 같은 규칙을 써야 화면끼리 안 어긋난다.
+        //   정산금액 = 실수령 + 공제 − 지원금   →   정산금액 + 지원금 − 공제 = 실수령 (항상 성립)
         return [
             'count'   => (int) $row['cnt'],
             'orders'  => (int) $row['orders'],
-            'gross'   => max(0, (int) $row['gross'] - $pre),
-            'support' => (int) $row['support'],
+            'gross'   => max(0, $net + $fee - $support),
+            'support' => $support,
             'payout'  => (int) $row['payout'],
-            'fee'     => max(0, (int) $row['fee'] - $pre),
-            'net'     => (int) $row['net'],
+            'fee'     => $fee,
+            'net'     => $net,
         ];
     }
 

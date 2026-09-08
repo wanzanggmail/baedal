@@ -12,6 +12,9 @@ final class AdminDashboard
     /** 큰 금액 출금 하이라이트 임계값(원) */
     public const LARGE_WITHDRAWAL_THRESHOLD = 1_000_000;
 
+    /** 일일정산이 이 일수 이상 밀리면 리스크 알림에 띄운다(2026-09-09 갑). */
+    public const SETTLEMENT_STALE_DAYS = 3;
+
     /**
      * @param ?string $from 기간 시작(YYYY-MM-DD). 생략 시 이번 주 월요일
      * @param ?string $to   기간 끝(YYYY-MM-DD). 생략 시 오늘
@@ -209,10 +212,90 @@ final class AdminDashboard
      *
      * @return list<array{at:string, action:string, actor:string, detail:string, level:string}>
      */
+    /**
+     * 일일정산서가 밀린 대리점 — 본사 리스크 알림용 (2026-09-09 갑).
+     *
+     * 갑: "본사 대시보드에 일일정산서가 3일 이상 밀린 대리점에 대해서 리스크 알림에 띄워줘"
+     *
+     * 판정: **활동중 라이더가 있는 활성 대리점**의 마지막 «정산 반영 완료»(`status='applied'`)
+     * 일일 업로드의 정산일이 기준 일수 이상 지났으면 알린다. 업로드만 하고 반영을 안 한 것도
+     * 밀린 것이므로 `applied` 만 센다.
+     *
+     * 라이더가 없는 대리점은 제외한다 — 정산할 게 없는데 매일 빨간 줄이 뜨면 그 알림 전체를
+     * 안 보게 된다(개발 DB 기준 29곳 중 26곳이 라이더 0명이었다).
+     *
+     * @return list<array{at:string, action:string, actor:string, detail:string, level:string}>
+     */
+    public static function staleSettlementAlerts(): array
+    {
+        if (!self::tableExists('settlement_uploads') || !self::tableExists('organizations')) {
+            return [];
+        }
+
+        $rows = db_rows(
+            "SELECT o.name,
+                    COUNT(r.id) AS riders,
+                    (SELECT MAX(u.settlement_date)
+                       FROM settlement_uploads u
+                      WHERE u.agency_id = o.id AND u.kind = 'daily' AND u.status = 'applied') AS last_date
+               FROM organizations o
+               INNER JOIN riders r ON r.agency_id = o.id AND r.status = 'active'
+              WHERE o.level = ? AND o.is_active = 1
+              GROUP BY o.id, o.name
+             HAVING riders > 0
+              ORDER BY last_date IS NULL DESC, last_date ASC",
+            [Org::LEVEL_AGENCY]
+        );
+
+        $today = new DateTimeImmutable('today');
+        $out   = [];
+        foreach ($rows as $r) {
+            $last = (string) ($r['last_date'] ?? '');
+            if ($last === '') {
+                // 라이더는 있는데 정산을 한 번도 반영한 적이 없다 — 밀린 것보다 더 급하다.
+                $out[] = [
+                    'at'     => '기록 없음',
+                    'action' => '정산 지연',
+                    'actor'  => sprintf('라이더 %d명', (int) $r['riders']),
+                    'detail' => sprintf('%s — 일일정산 반영 이력이 없습니다', (string) $r['name']),
+                    'level'  => 'danger',
+                ];
+                continue;
+            }
+
+            $lastDay = DateTimeImmutable::createFromFormat('!Y-m-d', substr($last, 0, 10));
+            if ($lastDay === false) {
+                continue;
+            }
+            $days = (int) $today->diff($lastDay)->days;
+            if ($lastDay > $today || $days < self::SETTLEMENT_STALE_DAYS) {
+                continue;
+            }
+
+            $out[] = [
+                'at'     => sprintf('%d일 밀림', $days),
+                'action' => '정산 지연',
+                'actor'  => sprintf('라이더 %d명', (int) $r['riders']),
+                'detail' => sprintf('%s — 최종 정산 %s', (string) $r['name'], date('m-d', $lastDay->getTimestamp())),
+                // 일주일 넘게 밀리면 라이더 지급이 막히는 수준이라 등급을 올린다.
+                'level'  => $days >= 7 ? 'danger' : 'warning',
+            ];
+        }
+
+        return $out;
+    }
     public static function riskAlerts(): array
     {
-        if (admin_org_level() !== Org::LEVEL_ADMIN || !self::tableExists('audit_logs')) {
+        if (admin_org_level() !== Org::LEVEL_ADMIN) {
             return [];
+        }
+
+        // 정산이 밀린 대리점을 **맨 앞에** 붙인다(2026-09-09 갑) — 감사 로그보다 지금 조치가
+        // 필요한 일이라 먼저 보여야 한다.
+        $out = self::staleSettlementAlerts();
+
+        if (!self::tableExists('audit_logs')) {
+            return $out;
         }
 
         $rows = db_rows(
@@ -226,7 +309,6 @@ final class AdminDashboard
               LIMIT 10"
         );
 
-        $out = [];
         foreach ($rows as $r) {
             $action = (string) ($r['action'] ?? '');
             $after  = json_decode((string) ($r['after_value'] ?? ''), true);

@@ -268,7 +268,7 @@ if ($agencyId > 0) {
 					<?php else : ?>
 					<div class="alert bg-light-primary fs-8 p-3 mb-4">
 						대리점이 <strong>자체 인출</strong>로 정산금을 받을 계좌입니다.
-						라이더에게 나가는 이체는 <strong>본사 단일 출금 계좌</strong>에서 실행되므로 여기 설정과 무관합니다.
+						<!-- 라이더에게 나가는 이체는 <strong>본사 단일 출금 계좌</strong>에서 실행되므로 여기 설정과 무관합니다. -->
 					</div>
 					<?php endif; ?>
 					<div class="mb-3">
