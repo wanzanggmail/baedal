@@ -174,6 +174,102 @@ final class WithdrawalConfig
      * @param array<string, mixed> $data
      * @return array<string, int>
      */
+    /**
+     * **추가금만** 저장한다 — 총판 추가금·대리점 추가금 두 쌍 (2026-09-08 갑).
+     *
+     * 갑: "수수료 설정화면에서 대리점, 총판의 정산수수료 추가금에 대한 것들을 설정하게 해줘"
+     *
+     * `save()` 를 쓰면 안 되는 이유: 그쪽은 보증금·경과일 기준·이체수수료까지 한꺼번에 쓰는데,
+     * 키가 안 오면 **보증금이 0 으로 덮인다**(`$data['reserve_amount'] ?? 0`). 추가금만 있는
+     * 화면에서 부르면 그 대리점 보증금이 조용히 사라진다. 그래서 네 컬럼만 만지는 길을 따로 둔다.
+     *
+     * 행이 없으면 만든다 — 이때 나머지 값은 **지금 그 대리점에 적용되던 값**을 복사해
+     * 동작이 바뀌지 않게 한다.
+     *
+     * @param array<string, mixed> $data dist_fee_short/long · agency_add_short/long
+     * @return array<string, int> 저장 후 설정
+     */
+    public static function saveAddons(array $data, ?int $orgId = null, ?int $adminId = null): array
+    {
+        if (!db_table_exists('withdrawal_config')) {
+            throw new RuntimeException('withdrawal_config 테이블이 없습니다. php migrate.php 를 실행하세요.');
+        }
+
+        $cur  = self::get($orgId);
+        $take = static function (string $k) use ($data, $cur): int {
+            $v = array_key_exists($k, $data) ? (int) $data[$k] : (int) ($cur[$k] ?? 0);
+            if ($v < 0) {
+                throw new InvalidArgumentException('추가금은 0원 이상이어야 합니다.');
+            }
+            if ($v > 100000) {
+                throw new InvalidArgumentException('추가금이 너무 큽니다(건당 100,000원 초과).');
+            }
+
+            return $v;
+        };
+
+        $distS = $take('dist_fee_short');
+        $distL = $take('dist_fee_long');
+        $addS  = $take('agency_add_short');
+        $addL  = $take('agency_add_long');
+
+        // 총액은 파생값 — 전역 고정분에 추가금을 더한다.
+        $fixedS = (int) $cur['hq_fee_short'] + (int) $cur['tax_fee_short'] + (int) $cur['dev_fee_short'];
+        $fixedL = (int) $cur['hq_fee_long'] + (int) $cur['tax_fee_long'] + (int) $cur['dev_fee_long'];
+
+        $hasOrg = $orgId !== null && $orgId > 0;
+        $exists = $hasOrg
+            ? db_row('SELECT id FROM withdrawal_config WHERE org_id = ? LIMIT 1', [$orgId])
+            : db_row('SELECT id FROM withdrawal_config WHERE org_id IS NULL ORDER BY id ASC LIMIT 1');
+
+        if ($exists) {
+            db_execute(
+                'UPDATE withdrawal_config
+                    SET dist_fee_short = ?, dist_fee_long = ?,
+                        agency_add_short = ?, agency_add_long = ?,
+                        fee_per_tx_short = ?, fee_per_tx_long = ?,
+                        updated_by = ?, updated_at = NOW()
+                  WHERE id = ?',
+                [
+                    $distS, $distL, $addS, $addL,
+                    $fixedS + $distS + $addS,
+                    $fixedL + $distL + $addL,
+                    ($adminId !== null && $adminId > 0) ? $adminId : null,
+                    (int) $exists['id'],
+                ]
+            );
+        } else {
+            db_insert(
+                'INSERT INTO withdrawal_config
+                    (org_id, reserve_amount, fee_day_threshold, fee_per_tx_short, fee_per_tx_long,
+                     hq_fee_short, hq_fee_long, dist_fee_short, dist_fee_long,
+                     tax_fee_short, tax_fee_long, dev_fee_short, dev_fee_long,
+                     agency_add_short, agency_add_long,
+                     transfer_fee, auto_transfer_on_request, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $hasOrg ? $orgId : null,
+                    (int) $cur['reserve_amount'],
+                    (int) $cur['fee_day_threshold'],
+                    $fixedS + $distS + $addS,
+                    $fixedL + $distL + $addL,
+                    // 전역 고정분은 전역 행에서만 읽으므로 여기 값은 참고용으로 같이 복사해둔다.
+                    (int) $cur['hq_fee_short'], (int) $cur['hq_fee_long'],
+                    $distS, $distL,
+                    (int) $cur['tax_fee_short'], (int) $cur['tax_fee_long'],
+                    (int) $cur['dev_fee_short'], (int) $cur['dev_fee_long'],
+                    $addS, $addL,
+                    (int) $cur['transfer_fee'],
+                    (int) $cur['auto_transfer_on_request'],
+                    ($adminId !== null && $adminId > 0) ? $adminId : null,
+                ]
+            );
+        }
+
+        self::$cache = [];
+
+        return self::get($orgId);
+    }
     public static function save(array $data, ?int $orgId = null, ?int $adminId = null): array
     {
         if (!db_table_exists('withdrawal_config')) {
