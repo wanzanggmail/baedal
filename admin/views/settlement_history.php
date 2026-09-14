@@ -290,7 +290,7 @@ $queryParams = array_filter([
 								<?= htmlspecialchars($wk !== null ? $wk['week'] : (string) $up['settlement_date'], ENT_QUOTES, 'UTF-8') ?>
 							</td>
 							<?php // 팀·지역은 파일명에서 뽑히다 보니 아주 긴 값이 섞인다 — 잘라 두고 전체는 툴팁으로. ?>
-							<td class="fs-8 text-gray-700" title="<?= htmlspecialchars($teamLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($teamLabel !== '' ? mb_strimwidth($teamLabel, 0, 22, '…') : '-', ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="fs-8 text-gray-700" title="<?= htmlspecialchars($teamLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($teamLabel !== '' ? mb_strimwidth($teamLabel, 0, 40, '…') : '-', ENT_QUOTES, 'UTF-8') ?></td>
 							<td class="text-gray-700 fs-8 text-break">
 							<?= htmlspecialchars((string) $up['original_filename'], ENT_QUOTES, 'UTF-8') ?>
 						</td>
