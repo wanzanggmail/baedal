@@ -1,0 +1,10 @@
+# 운영 도구는 명령줄(php tools/...) 전용 — 웹으로는 절대 열리면 안 된다.
+# 저장소가 웹 루트에 그대로 배포되므로, 막지 않으면 audit_money.php 가 대리점 잔액을 공개한다.
+
+<IfModule mod_authz_core.c>
+	Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+	Order allow,deny
+	Deny from all
+</IfModule>
