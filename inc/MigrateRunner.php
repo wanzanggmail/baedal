@@ -475,6 +475,15 @@ final class MigrateRunner
             return;
         }
 
+        // 3분할 컬럼이 생긴 뒤로는 행을 미리 만들 이유가 없다 — 행이 없으면 전역 요율을 쓴다.
+        // 여기서 빈 행을 만들면 hq/distributor/agency_pct 가 0 으로 들어가 전역 요율을 덮어썼다(2026-09-17).
+        $feeCols = array_column(db_rows('SHOW COLUMNS FROM org_fee_config'), 'Field');
+        if (in_array('hq_pct', $feeCols, true)) {
+            echo "SKIP  org_fee_config backfill (3분할 이후 — 행이 없으면 전역 요율)\n";
+
+            return;
+        }
+
         $missing = (int) (db_row(
             'SELECT COUNT(*) AS c FROM organizations o
              LEFT JOIN org_fee_config f ON f.org_id = o.id
