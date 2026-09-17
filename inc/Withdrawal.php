@@ -1034,6 +1034,30 @@ final class Withdrawal
         if ($riderId < 1) {
             throw new InvalidArgumentException('라이더 정보가 없습니다.');
         }
+
+        // ⚠️ 라이더 단위 잠금 (2026-09-17) — 「미출금 정산분 조회 → 신청 INSERT → 사이클 점유」 사이에
+        //    같은 라이더의 신청이 끼어들면 **같은 정산분으로 출금이 두 번** 만들어진다.
+        //    (같은 대리점의 업로드 두 개를 동시에 반영하면 자동출금이 같은 라이더에게 겹쳐 돈다.)
+        //    뒤에 온 쪽은 앞 신청이 **커밋된 뒤** 남은 정산분을 다시 읽으므로 중복이 생기지 않는다.
+        //    자동출금·관리자 대리신청·라이더 앱이 모두 이 함수를 거치므로 여기 한 곳에서 막는다.
+        //    바깥 트랜잭션 안에서 부르면 커밋 전에 잠금이 풀려 보호가 깨진다 — 그래서 거부한다.
+        if (db()->inTransaction()) {
+            throw new LogicException('출금 신청은 트랜잭션 밖에서 호출해야 합니다(라이더 잠금 보호).');
+        }
+        $lock = 'wd_apply_' . DB_NAME . '_' . $riderId;
+        if ((int) (db_row('SELECT GET_LOCK(?, 30) AS g', [$lock])['g'] ?? 0) !== 1) {
+            throw new RuntimeException('같은 라이더의 출금 신청이 처리 중입니다. 잠시 후 다시 시도하세요.');
+        }
+        try {
+            return self::applyForRiderLocked($riderId, $toDate, $allowDailySettlement);
+        } finally {
+            db_row('SELECT RELEASE_LOCK(?) AS r', [$lock]);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private static function applyForRiderLocked(int $riderId, ?string $toDate, bool $allowDailySettlement): array
+    {
         if ($toDate !== null && $toDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $toDate)) {
             throw new InvalidArgumentException('출금 기간이 올바르지 않습니다.');
         }
