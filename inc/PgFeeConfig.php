@@ -109,10 +109,19 @@ final class PgFeeConfig
 
         if ($agencyId > 0 && self::hasSplitColumns()) {
             $row = db_row(
-                'SELECT hq_pct, distributor_pct, agency_pct FROM org_fee_config WHERE org_id = ? LIMIT 1',
+                'SELECT hq_pct, distributor_pct, agency_pct, updated_by FROM org_fee_config WHERE org_id = ? LIMIT 1',
                 [$agencyId]
             );
-            if ($row !== null) {
+            // ⚠️ 마이그레이션 backfill 이 만든 «아무도 저장 안 한 0/0/0 행»은 설정이 아니다(2026-09-17).
+            //    예전엔 이 행이 전역 요율을 0% 로 덮어써서, 요율을 한 번도 안 건드린 대리점은
+            //    카드에 수수료 없이 충전액만 결제됐다. 관리자가 **일부러 0% 로 저장**했다면
+            //    updated_by 가 남으므로 그 경우는 그대로 0% 를 존중한다.
+            $unsetRow = $row !== null
+                && $row['updated_by'] === null
+                && (float) $row['hq_pct'] === 0.0
+                && (float) $row['distributor_pct'] === 0.0
+                && (float) $row['agency_pct'] === 0.0;
+            if ($row !== null && !$unsetRow) {
                 $d = [
                     'agency'      => (float) $row['agency_pct'],
                     'distributor' => (float) $row['distributor_pct'],
