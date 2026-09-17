@@ -180,9 +180,45 @@ try {
         }
     }
 
+    // 팝업 표 — 이 업로드로 반영된 라이더별 결제 내역(라이더·금액·카드명·상태).
+    // 한 라이더에 결제 시도가 여러 번이면(실패 후 재시도) 마지막 것을 보여준다.
+    $rows = [];
+    foreach (db_rows(
+        "SELECT r.name, c.gross_amount + c.support_amount AS settle,
+                p.total_charged, p.status, p.fail_reason,
+                k.alias, k.brand, k.last4
+           FROM settlement_rider_cycles c
+           INNER JOIN riders r ON r.id = c.rider_id
+           LEFT JOIN pg_payments p ON p.id = (
+                SELECT MAX(p2.id) FROM pg_payments p2
+                 WHERE p2.upload_id = c.upload_id AND p2.rider_id = c.rider_id)
+           LEFT JOIN agency_cards k ON k.id = p.card_id
+          WHERE c.upload_id = ?
+          ORDER BY r.name",
+        [$uploadId]
+    ) as $x) {
+        $card = trim((string) ($x['alias'] ?? ''));
+        if ($card === '' && ($x['last4'] ?? '') !== '') {
+            $card = trim((string) $x['brand'] . ' ****' . (string) $x['last4']);
+        }
+        $rows[] = [
+            'name'   => (string) $x['name'],
+            'amount' => (int) $x['settle'],
+            'charged' => $x['total_charged'] !== null ? (int) $x['total_charged'] : null,
+            'card'   => $card,
+            'status' => match ((string) ($x['status'] ?? '')) {
+                'success'  => '결제완료',
+                'failed'   => '결제실패' . (($x['fail_reason'] ?? '') !== '' ? ' · ' . $x['fail_reason'] : ''),
+                'canceled' => '결제취소',
+                default    => '미결제',
+            },
+        ];
+    }
+
     echo json_encode([
         'ok'        => true,
         'message'   => $message,
+        'rows'      => $rows,
         'result'    => $result,
         'pg_fund'   => $fund,
         'auto_withdraw' => $auto,

@@ -603,6 +603,36 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 	<?php endif; ?>
 
 	<!--begin::원본 데이터 상세 모달-->
+	<?php // 정산 반영 결과 팝업 — 라이더·금액·카드명·상태 ?>
+	<div class="modal fade" id="kt_apply_result_modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+		<div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h3 class="modal-title">정산 반영 내역</h3>
+					<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+				</div>
+				<div class="modal-body">
+					<div class="alert bg-light-primary fs-7 p-4 mb-5" id="apply_result_msg" style="white-space:pre-line"></div>
+					<div class="table-responsive">
+						<table class="table table-row-dashed align-middle fs-7 gy-3 mb-0">
+							<thead>
+								<tr class="text-gray-500 fw-bold text-uppercase fs-8">
+									<th>라이더</th>
+									<th class="text-end">금액</th>
+									<th>카드명</th>
+									<th>상태</th>
+								</tr>
+							</thead>
+							<tbody id="apply_result_rows"></tbody>
+						</table>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-primary" data-bs-dismiss="modal">확인</button>
+				</div>
+			</div>
+		</div>
+	</div>
 	<div class="modal fade" id="kt_dr_detail_modal" tabindex="-1" aria-hidden="true">
 		<div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
 			<div class="modal-content">
@@ -1130,6 +1160,33 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		var btn = document.getElementById('btn_settlement_apply');
 		if (!btn) return;
 		var dailyCount = <?= (int) $dailyCount ?>;
+		function showApplyResult(message, rows) {
+			var esc = function (v) {
+				return String(v).replace(/[&<>"']/g, function (c) {
+					return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+				});
+			};
+			var badge = function (st) {
+				var cls = st.indexOf('결제완료') === 0 ? 'success'
+					: st.indexOf('결제실패') === 0 ? 'danger'
+					: st.indexOf('결제취소') === 0 ? 'warning' : 'secondary';
+				return '<span class="badge badge-light-' + cls + '">' + esc(st) + '</span>';
+			};
+			document.getElementById('apply_result_msg').textContent = message;
+			document.getElementById('apply_result_rows').innerHTML = rows.length
+				? rows.map(function (r) {
+					return '<tr><td class="fw-semibold text-gray-800">' + esc(r.name) + '</td>'
+						+ '<td class="text-end">' + Number(r.amount).toLocaleString() + '원'
+						+ (r.charged !== null && r.charged !== r.amount ? '<div class="text-muted fs-8">카드 청구 ' + Number(r.charged).toLocaleString() + '원</div>' : '')
+						+ '</td>'
+						+ '<td>' + (r.card ? esc(r.card) : '<span class="text-muted">-</span>') + '</td>'
+						+ '<td>' + badge(r.status) + '</td></tr>';
+				}).join('')
+				: '<tr><td colspan="4" class="text-center text-muted py-6">반영된 라이더가 없습니다.</td></tr>';
+			var el = document.getElementById('kt_apply_result_modal');
+			el.addEventListener('hidden.bs.modal', function () { location.reload(); }, { once: true });
+			bootstrap.Modal.getOrCreateInstance(el).show();
+		}
 		btn.addEventListener('click', function () {
 			var msg = '매칭된 라이더에 정산 수수료를 계산하고 지갑에 반영할까요?\n이미 반영된 일자·플랫폼은 건너뜁니다.';
 			if (dailyCount > 0) {
@@ -1158,8 +1215,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 							if (problems.length > 10) out += '\n… 외 ' + (problems.length - 10) + '명';
 						}
 					}
-					alert(out);
-					location.reload();
+					showApplyResult(out, res.rows || []);
 				})
 				.catch(function (e) {
 					alert(e.message || '정산 반영 실패');
