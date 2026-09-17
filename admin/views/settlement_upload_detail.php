@@ -163,6 +163,15 @@ $dailyCount = (int) (db_row(
     [$uploadId]
 )['cnt'] ?? 0);
 
+// 서버에서 정산 반영이 진행 중이면(창을 닫았다 다시 연 경우) 진행 팝업을 이어서 띄운다.
+require_once INC_PATH . '/SettlementApplyJob.php';
+$activeApplyJobId = SettlementApplyJob::tableExists()
+    ? (int) (db_row(
+        "SELECT id FROM settlement_apply_jobs WHERE upload_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1",
+        [$uploadId]
+    )['id'] ?? 0)
+    : 0;
+
 $exVatExpr = SettlementAmounts::sqlExVatExpr('dr');
 $totals = db_row(
     "SELECT COUNT(*) AS cnt,
@@ -603,7 +612,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 	<?php endif; ?>
 
 	<!--begin::원본 데이터 상세 모달-->
-	<?php // 정산 반영 결과 팝업 — 라이더·금액·카드명·상태 ?>
+	<?php // 정산 반영 진행 팝업 — 서버 백그라운드 작업을 폴링해 라이더별 결제·이체 상태를 실시간으로 바꾼다. ?>
 	<div class="modal fade" id="kt_apply_result_modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
 		<div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
 			<div class="modal-content">
@@ -612,7 +621,20 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
 				</div>
 				<div class="modal-body">
-					<div class="alert bg-light-primary fs-7 p-4 mb-5" id="apply_result_msg" style="white-space:pre-line"></div>
+					<div class="mb-5">
+						<div class="d-flex align-items-center justify-content-between mb-2">
+							<div class="d-flex align-items-center gap-2 fw-semibold text-gray-800 fs-6">
+								<span class="spinner-border spinner-border-sm text-primary" id="apply_spin" role="status"></span>
+								<span id="apply_stage">준비 중…</span>
+							</div>
+							<span class="text-muted fs-7" id="apply_count"></span>
+						</div>
+						<div class="progress h-6px">
+							<div class="progress-bar bg-primary" id="apply_bar" role="progressbar" style="width:0%"></div>
+						</div>
+						<div class="text-muted fs-8 mt-2">창을 닫아도 서버에서 끝까지 처리됩니다. 이 화면을 다시 열면 이어서 볼 수 있습니다.</div>
+					</div>
+					<div class="alert bg-light-primary fs-7 p-4 mb-5 d-none" id="apply_result_msg" style="white-space:pre-line"></div>
 					<div class="table-responsive">
 						<table class="table table-row-dashed align-middle fs-7 gy-3 mb-0">
 							<thead>
@@ -620,7 +642,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 									<th>라이더</th>
 									<th class="text-end">금액</th>
 									<th>카드명</th>
-									<th>상태</th>
+									<th>결제</th>
+									<th>이체</th>
 								</tr>
 							</thead>
 							<tbody id="apply_result_rows"></tbody>
@@ -628,7 +651,7 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 					</div>
 				</div>
 				<div class="modal-footer">
-					<button type="button" class="btn btn-primary" data-bs-dismiss="modal">확인</button>
+					<button type="button" class="btn btn-primary" data-bs-dismiss="modal" id="apply_close">닫기</button>
 				</div>
 			</div>
 		</div>
@@ -1160,33 +1183,99 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 		var btn = document.getElementById('btn_settlement_apply');
 		if (!btn) return;
 		var dailyCount = <?= (int) $dailyCount ?>;
-		function showApplyResult(message, rows) {
-			var esc = function (v) {
-				return String(v).replace(/[&<>"']/g, function (c) {
-					return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-				});
-			};
-			var badge = function (st) {
-				var cls = st.indexOf('결제완료') === 0 ? 'success'
-					: st.indexOf('결제실패') === 0 ? 'danger'
-					: st.indexOf('결제취소') === 0 ? 'warning' : 'secondary';
-				return '<span class="badge badge-light-' + cls + '">' + esc(st) + '</span>';
-			};
-			document.getElementById('apply_result_msg').textContent = message;
-			document.getElementById('apply_result_rows').innerHTML = rows.length
-				? rows.map(function (r) {
+		var ACTIVE_JOB = <?= (int) $activeApplyJobId ?>;
+		var STATUS_API = <?= json_encode(rtrim(ADMIN_BASE, '/') . '/api/settlement_apply_status.php', JSON_UNESCAPED_UNICODE) ?>;
+		var STAGES = { queued: '시작 대기 중…', apply: '정산 반영 중…', fund: 'PG 카드 결제 중…',
+			withdraw: '일일정산 자동출금 중…', statement: '명세서 알림톡 준비 중…' };
+		var modalEl = document.getElementById('kt_apply_result_modal');
+		var pollTimer = null;
+		var popupOpen = false;   // 'show' 클래스는 페이드가 끝나야 붙어서 첫 응답 때 아직 없다 — 직접 추적한다.
+
+		var esc = function (v) {
+			return String(v).replace(/[&<>"']/g, function (c) {
+				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+			});
+		};
+		var badge = function (s) {
+			if (!s) return '<span class="text-muted">-</span>';
+			var cls = { done: 'success', fail: 'danger', warn: 'warning', busy: 'primary', idle: 'secondary' }[s.state] || 'secondary';
+			var spin = s.state === 'busy' ? '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span>' : '';
+			return '<span class="badge badge-light-' + cls + '">' + spin + esc(s.label) + '</span>';
+		};
+
+		function render(st) {
+			var running = st.status === 'queued' || st.status === 'running';
+			var waitingTransfer = !running && st.transferring > 0;
+			document.getElementById('apply_spin').classList.toggle('d-none', !running && !waitingTransfer);
+			document.getElementById('apply_stage').textContent = running
+				? (STAGES[st.stage] || '처리 중…')
+				: st.status === 'failed' ? '처리 실패'
+				: waitingTransfer ? '반영 완료 · 이체 결과 확인 중…' : '처리 완료';
+			var pct = st.total > 0 ? Math.round(st.processed / st.total * 100) : (running ? 5 : 100);
+			if (!running) pct = 100;
+			var bar = document.getElementById('apply_bar');
+			bar.style.width = pct + '%';
+			bar.className = 'progress-bar ' + (st.status === 'failed' ? 'bg-danger' : running ? 'bg-primary' : 'bg-success');
+			document.getElementById('apply_count').textContent = st.total > 0 ? ('결제 ' + st.processed + ' / ' + st.total + '명') : '';
+
+			var msg = document.getElementById('apply_result_msg');
+			msg.classList.toggle('d-none', running || !st.message);
+			msg.className = msg.className.replace(/bg-light-\w+/, st.status === 'failed' ? 'bg-light-danger' : 'bg-light-primary');
+			msg.textContent = st.message || '';
+
+			document.getElementById('apply_result_rows').innerHTML = st.rows.length
+				? st.rows.map(function (r) {
 					return '<tr><td class="fw-semibold text-gray-800">' + esc(r.name) + '</td>'
 						+ '<td class="text-end">' + Number(r.amount).toLocaleString() + '원'
 						+ (r.charged !== null && r.charged !== r.amount ? '<div class="text-muted fs-8">카드 청구 ' + Number(r.charged).toLocaleString() + '원</div>' : '')
 						+ '</td>'
 						+ '<td>' + (r.card ? esc(r.card) : '<span class="text-muted">-</span>') + '</td>'
-						+ '<td>' + badge(r.status) + '</td></tr>';
+						+ '<td>' + badge(r.pay) + '</td>'
+						+ '<td>' + badge(r.transfer) + '</td></tr>';
 				}).join('')
-				: '<tr><td colspan="4" class="text-center text-muted py-6">반영된 라이더가 없습니다.</td></tr>';
-			var el = document.getElementById('kt_apply_result_modal');
-			el.addEventListener('hidden.bs.modal', function () { location.reload(); }, { once: true });
-			bootstrap.Modal.getOrCreateInstance(el).show();
+				: '<tr><td colspan="5" class="text-center text-muted py-6">' + (running ? '라이더 정산을 반영하는 중입니다…' : '반영된 라이더가 없습니다.') + '</td></tr>';
+
+			document.getElementById('apply_close').textContent = running ? '닫기 (서버는 계속 처리)' : '확인';
+			return running || waitingTransfer;
 		}
+
+		function poll(jobId) {
+			fetch(STATUS_API + '?job_id=' + jobId, { credentials: 'same-origin', cache: 'no-store' })
+				.then(function (r) { return r.json(); })
+				.then(function (st) {
+					if (!st.ok) throw new Error(st.message || '조회 실패');
+					var again = render(st);
+					// 반영 중엔 1.5초, 끝나고 이체 결과(웹훅)만 기다릴 땐 5초 간격
+					if (again && popupOpen) {
+						pollTimer = setTimeout(function () { poll(jobId); }, st.status === 'done' ? 5000 : 1500);
+					}
+				})
+				.catch(function () {
+					// 일시적인 네트워크 오류는 조금 쉬었다가 다시 묻는다(작업은 서버에서 계속된다).
+					if (popupOpen) {
+						pollTimer = setTimeout(function () { poll(jobId); }, 3000);
+					}
+				});
+		}
+
+		function openProgress(jobId) {
+			render({ status: 'queued', stage: 'queued', rows: [], total: 0, processed: 0, transferring: 0, message: '' });
+			modalEl.addEventListener('hidden.bs.modal', function () {
+				popupOpen = false;
+				clearTimeout(pollTimer);
+				location.reload();
+			}, { once: true });
+			popupOpen = true;
+			bootstrap.Modal.getOrCreateInstance(modalEl).show();
+			poll(jobId);
+		}
+
+		// 창을 닫았거나 새로고침한 사이에도 서버가 처리 중이면 진행 화면을 이어서 보여준다.
+		if (ACTIVE_JOB > 0) {
+			btn.disabled = true;
+			openProgress(ACTIVE_JOB);
+		}
+
 		btn.addEventListener('click', function () {
 			var msg = '매칭된 라이더에 정산 수수료를 계산하고 지갑에 반영할까요?\n이미 반영된 일자·플랫폼은 건너뜁니다.';
 			if (dailyCount > 0) {
@@ -1203,19 +1292,8 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				.then(function (r) { return r.json(); })
 				.then(function (res) {
 					if (!res.ok) throw new Error(res.message || '실패');
-					var out = res.message || '반영되었습니다.';
-					// 자동출금에서 건너뛰거나 실패한 건은 사유를 같이 보여준다(계좌 미등록·보증금 미달 등).
-					var aw = res.auto_withdraw;
-					if (aw && aw.results && aw.results.length) {
-						var problems = aw.results.filter(function (x) { return x.status !== 'paid'; });
-						if (problems.length) {
-							out += '\n\n[자동출금 미처리]\n' + problems.slice(0, 10).map(function (x) {
-								return '· ' + x.name + ': ' + x.message;
-							}).join('\n');
-							if (problems.length > 10) out += '\n… 외 ' + (problems.length - 10) + '명';
-						}
-					}
-					showApplyResult(out, res.rows || []);
+					// 이미 진행 중인 작업이면 새로 시작하지 않고 그 진행 화면을 보여준다(중복 결제 방지).
+					openProgress(res.job_id);
 				})
 				.catch(function (e) {
 					alert(e.message || '정산 반영 실패');

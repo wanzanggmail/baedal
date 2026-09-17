@@ -105,7 +105,7 @@ final class Deployer
      * PHP CLI 실행 파일. `PHP_BINARY` 는 mod_php 환경에서 httpd 를 가리키므로 쓸 수 없다.
      * exec 의 PATH 가 로그인 셸과 다를 수 있어 절대 경로를 먼저 찾는다.
      */
-    private static function phpCmd(): string
+    public static function phpCmd(): string
     {
         foreach (['/usr/bin/php', '/usr/local/bin/php'] as $candidate) {
             if (is_file($candidate) && is_executable($candidate)) {

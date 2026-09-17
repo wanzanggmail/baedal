@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 /**
  * 정산 반영 API — 업로드 → 라이더별 수수료·지갑 적립
- * POST { "upload_id": n }
+ * POST { "upload_id": n }  →  { ok, job_id }
+ *
+ * 실제 처리는 백그라운드 작업(SettlementApplyJob)이 한다. 화면은 job_id 로
+ * `settlement_apply_status.php` 를 폴링해 라이더별 결제·이체 상태를 받아 간다.
  */
 
 require_once dirname(__DIR__, 2) . '/inc/bootstrap.php';
-require_once INC_PATH . '/SettlementLedger.php';
-require_once INC_PATH . '/AuditLog.php';
+require_once INC_PATH . '/SettlementApplyJob.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -56,178 +58,31 @@ if (!Org::canAccessAgency((int) ($uploadRow['agency_id'] ?? 0))) {
 
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
-    $result  = SettlementLedger::applyUpload($uploadId, $adminId > 0 ? $adminId : null);
-
-    if ($result['applied'] === 0 && $result['errors'] !== []) {
-        throw new InvalidArgumentException(implode(' / ', $result['errors']));
-    }
-
-    AuditLog::record(
-        'settlement.apply',
-        (string) $uploadId,
-        "정산 반영 {$result['applied']}명 · 건너뜀 {$result['skipped']}명"
-    );
-
-    // ── 자금 조달(PG 카드결제) — 플랫폼 수수료가 여기서 발생한다 ──
-    // 정산이 반영되면 대리점은 라이더에게 줄 돈을 카드로 조달하고, 그 청구액에 플랫폼
-    // 수수료(본사·총판·대리점 몫)가 붙는다. 즉 **플랫폼 수수료는 정산 반영 시점에 발생**하므로
-    // 여기서 실행해야 「플랫폼 수수료 내역」 화면에 곧바로 잡힌다.
-    // ⚠️ 순서: 정산 반영 → PG 조달(대리점 지갑 충전) → 라이더 출금. 돈이 대리점→라이더로
-    //    흐르므로 조달이 출금보다 먼저여야 한다.
-    require_once INC_PATH . '/PgPayment.php';
-    $fund = PgPayment::fundAppliedUpload($uploadId, (int) ($uploadRow['agency_id'] ?? 0), $adminId > 0 ? $adminId : null);
-
-    if ($fund['charged'] > 0) {
-        AuditLog::record(
-            'settlement.pg_fund',
-            (string) $uploadId,
-            sprintf(
-                'PG 자금조달 %d건 · 조달 %s원 · 플랫폼수수료 %s원 · 실패 %d건',
-                $fund['charged'],
-                number_format($fund['funded']),
-                number_format($fund['fee']),
-                count($fund['failed'])
-            )
-        );
-    }
-
-    // 일일정산(선정산) 라이더는 반영 직후 곧바로 출금까지 실행한다(보증금은 자동 제외).
-    // ⚠️ applyUpload()의 트랜잭션이 커밋된 뒤여야 지갑 잔액이 확정돼 출금액이 맞게 계산된다.
-    // 대상은 "이번에 새로 반영된 사람"이 아니라 "미출금 정산분이 남은 사람" — 계좌를 뒤늦게
-    // 등록하고 재반영했을 때 자동출금이 재시도돼야 하기 때문이다(runForUpload 주석 참고).
-    require_once INC_PATH . '/DailyAutoWithdrawal.php';
-    $auto = DailyAutoWithdrawal::runForUpload($uploadId);
-
-    // 이 업로드에 일일정산 라이더가 아예 없는 경우와, 있는데 이미 다 지급된 경우를 구분해
-    // 안내하기 위한 값(전자는 자동출금 얘기를 꺼낼 필요가 없다).
-    $dailyTotal = (int) (db_row(
-        'SELECT COUNT(DISTINCT dr.rider_id) AS cnt
-           FROM settlement_daily_riders dr
-           INNER JOIN riders r ON r.id = dr.rider_id
-          WHERE dr.upload_id = ? AND r.is_daily_settlement = 1',
-        [$uploadId]
-    )['cnt'] ?? 0);
-
-    if ($auto['targets'] > 0) {
-        AuditLog::record(
-            'settlement.auto_withdraw',
-            (string) $uploadId,
-            sprintf(
-                '일일정산 자동출금 대상 %d명 · 지급 %d명(%s원) · 실패 %d명 · 건너뜀 %d명',
-                $auto['targets'],
-                $auto['paid'],
-                number_format($auto['paid_amount']),
-                $auto['failed'],
-                $auto['skipped']
-            )
-        );
-    }
-
-    // 일정산 명세서 알림톡 자동 발송 — 대리점 설정(stmt_daily_alimtalk)이 켜져 있을 때만 큐 적재.
-    require_once INC_PATH . '/RiderStatement.php';
-    $stmt = RiderStatement::enqueueDailyStatements($uploadId, (int) ($uploadRow['agency_id'] ?? 0), $adminId > 0 ? $adminId : null);
-    if ($stmt['queued'] > 0) {
-        AuditLog::record(
-            'settlement.statement_alimtalk',
-            (string) $uploadId,
-            sprintf('일정산 명세서 알림톡 큐 적재 %d건 · 실패 %d건', $stmt['queued'], $stmt['skipped'])
-        );
-    }
-
-    $message = "정산 반영 {$result['applied']}명 완료" . ($result['skipped'] > 0 ? " (건너뜀 {$result['skipped']}명)" : '');
-    if ($result['applied'] === 0) {
-        $message .= "\n(이미 반영된 건은 다시 반영되지 않습니다)";
-    }
-
-    // 자금 조달(플랫폼 수수료 발생) 결과
-    if ($fund['skipped_reason'] !== '') {
-        $message .= "\n\n자금 조달(플랫폼 수수료): " . $fund['skipped_reason'];
-    } elseif ($fund['charged'] > 0) {
-        $message .= sprintf(
-            "\n\n자금 조달 %d건: %s원 충전 · 플랫폼 수수료 %s원 발생",
-            $fund['charged'],
-            number_format($fund['funded']),
-            number_format($fund['fee'])
-        );
-        if ($fund['failed'] !== []) {
-            $message .= ' · 실패 ' . count($fund['failed']) . '건';
-        }
-    }
-
-    // 반영이 0건이어도 자동출금은 별도로 시도되므로 결과를 항상 보여준다.
-    // — 계좌를 뒤늦게 채우고 재반영한 관리자가 "아무 일도 안 일어났다"고 오해하지 않도록.
-    if ($auto['targets'] > 0) {
-        $message .= sprintf(
-            "\n\n일일정산 자동출금 (대상 %d명): 지급 %d명 (%s원)",
-            $auto['targets'],
-            $auto['paid'],
-            number_format($auto['paid_amount'])
-        );
-        if ($auto['failed'] > 0) {
-            $message .= " · 실패 {$auto['failed']}명";
-        }
-        if ($auto['skipped'] > 0) {
-            $message .= " · 미지급 {$auto['skipped']}명";
-        }
-    } elseif ($dailyTotal > 0) {
-        $message .= "\n\n일일정산 자동출금: 출금할 정산분이 남은 대상이 없습니다(이미 전부 지급됨).";
-    }
-
-    if ($stmt['queued'] > 0) {
-        $message .= sprintf("\n\n일정산 명세서 알림톡: %d건 발송 대기(큐)", $stmt['queued']);
-        if ($stmt['skipped'] > 0) {
-            $message .= " · 실패 {$stmt['skipped']}건";
-        }
-    }
-
-    // 팝업 표 — 이 업로드로 반영된 라이더별 결제 내역(라이더·금액·카드명·상태).
-    // 한 라이더에 결제 시도가 여러 번이면(실패 후 재시도) 마지막 것을 보여준다.
-    $rows = [];
-    foreach (db_rows(
-        "SELECT r.name, c.gross_amount + c.support_amount AS settle,
-                p.total_charged, p.status, p.fail_reason,
-                k.alias, k.brand, k.last4
-           FROM settlement_rider_cycles c
-           INNER JOIN riders r ON r.id = c.rider_id
-           LEFT JOIN pg_payments p ON p.id = (
-                SELECT MAX(p2.id) FROM pg_payments p2
-                 WHERE p2.upload_id = c.upload_id AND p2.rider_id = c.rider_id)
-           LEFT JOIN agency_cards k ON k.id = p.card_id
-          WHERE c.upload_id = ?
-          ORDER BY r.name",
-        [$uploadId]
-    ) as $x) {
-        $card = trim((string) ($x['alias'] ?? ''));
-        if ($card === '' && ($x['last4'] ?? '') !== '') {
-            $card = trim((string) $x['brand'] . ' ****' . (string) $x['last4']);
-        }
-        $rows[] = [
-            'name'   => (string) $x['name'],
-            'amount' => (int) $x['settle'],
-            'charged' => $x['total_charged'] !== null ? (int) $x['total_charged'] : null,
-            'card'   => $card,
-            'status' => match ((string) ($x['status'] ?? '')) {
-                'success'  => '결제완료',
-                'failed'   => '결제실패' . (($x['fail_reason'] ?? '') !== '' ? ' · ' . $x['fail_reason'] : ''),
-                'canceled' => '결제취소',
-                default    => '미결제',
-            },
-        ];
-    }
-
-    echo json_encode([
-        'ok'        => true,
-        'message'   => $message,
-        'rows'      => $rows,
-        'result'    => $result,
-        'pg_fund'   => $fund,
-        'auto_withdraw' => $auto,
-        'statement_alimtalk' => $stmt,
-    ], JSON_UNESCAPED_UNICODE);
-} catch (InvalidArgumentException $e) {
-    http_response_code(422);
-    echo json_encode(['ok' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    $job     = SettlementApplyJob::start($uploadId, $adminId > 0 ? $adminId : null);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['ok' => false, 'message' => '처리 실패: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// 세션 파일 잠금을 먼저 푼다 — 안 풀면 팝업의 상태 조회 요청이 이 요청이 끝날 때까지 줄 서서 기다린다.
+session_write_close();
+
+// 응답을 먼저 보내고 연결을 끊는다. 팝업은 곧바로 진행 상황 조회를 시작한다.
+$payload = json_encode(['ok' => true, 'job_id' => $job['job_id'], 'reused' => $job['reused']], JSON_UNESCAPED_UNICODE);
+ignore_user_abort(true);
+header('Connection: close');
+header('Content-Length: ' . strlen((string) $payload));
+echo $payload;
+while (ob_get_level() > 0) {
+    ob_end_flush();
+}
+flush();
+if (function_exists('fastcgi_finish_request')) {
+    fastcgi_finish_request();
+}
+
+// 이미 진행 중인 작업을 다시 보여주는 경우엔 또 띄우지 않는다.
+if (!$job['reused']) {
+    SettlementApplyJob::dispatch($job['job_id']);
 }
