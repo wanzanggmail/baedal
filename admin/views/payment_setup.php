@@ -55,6 +55,11 @@ if ($isSelf) {
 $accountOnly = $isHqAccount || $isDistSelf;
 
 $canUse  = $agencyId > 0 && !$needsMigrate;
+
+// PG 충전도 라이더 자금조달과 같이 카드에는 «충전액 + 플랫폼 수수료»가 청구된다(PgPayment::chargeForRider).
+// 결제 전에 청구액을 보여주려고 요율만 미리 읽는다.
+require_once INC_PATH . '/PgFeeConfig.php';
+$pgFeePct = $agencyId > 0 ? (float) PgFeeConfig::breakdownForAgency($agencyId)['total'] : 0.0;
 $cards   = $canUse ? AgencyCard::listForAgency($agencyId) : [];
 $account = $canUse ? BankAccount::get($agencyId) : null;
 $wallet  = $canUse ? AgencyWallet::withdrawable($agencyId) : ['balance' => 0];
@@ -306,6 +311,11 @@ if ($agencyId > 0) {
 						<span class="text-muted">현재 대리점 잔액</span><span class="fw-bold" id="ps_balance"><?= number_format((int) $wallet['balance']) ?>원</span>
 					</div>
 					<div class="mb-3"><label class="form-label required">충전 금액 (원)</label><input type="number" class="form-control form-control-solid" id="ps_charge_amt" min="1" step="10000" /></div>
+					<div class="bg-light rounded p-3 mb-3 fs-8" id="ps_charge_preview" data-fee-pct="<?= htmlspecialchars((string) $pgFeePct, ENT_QUOTES, 'UTF-8') ?>">
+						<div class="d-flex justify-content-between"><span class="text-muted">충전액 (잔액에 들어가는 금액)</span><span id="ps_pv_net">0원</span></div>
+						<div class="d-flex justify-content-between"><span class="text-muted">플랫폼 수수료 <?= htmlspecialchars(rtrim(rtrim(number_format($pgFeePct, 2), '0'), '.'), ENT_QUOTES, 'UTF-8') ?>%</span><span id="ps_pv_fee">0원</span></div>
+						<div class="d-flex justify-content-between fw-bold text-gray-800 border-top border-gray-300 pt-2 mt-2"><span>카드 결제 금액</span><span id="ps_pv_total">0원</span></div>
+					</div>
 					<button type="button" class="btn btn-success" id="ps_charge">카드로 충전</button>
 				</div>
 			</div>
@@ -385,9 +395,24 @@ if ($agencyId > 0) {
 					showToast(r.message, true);
 				}).catch(function (e) { showToast(e.message, false); });
 		});
+		// 서버(PgFeeConfig::feeAmount)와 같은 식 — round(충전액 × 요율 / 100)
+		function chargePreview(amt) {
+			var box = document.getElementById('ps_charge_preview');
+			var pct = box ? parseFloat(box.getAttribute('data-fee-pct')) || 0 : 0;
+			var fee = amt > 0 ? Math.round(amt * pct / 100) : 0;
+			return { net: amt, fee: fee, total: amt + fee };
+		}
+		on('ps_charge_amt', 'input', function () {
+			var pv = chargePreview(parseInt(this.value, 10) || 0);
+			document.getElementById('ps_pv_net').textContent = pv.net.toLocaleString('ko-KR') + '원';
+			document.getElementById('ps_pv_fee').textContent = pv.fee.toLocaleString('ko-KR') + '원';
+			document.getElementById('ps_pv_total').textContent = pv.total.toLocaleString('ko-KR') + '원';
+		});
 		on('ps_charge', 'click', function () {
 			var amt = parseInt(document.getElementById('ps_charge_amt').value, 10) || 0;
 			if (amt <= 0) { showToast('충전 금액을 입력하세요.', false); return; }
+			var pv = chargePreview(amt);
+			if (!confirm(pv.net.toLocaleString('ko-KR') + '원을 충전할까요?\n\n플랫폼 수수료 ' + pv.fee.toLocaleString('ko-KR') + '원을 더해\n카드로 ' + pv.total.toLocaleString('ko-KR') + '원이 결제됩니다.')) return;
 			post({ action: 'pg_charge', amount: amt }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); if (r.wallet) document.getElementById('ps_balance').textContent = (r.wallet.balance || 0).toLocaleString('ko-KR') + '원'; }).catch(function (e) { showToast(e.message, false); });
 		});
 	
