@@ -1,0 +1,10 @@
+# 스크립트는 명령줄 전용 — 웹으로는 절대 열리면 안 된다(정산 워커·운영 데이터 초기화 등).
+# 저장소가 웹 루트에 그대로 배포되므로 막지 않으면 브라우저로 실행될 수 있다.
+
+<IfModule mod_authz_core.c>
+	Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+	Order allow,deny
+	Deny from all
+</IfModule>

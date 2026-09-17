@@ -101,6 +101,7 @@ final class MigrateRunner
         self::migrateFeePayerFlags();
         self::migrateDropDeadAgencyFeeColumns();
         self::migrateFeeShareAdditive();
+        self::migrateSettlementApplyJobs();
 
         echo "\n완료.\n";
     }
@@ -3882,5 +3883,39 @@ final class MigrateRunner
             [$fixShort, $fixLong]
         );
         printf("OK    총액 재계산 %d행 (전역고정 %d/%d + 총판추가 + 대리점추가)\n", $n, $fixShort, $fixLong);
+    }
+    /**
+     * 정산 반영 백그라운드 작업 (2026-09-17) — SettlementApplyJob.
+     * 팝업이 진행 상황을 폴링하고, 업로드당 하나만 돌게 하는 기록.
+     */
+    private static function migrateSettlementApplyJobs(): void
+    {
+        echo "== settlement_apply_jobs ==\n";
+
+        if (db_table_exists('settlement_apply_jobs')) {
+            echo "SKIP  settlement_apply_jobs (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "CREATE TABLE settlement_apply_jobs (
+                id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                upload_id   INT UNSIGNED NOT NULL,
+                status      ENUM('queued','running','done','failed') NOT NULL DEFAULT 'queued',
+                stage       VARCHAR(20) NOT NULL DEFAULT 'queued' COMMENT 'apply|fund|withdraw|statement|done|failed',
+                message     TEXT NULL,
+                result_json MEDIUMTEXT NULL,
+                started_by  INT UNSIGNED NULL,
+                created_at  DATETIME NOT NULL,
+                started_at  DATETIME NULL,
+                finished_at DATETIME NULL,
+                updated_at  DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_upload_status (upload_id, status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='정산 반영 백그라운드 작업'"
+        );
+        echo "OK    settlement_apply_jobs 생성\n";
     }
 }
