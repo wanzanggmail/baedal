@@ -542,6 +542,8 @@ final class Withdrawal
                 'bank'      => (string) ($row['bank_code'] ?? ''),
                 'account'   => Crypto::decryptSafe((string) ($row['bank_account'] ?? '')),
                 'holder'    => (string) ($row['account_holder'] ?? ''),
+                // 받는 분(라이더) 통장에 찍히는 이름 — 라이더 소속 대리점 이름.
+                'memo'      => (string) (Org::find($agencyId)['name'] ?? ''),
             ];
         }
 
@@ -640,7 +642,7 @@ final class Withdrawal
                     'amount'        => (int) $q['amount'],
                     // 예금주명을 넣으면 바움이 이체 시점에 한 번 더 검증해 준다.
                     'accountHolder' => (string) $q['holder'],
-                    'receiverMemo'  => (string) $q['holder'],
+                    'receiverMemo'  => (string) $q['memo'],
                     'metadata'      => (string) json_encode([
                         'wd'    => (int) $q['id'],
                         'org'   => (int) $q['agency_id'],
@@ -700,7 +702,7 @@ final class Withdrawal
                         'request_id'     => $id,
                         'rider_code'     => (string) ($q['row']['rider_code'] ?? ''),
                         'kind'           => 'WD',
-                        'receiver_memo'  => (string) $q['holder'],
+                        'receiver_memo'  => (string) $q['memo'],
                     ]
                 );
             } catch (Throwable $e) {

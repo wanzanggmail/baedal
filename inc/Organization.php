@@ -619,6 +619,7 @@ final class Organization
             'biz_category'         => (string) ($row['biz_category'] ?? ''),
             'biz_address'          => (string) ($row['biz_address'] ?? ''),
             'agency_fee_payer'     => ((string) ($row['agency_fee_payer'] ?? 'rider')) === 'agency' ? 'agency' : 'rider',
+            'transfer_fee_payer'   => ((string) ($row['transfer_fee_payer'] ?? 'rider')) === 'agency' ? 'agency' : 'rider',
             'stmt_weekly_enabled'  => (int) ($row['stmt_weekly_enabled'] ?? 1) === 1,
             'stmt_daily_alimtalk'  => (int) ($row['stmt_daily_alimtalk'] ?? 0) === 1,
             'active'               => (int) ($row['is_active'] ?? 0) === 1,
