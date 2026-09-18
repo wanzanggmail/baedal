@@ -2,12 +2,26 @@
 
 declare(strict_types=1);
 
-// 로그인 직후 팝업 공지 — rider/index.php 가 세션 큐에 담아두면 첫 화면에서 한 번만 띄운다.
-// 큐는 여기서 **바로 비운다**(unset). 페이지를 옮길 때마다 다시 뜨면 안 되기 때문.
+// 팝업 공지 — 라이더 앱에 들어오면 공개된 공지를 모달로 띄운다(2026-09-18 갑).
+//  · 세션당 한 번만 — 페이지를 옮길 때마다 다시 뜨면 안 된다.
+//  · 「하루 동안 보지 않기」를 누르면 쿠키가 살아 있는 동안 아예 만들지 않는다.
 $riderNoticePopups = [];
-if (empty($riderMinimalShell) && !empty($_SESSION['rider_notice_popup_queue'])) {
-    $riderNoticePopups = (array) $_SESSION['rider_notice_popup_queue'];
+if (empty($riderMinimalShell)
+    && function_exists('rider_current_user') && rider_current_user() !== null
+    && empty($_SESSION['rider_notice_popup_done'])
+    && (int) ($_COOKIE['rider_notice_hide'] ?? 0) < time()
+) {
+    try {
+        require_once INC_PATH . '/Notice.php';
+        // 로그인 직후엔 이미 담아 둔 큐를 쓰고, 그 외에는 지금 조회한다.
+        $riderNoticePopups = !empty($_SESSION['rider_notice_popup_queue'])
+            ? (array) $_SESSION['rider_notice_popup_queue']
+            : Notice::loginPopupQueue(rider_current_agency_id());
+    } catch (Throwable) {
+        $riderNoticePopups = [];
+    }
     unset($_SESSION['rider_notice_popup_queue']);
+    $_SESSION['rider_notice_popup_done'] = 1;
 }
 ?>
 		</main>
@@ -32,10 +46,13 @@ if (empty($riderMinimalShell) && !empty($_SESSION['rider_notice_popup_queue'])) 
 					</div>
 					<div id="rnp_body" class="text-gray-800" style="word-break:break-word"></div>
 				</div>
-				<div class="modal-footer py-3">
-					<button type="button" class="btn btn-sm btn-light" id="rnp_prev">이전</button>
-					<button type="button" class="btn btn-sm btn-primary" id="rnp_next">다음</button>
-					<button type="button" class="btn btn-sm btn-light-primary" data-bs-dismiss="modal" id="rnp_close">닫기</button>
+				<div class="modal-footer py-3 d-flex justify-content-between">
+					<?php // 「하루 동안 보지 않기」는 **전부 본 뒤에만** 눌릴 수 있게 한다(갑 지시). ?>
+					<button type="button" class="btn btn-sm btn-light text-muted d-none" id="rnp_hide">하루 동안 보지 않기</button>
+					<div class="d-flex gap-2 ms-auto">
+						<button type="button" class="btn btn-sm btn-light d-none" id="rnp_prev">이전</button>
+						<button type="button" class="btn btn-sm btn-primary" id="rnp_next">확인</button>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -63,20 +80,40 @@ if (empty($riderMinimalShell) && !empty($_SESSION['rider_notice_popup_queue'])) 
 		if (!items.length) return;
 
 		var i = 0;
+		var seenAll = items.length === 1;   // 한 건뿐이면 그 자체로 «전부 본» 것
 		var el = document.getElementById('kt_rider_notice_popup');
+		var prevBtn = document.getElementById('rnp_prev');
+		var nextBtn = document.getElementById('rnp_next');
+		var hideBtn = document.getElementById('rnp_hide');
+
 		function render() {
 			var n = items[i];
+			var last = i >= items.length - 1;
 			document.getElementById('rnp_title').textContent = n.title || '공지';
 			// 본문은 관리자(CKEditor)가 작성한 HTML이다 — innerHTML로 그대로 렌더링한다.
 			document.getElementById('rnp_body').innerHTML = n.body || '';
 			document.getElementById('rnp_category').textContent = n.pinned ? '고정' : (n.category || '공지');
 			document.getElementById('rnp_date').textContent = n.date || '';
-			document.getElementById('rnp_counter').textContent = items.length > 1 ? (i + 1) + ' / ' + items.length : '';
-			document.getElementById('rnp_prev').classList.toggle('d-none', items.length < 2 || i === 0);
-			document.getElementById('rnp_next').classList.toggle('d-none', items.length < 2 || i >= items.length - 1);
+			// 몇 개 중 몇 번째인지 항상 보여준다(갑 지시) — 한 건이어도 1 / 1.
+			document.getElementById('rnp_counter').textContent = (i + 1) + ' / ' + items.length;
+			prevBtn.classList.toggle('d-none', i === 0);
+			// 마지막 장에서는 「확인」이 닫기 역할을 한다.
+			nextBtn.textContent = last ? '확인' : '확인 (다음 ' + (items.length - i - 1) + '건)';
+			if (last) { seenAll = true; }
+			hideBtn.classList.toggle('d-none', !seenAll);
+			el.querySelector('.modal-body').scrollTop = 0;
 		}
-		document.getElementById('rnp_prev').addEventListener('click', function () { if (i > 0) { i--; render(); } });
-		document.getElementById('rnp_next').addEventListener('click', function () { if (i < items.length - 1) { i++; render(); } });
+		prevBtn.addEventListener('click', function () { if (i > 0) { i--; render(); } });
+		nextBtn.addEventListener('click', function () {
+			if (i < items.length - 1) { i++; render(); return; }
+			bootstrap.Modal.getOrCreateInstance(el).hide();
+		});
+		hideBtn.addEventListener('click', function () {
+			// 하루(86400초) 동안 팝업을 만들지 않는다 — 서버가 이 쿠키를 보고 큐 자체를 비운다.
+			document.cookie = 'rider_notice_hide=' + Math.floor(Date.now() / 1000 + 86400)
+				+ '; max-age=86400; path=/; samesite=lax';
+			bootstrap.Modal.getOrCreateInstance(el).hide();
+		});
 		render();
 		bootstrap.Modal.getOrCreateInstance(el).show();
 	})();
