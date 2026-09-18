@@ -18,6 +18,9 @@ final class Deployer
 {
     private const BRANCH = 'production';
 
+    /** git 로그 필드 구분자 — ^ 는 Windows 셸에서 이스케이프로 먹혀 %x1f(유닛 구분자)를 쓴다. */
+    private const SEP = "\x1f";
+
     public static function ready(): bool
     {
         return is_dir(ROOT_PATH . '/.git');
@@ -47,14 +50,91 @@ final class Deployer
             return ['ok' => false, 'ahead' => 0, 'commits' => [], 'output' => $out];
         }
 
-        $log = self::run(self::gitCmd() . ' log HEAD..origin/' . escapeshellarg(self::BRANCH) . ' --format=%h^^^%s^^^%an');
+        $log = self::run(self::gitCmd() . ' log HEAD..origin/' . escapeshellarg(self::BRANCH) . ' --format=%h%x1f%s%x1f%an');
         $commits = [];
         foreach (array_filter(explode("\n", $log), static fn (string $l): bool => trim($l) !== '') as $line) {
-            [$h, $s, $a] = array_pad(explode('^^^', $line, 3), 3, '');
+            [$h, $s, $a] = array_pad(explode(self::SEP, $line, 3), 3, '');
             $commits[] = ['hash' => $h, 'subject' => $s, 'author' => $a];
         }
 
         return ['ok' => true, 'ahead' => count($commits), 'commits' => $commits, 'output' => $out];
+    }
+
+    /**
+     * 두 커밋 사이에 들어간 커밋 목록 — 배포 이력(릴리즈 노트)에 박아 둘 내용.
+     *
+     * @return list<array{hash:string, subject:string, author:string, date:string}>
+     */
+    public static function commitsBetween(string $from, string $to): array
+    {
+        if ($from === '' || $to === '' || $from === $to) {
+            return [];
+        }
+        $log = self::run(self::gitCmd() . ' log ' . escapeshellarg($from . '..' . $to) . ' --format=%h%x1f%s%x1f%an%x1f%ci');
+        $out = [];
+        foreach (array_filter(explode("\n", $log), static fn (string $l): bool => trim($l) !== '') as $line) {
+            [$h, $s, $a, $d] = array_pad(explode(self::SEP, $line, 4), 4, '');
+            $out[] = ['hash' => $h, 'subject' => $s, 'author' => $a, 'date' => $d];
+        }
+
+        return $out;
+    }
+
+    /**
+     * 최근 배포 이력. 배포를 누를 때마다 «그 배포에 들어간 커밋»을 통째로 저장해 둔다 —
+     * git 커밋 날짜로는 «언제 서버에 반영됐는지» 를 알 수 없어서다(장애 때 되짚기용).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function history(int $limit = 20): array
+    {
+        if (!db_table_exists('deploy_history')) {
+            return [];
+        }
+        $limit = max(1, min(100, $limit));
+        $rows  = db_rows("SELECT * FROM deploy_history ORDER BY id DESC LIMIT {$limit}");
+        foreach ($rows as &$r) {
+            $r['commits'] = $r['commits_json'] !== null
+                ? (array) json_decode((string) $r['commits_json'], true)
+                : [];
+        }
+        unset($r);
+
+        return $rows;
+    }
+
+    /**
+     * 배포·마이그레이션 실행 결과를 이력에 남긴다.
+     *
+     * @param list<array<string,mixed>> $commits
+     */
+    public static function record(string $kind, bool $ok, string $from, string $to, array $commits, string $note): void
+    {
+        if (!db_table_exists('deploy_history')) {
+            return;
+        }
+        $u = function_exists('admin_user') ? admin_user() : null;
+        try {
+            db_insert(
+                "INSERT INTO deploy_history
+                    (kind, ok, from_hash, to_hash, commit_count, commits_json, note, actor_id, actor_login, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                [
+                    $kind === 'migrate' ? 'migrate' : 'deploy',
+                    $ok ? 1 : 0,
+                    $from !== '' ? $from : null,
+                    $to !== '' ? $to : null,
+                    count($commits),
+                    $commits === [] ? null : json_encode($commits, JSON_UNESCAPED_UNICODE),
+                    mb_substr($note, 0, 500),
+                    $u['id'] ?? null,
+                    $u['login_id'] ?? null,
+                ]
+            );
+        } catch (Throwable $e) {
+            // 이력 저장 실패가 배포 자체를 막지는 않는다.
+            error_log('[Deployer] 이력 기록 실패: ' . $e->getMessage());
+        }
     }
 
     /**
