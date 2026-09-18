@@ -509,20 +509,15 @@ final class RiderDebt
 
         $kind        = (string) $debt['kind'];
         $isAmortizing = in_array($kind, self::AMORTIZING, true);
-        $balance     = (int) $debt['balance_amount'];
 
-        // 금액 결정: 명시값 우선, 없으면 일납 × 일수
+        // 금액 결정: 명시값 우선, 없으면 일납 × 일수. 잔액 상한은 **트랜잭션 안에서** 다시 잡는다.
         $charge = $amount !== null ? (int) $amount : ((int) $debt['daily_amount'] * $days);
         if ($charge <= 0) {
             throw new InvalidArgumentException('차감액이 0보다 커야 합니다. (일납·일수 또는 금액을 확인)');
         }
-        if ($isAmortizing) {
-            if ($balance <= 0) {
-                throw new InvalidArgumentException('남은 잔액이 없습니다.');
-            }
-            $charge = min($charge, $balance); // 잔액 초과 차감 금지
+        if ($isAmortizing && (int) $debt['balance_amount'] <= 0) {
+            throw new InvalidArgumentException('남은 잔액이 없습니다.');
         }
-        $balanceAfter = $isAmortizing ? ($balance - $charge) : $balance;
 
         $dedKind = self::DEDUCTION_KIND[$kind] ?? 'manual';
         $note    = trim(($debt['title'] !== '' ? $debt['title'] : self::kindLabel($kind)) . ($memo !== '' ? ' · ' . $memo : ''));
@@ -531,8 +526,11 @@ final class RiderDebt
         // 이력에 그대로 박아둬야 나중에 설정이 바뀌어도 과거 정산 근거가 보존된다.
         // 부분 차감(금액 직접 입력 등)으로 일납×일수보다 적게 걷혔으면 그 비율만큼 줄여
         // "걷은 돈보다 많이 나눠 갖는" 상황을 막는다.
-        $split = ['fee_hq' => 0, 'fee_distributor' => 0, 'fee_agency' => 0];
-        if ($kind === 'lease') {
+        $splitOf = static function (int $charge) use ($kind, $debt, $days): array {
+            $split = ['fee_hq' => 0, 'fee_distributor' => 0, 'fee_agency' => 0];
+            if ($kind !== 'lease') {
+                return $split;
+            }
             $expected = (int) $debt['daily_amount'] * $days;
             $ratio    = ($expected > 0 && $charge < $expected) ? ($charge / $expected) : 1.0;
             foreach ($split as $f => $_) {
@@ -545,7 +543,9 @@ final class RiderDebt
                 $top = array_key_first($split);
                 $split[$top] -= ($sum - $charge);
             }
-        }
+
+            return $split;
+        };
 
         // 차감 귀속일(applied_date)과 **부과가 커버한 마지막 날**은 다를 수 있다.
         // 부분 부과(여유분이 모자라 일부 일수만 걷을 때) 시 귀속일은 반드시 **정산일**이어야
@@ -556,8 +556,24 @@ final class RiderDebt
         $chain = $kind === 'lease' ? self::orgChainForRider((int) $debt['rider_id']) : ['agency' => 0, 'distributor' => 0, 'hq' => 0];
 
         return db_transaction(static function () use (
-            $debtId, $debt, $appliedDate, $covered, $days, $charge, $balanceAfter, $isAmortizing, $dedKind, $note, $memo, $split, $chain
+            $debtId, $debt, $appliedDate, $covered, $days, $charge, $isAmortizing, $dedKind, $note, $memo, $splitOf, $chain
         ): array {
+            // ⚠️ 잔액은 **행 잠금으로 다시 읽어** 상한을 잡는다(2026-09-18).
+            //    정산 반영이 업로드별로 동시에 돌 수 있어, 바깥에서 읽은 잔액으로 계산하면
+            //    두 차감이 같은 잔액을 보고 각자 빼 «잔액보다 많이 걷히는» 일이 생긴다
+            //    (재현: 잔액 100,000 에 70,000 을 동시 차감 → 합계 140,000 · 잔액 30,000).
+            if ($isAmortizing) {
+                $fresh = (int) (db_row('SELECT balance_amount FROM rider_debts WHERE id = ? FOR UPDATE', [$debtId])['balance_amount'] ?? 0);
+                if ($fresh <= 0) {
+                    throw new InvalidArgumentException('남은 잔액이 없습니다.');
+                }
+                $charge = min($charge, $fresh);
+                $balanceAfter = $fresh - $charge;
+            } else {
+                $balanceAfter = (int) $debt['balance_amount'];
+            }
+            $split = $splitOf($charge);
+
             // 1) 정산 반영이 소비할 deduction_entries
             $dedId = db_insert(
                 'INSERT INTO deduction_entries (rider_id, applied_date, kind, amount, note) VALUES (?, ?, ?, ?, ?)',
