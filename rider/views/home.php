@@ -256,7 +256,7 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 
 	<!--begin::배너-->
 	<?php if ($homeBanners !== []) : ?>
-	<div class="rider-home-banners">
+	<div class="rider-home-banners mb-4">
 		<div id="kt_rider_home_carousel" class="carousel slide rider-home-carousel rounded-3 overflow-hidden shadow-sm" data-bs-ride="carousel" data-bs-interval="4500">
 			<?php if (count($homeBanners) > 1) : ?>
 			<div class="carousel-indicators rider-home-carousel-indicators">
