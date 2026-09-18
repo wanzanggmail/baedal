@@ -26,6 +26,32 @@ if (!admin_is_logged_in()) {
 if (!admin_has_role('super')) {
     $err('배포는 최고관리자만 실행할 수 있습니다.', 403);
 }
+// 이력 조회는 git 배포 서버가 아니어도 된다(기록은 DB에 있다) — ready() 게이트보다 먼저 처리한다.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+    && (string) (((array) json_decode(file_get_contents('php://input') ?: '{}', true))['action'] ?? '') === 'history'
+) {
+    $b      = (array) json_decode(file_get_contents('php://input') ?: '{}', true);
+    $limit  = max(1, min(50, (int) ($b['limit'] ?? 20)));
+    $offset = max(0, (int) ($b['offset'] ?? 0));
+    $rows   = Deployer::history($limit + 1, $offset);   // 한 건 더 읽어 «더 있는지»를 판단
+    $more   = count($rows) > $limit;
+
+    echo json_encode([
+        'ok'       => true,
+        'rows'     => array_map(static fn (array $r): array => [
+            'kind'         => (string) $r['kind'],
+            'ok'           => (int) $r['ok'] === 1,
+            'created_at'   => (string) $r['created_at'],
+            'actor_login'  => (string) ($r['actor_login'] ?? ''),
+            'commit_count' => (int) $r['commit_count'],
+            'note'         => (string) ($r['note'] ?? ''),
+            'commits'      => array_values((array) ($r['commits'] ?? [])),
+        ], array_slice($rows, 0, $limit)),
+        'has_more' => $more,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if (!Deployer::ready()) {
     $err('이 서버는 git 배포 대상이 아닙니다(rsync 배포 서버).', 409);
 }
