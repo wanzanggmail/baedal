@@ -303,7 +303,8 @@ final class RiderDebt
         // 이관 표시가 없으면 개시일부터 오늘까지 전부 미차감으로 보고 **소급 부과**된다
         // (실측: 180일 전 개시 리스가 첫 정산에서 4,887,000원). 이관 건은 남은 잔액과
         // 「이 날짜까지 정산 완료」를 받아 그다음 날부터만 부과한다.
-        $isMigrated = !empty($in['is_migrated']);
+        // 선지급금은 입력한 금액이 곧 남은 잔액이라 이관 입력이 의미가 없다 — 들어와도 무시한다.
+        $isMigrated = !empty($in['is_migrated']) && $kind !== 'advance';
         $dueUpdated = null;
         if ($isMigrated) {
             $balance    = max(0, (int) ($in['migrate_balance'] ?? 0));
@@ -379,7 +380,15 @@ final class RiderDebt
         $sets   = [];
         $params = [];
         if (array_key_exists('title', $in))    { $sets[] = 'title = ?';    $params[] = trim((string) $in['title']); }
-        if (array_key_exists('daily_amount', $in)) { $sets[] = 'daily_amount = ?'; $params[] = max(0, (int) $in['daily_amount']); }
+        if (array_key_exists('daily_amount', $in)) {
+            $newDailyIn = max(0, (int) $in['daily_amount']);
+            // 등록에서 막은 «죽은 계약»을 수정으로 만들 수 있으면 의미가 없다 — 여기서도 0 을 막는다.
+            if ($newDailyIn <= 0 && (string) $debt['kind'] !== 'advance') {
+                throw new InvalidArgumentException('일납금액은 0보다 커야 합니다. (0이면 자동 차감이 멈춥니다)');
+            }
+            $sets[]   = 'daily_amount = ?';
+            $params[] = $newDailyIn;
+        }
         if (array_key_exists('creditor', $in)) { $sets[] = 'creditor = ?'; $params[] = trim((string) $in['creditor']); }
         if (array_key_exists('note', $in))     { $sets[] = 'note = ?';     $params[] = trim((string) $in['note']); }
         if (array_key_exists('opened_on', $in)){ $sets[] = 'opened_on = ?';$params[] = self::normDate($in['opened_on']); }
