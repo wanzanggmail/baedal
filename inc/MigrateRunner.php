@@ -102,6 +102,7 @@ final class MigrateRunner
         self::migrateDropDeadAgencyFeeColumns();
         self::migrateFeeShareAdditive();
         self::migrateSettlementApplyJobs();
+        self::migrateDebtMigratedFlag();
 
         echo "\n완료.\n";
     }
@@ -3917,5 +3918,33 @@ final class MigrateRunner
               COMMENT='정산 반영 백그라운드 작업'"
         );
         echo "OK    settlement_apply_jobs 생성\n";
+    }
+    /**
+     * 미수금 이관 표시 (2026-09-18) — 기존 계약을 잔액 기준으로 옮겨 담은 건.
+     *
+     * 리스는 «총액 = 일납 × 계약일수» 로 자동 재계산되는데, 이관 건은 그 총액이 아니라
+     * **남은 잔액**으로 시작한다. 재계산이 이관 잔액을 덮어쓰지 않도록 표시를 남긴다.
+     */
+    private static function migrateDebtMigratedFlag(): void
+    {
+        echo "== rider_debts.is_migrated ==\n";
+
+        if (!db_table_exists('rider_debts')) {
+            echo "SKIP  rider_debts 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM rider_debts'), 'Field');
+        if (in_array('is_migrated', $cols, true)) {
+            echo "SKIP  is_migrated (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE rider_debts
+                ADD COLUMN is_migrated TINYINT(1) NOT NULL DEFAULT 0
+                COMMENT '기존 계약 이관 등록(잔액 기준) — 총액 자동 재계산 제외'"
+        );
+        echo "OK    rider_debts.is_migrated 추가\n";
     }
 }

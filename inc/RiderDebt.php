@@ -272,6 +272,13 @@ final class RiderDebt
         $openedOn   = self::normDate($in['opened_on'] ?? null);
         $plannedEnd = $kind === 'lease' ? self::normDate($in['planned_end_on'] ?? null) : null;
 
+        // 선지급금(가불)은 **다음 정산에서 전액 회수**라 일납·계약기간 개념이 없다(2026-09-18 갑).
+        // 입력도 금액·메모뿐이므로 개시일은 등록일로 채운다(자동 부과가 개시일을 기준으로 삼는다).
+        if ($kind === 'advance') {
+            $daily      = 0;
+            $openedOn ??= date('Y-m-d');
+        }
+
         // 리스 총액은 입력받지 않고 **계약에서 계산**한다 — 일납 × 계약일수.
         // 오타로 과다·과소 징수가 나는 걸 막고, 계약 정보와 항상 일치시킨다.
         if ($kind === 'lease') {
@@ -280,6 +287,44 @@ final class RiderDebt
         $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
         if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
             throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
+        }
+
+        // ── 차감이 영영 안 되는 계약을 막는다 (2026-09-18) ──────────────────────────
+        // 예전엔 일납 0·개시일 없음·리스 종료일 없음이 그대로 저장돼, 자동 부과도 수동 차감도
+        // 안 되는 «죽은 계약» 이 조용히 만들어졌다(목록에서 구분도 안 됐다).
+        if ($openedOn === null) {
+            throw new InvalidArgumentException('개시일을 입력하세요.');
+        }
+        if ($kind !== 'advance' && $daily <= 0) {
+            throw new InvalidArgumentException('일납금액을 입력하세요. (0이면 차감이 되지 않습니다)');
+        }
+        if ($kind === 'lease' && $plannedEnd === null) {
+            throw new InvalidArgumentException('리스/렌탈은 계약 종료 예정일이 필요합니다. (총액·차감일수가 여기서 계산됩니다)');
+        }
+        if ($kind !== 'lease' && $principal <= 0) {
+            throw new InvalidArgumentException($kind === 'advance' ? '선지급 금액을 입력하세요.' : '원금을 입력하세요.');
+        }
+
+        // ── 기존 계약 이관 — 잔액 기준 (2026-09-18 갑) ─────────────────────────────
+        // 이관 표시가 없으면 개시일부터 오늘까지 전부 미차감으로 보고 **소급 부과**된다
+        // (실측: 180일 전 개시 리스가 첫 정산에서 4,887,000원). 이관 건은 남은 잔액과
+        // 「이 날짜까지 정산 완료」를 받아 그다음 날부터만 부과한다.
+        $isMigrated = !empty($in['is_migrated']);
+        $dueUpdated = null;
+        if ($isMigrated) {
+            $balance    = max(0, (int) ($in['migrate_balance'] ?? 0));
+            $dueUpdated = self::normDate($in['migrate_as_of'] ?? null);
+            if ($balance <= 0) {
+                throw new InvalidArgumentException('이관할 남은 잔액을 입력하세요.');
+            }
+            if ($dueUpdated === null) {
+                throw new InvalidArgumentException('「이 날짜까지 정산 완료」를 입력하세요. 그다음 날부터 차감이 시작됩니다.');
+            }
+            if ($dueUpdated < $openedOn) {
+                throw new InvalidArgumentException('정산 완료일은 개시일보다 앞설 수 없습니다.');
+            }
+            // 이관 건의 «총액» 은 이관 시작 잔액이다 — 진행률이 이관 이후 기준으로 보이게 한다.
+            $principal = $balance;
         }
 
         // 리스 전용 — 제공 주체·배분액·차대번호. 대여금/선지급은 해당 없음.
@@ -291,9 +336,9 @@ final class RiderDebt
         return db_insert(
             'INSERT INTO rider_debts
                 (rider_id, kind, title, principal_amount, balance_amount, daily_amount,
-                 creditor, status, opened_on, planned_end_on, note,
+                 creditor, status, opened_on, planned_end_on, due_updated_on, is_migrated, note,
                  lease_provider, vin, fee_hq, fee_distributor, fee_agency)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $riderId,
                 $kind,
@@ -305,6 +350,8 @@ final class RiderDebt
                 'active',
                 $openedOn,
                 $plannedEnd,
+                $dueUpdated,
+                $isMigrated ? 1 : 0,
                 trim((string) ($in['note'] ?? '')),
                 $lease['lease_provider'],
                 $vin,
@@ -377,7 +424,10 @@ final class RiderDebt
         // 리스 계약이 바뀌면 총액·잔액을 다시 계산한다 — 총액 = 일납 × 계약일수.
         // 리스 계약서(제5조)가 "365일 기준 예정 총액"을 명시하는 구조라 계약과 총액이
         // 어긋나면 안 된다. 잔액은 이미 걷은 만큼을 빼서 유지한다.
+        // ⚠️ 이관 건은 제외 — 이관 잔액이 「일납 × 계약 전체일수」로 덮어써지면
+        //    이미 상환한 몫까지 다시 물리게 된다(2026-09-18).
         if ((string) $debt['kind'] === 'lease'
+            && empty($debt['is_migrated'])
             && (array_key_exists('daily_amount', $in)
                 || array_key_exists('opened_on', $in)
                 || array_key_exists('planned_end_on', $in))
@@ -626,14 +676,25 @@ final class RiderDebt
 
         $daily  = (int) $debt['daily_amount'];
         $opened = self::normDate($debt['opened_on'] ?? null);
-        // 일납이 없거나 개시일이 없으면 자동계산 불가 — 수동 차감(applyRepayment)으로 처리한다.
-        if ($daily <= 0 || $opened === null) {
-            return null;
-        }
 
         $pe = self::normDate($periodEnd);
         if ($pe === null) {
             throw new InvalidArgumentException('정산기간 형식이 올바르지 않습니다. (YYYY-MM-DD)');
+        }
+
+        // 선지급금(가불)은 일수로 나누지 않고 **다음 정산에서 잔액 전액**을 건다(2026-09-18 갑).
+        // 그날 실지급이 모자라면 걷을 수 있는 만큼만 걷고, 남은 잔액은 다음 정산에서 다시 전액 시도한다.
+        //
+        // 단 **일납이 들어 있는 옛 선지급금은 그대로 분할 회수**한다 — 라이더와 분할로 합의해 둔
+        // 건을 규칙이 바뀌었다고 갑자기 전액 회수하면 그 달 실지급이 통째로 사라진다.
+        // 새로 등록되는 선지급금은 일납 칸 자체가 없어 항상 전액 회수다.
+        if ((string) $debt['kind'] === 'advance' && $daily <= 0) {
+            return self::chargeAdvance($debt, $pe, $headroom);
+        }
+
+        // 일납이 없거나 개시일이 없으면 자동계산 불가 — 수동 차감(applyRepayment)으로 처리한다.
+        if ($daily <= 0 || $opened === null) {
+            return null;
         }
 
         // 상각형(대여금·선지급금)은 잔액이 남아 있어야 부과한다.
@@ -696,6 +757,71 @@ final class RiderDebt
             throw $e;
         }
     }
+    /**
+     * 선지급금(가불) 회수 — 다음 정산에서 **잔액 전액**. 여유분이 모자라면 그만큼만 걷고
+     * 잔액을 남겨 다음 정산에서 다시 전액을 시도한다(부분 회수).
+     *
+     * 개시일 이후의 정산부터 걸린다 — 오늘 등록한 선지급을 어제 정산이 가져가면 안 된다.
+     *
+     * @param array<string,mixed> $debt
+     * @return array{amount:int, balance_after:int, entry_id:int, deduction_entry_id:int}|null
+     */
+    private static function chargeAdvance(array $debt, string $periodEnd, ?int $headroom): ?array
+    {
+        $balance = (int) $debt['balance_amount'];
+        if ($balance <= 0) {
+            return null;
+        }
+
+        // ⚠️ 정산일이 등록일보다 앞서도 걷는다. 일정산은 «지난 날짜» 로 올라오기 때문에
+        //    (오늘 등록 → 어제자 정산 반영) 날짜로 막으면 «다음 정산에서 전액 회수» 가
+        //    하루 이틀씩 밀린다. 이 함수는 정산 반영 시점에만 호출되므로, 등록 전에
+        //    이미 반영이 끝난 정산이 뒤늦게 이 가불을 가져갈 일은 없다.
+
+        $charge = $headroom !== null ? min($balance, max(0, $headroom)) : $balance;
+        if ($charge <= 0) {
+            return null;   // 이번 정산에선 한 푼도 못 걷음 → 다음 정산으로
+        }
+
+        try {
+            return self::applyRepayment(
+                (int) $debt['id'],
+                $periodEnd,
+                0,
+                $charge,
+                $charge < $balance ? '자동회수(일부) — 잔액 부족분은 다음 정산에서' : '자동회수(전액)',
+                $periodEnd
+            );
+        } catch (Throwable $e) {
+            // 같은 귀속일로 이미 처리됨 → 재반영 시 조용히 skip
+            if (str_contains($e->getMessage(), 'uq_rde_debt_applied') || str_contains($e->getMessage(), 'Duplicate entry')) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 같은 라이더에게 이미 있는 **진행 중인 같은 종류** 계약 — 중복 등록 경고용.
+     * 대여금은 여러 건이 정상일 수 있어 차단하지 않고 화면에서 확인만 받는다.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function activeSameKind(int $riderId, string $kind): array
+    {
+        if (!self::tableReady() || $riderId < 1 || !isset(self::KINDS[$kind])) {
+            return [];
+        }
+
+        return db_rows(
+            "SELECT id, title, balance_amount, daily_amount, opened_on
+               FROM rider_debts
+              WHERE rider_id = ? AND kind = ? AND status = 'active'
+              ORDER BY id DESC",
+            [$riderId, $kind]
+        );
+    }
+
     /**
      * 리스 수수료 배분 리포트 — 기간 내 실제로 배분된 금액을 조직별로 집계.
      * 현재 로그인 계정의 스코프(본사=전체 / 총판=하위 / 대리점=자기)를 자동 적용한다.

@@ -359,7 +359,7 @@ $currentUrl = admin_url('deduction/debts');
 							<th class="text-end min-w-90px">원금</th>
 							<th class="text-end min-w-90px">남은 잔액</th>
 							<th class="text-end min-w-80px">일납</th>
-							<th class="min-w-90px">채권자</th>
+							<th class="text-end min-w-110px">다음 차감 예상</th>
 							<th class="min-w-140px">계약기간 · 미납갱신</th>
 							<th class="min-w-80px">상태</th>
 							<th class="text-end min-w-140px">관리</th>
@@ -377,6 +377,9 @@ $currentUrl = admin_url('deduction/debts');
 							</td>
 							<td>
 								<span class="badge badge-light-<?= $kindBadge[$dk] ?? 'secondary' ?> mb-1"><?= htmlspecialchars(RiderDebt::kindLabel($dk), ENT_QUOTES, 'UTF-8') ?></span>
+								<?php if (!empty($d['is_migrated'])) : ?>
+								<span class="badge badge-light-info fs-9 mb-1" title="기존 계약을 잔액 기준으로 옮겨 담은 건입니다.">이관</span>
+								<?php endif; ?>
 								<?php if ($dk === 'lease' && (string) ($d['lease_provider'] ?? '') !== '') : ?>
 								<span class="badge badge-light-dark fs-9 mb-1"><?= htmlspecialchars(RiderDebt::providerLabel((string) $d['lease_provider']), ENT_QUOTES, 'UTF-8') ?> 제공</span>
 								<?php endif; ?>
@@ -399,7 +402,33 @@ $currentUrl = admin_url('deduction/debts');
 							<td class="text-end text-gray-700"><?= $isAmort ? $won($d['principal_amount']) : '—' ?></td>
 							<td class="text-end fw-bold <?= $isAmort && (int) $d['balance_amount'] > 0 ? 'text-danger' : 'text-gray-500' ?>"><?= $isAmort ? $won($d['balance_amount']) : '—' ?></td>
 							<td class="text-end text-gray-700"><?= (int) $d['daily_amount'] > 0 ? $won($d['daily_amount']) : '—' ?></td>
-							<td class="text-gray-700 fs-7"><?= htmlspecialchars((string) ($d['creditor'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
+							<?php
+							// 다음 정산에서 실제로 걸릴 금액 — 선지급금은 잔액 전액, 나머지는 밀린 일수 × 일납.
+							// 차감이 아예 안 되는 설정(일납 0·개시일 없음·리스 종료일 없음)은 여기서 눈에 띄게 한다.
+							$dGap  = RiderDebt::accrualGap($d);
+							$dDead = (string) ($d['opened_on'] ?? '') === ''
+							      || ($dk !== 'advance' && (int) $d['daily_amount'] <= 0)
+							      || ($dk === 'lease' && (string) ($d['planned_end_on'] ?? '') === '');
+							$dFull = $dk === 'advance' && (int) $d['daily_amount'] <= 0;
+							$dNext = 0;
+							if ((string) $d['status'] === 'active' && !$dDead) {
+							    $dNext = $dFull
+							        ? (int) $d['balance_amount']
+							        : min((int) $d['balance_amount'], (int) $d['daily_amount'] * (int) ($dGap['gap_days'] ?? 0));
+							}
+							?>
+							<td class="text-end fs-7">
+								<?php if ((string) $d['status'] !== 'active') : ?>
+								<span class="text-gray-500">—</span>
+								<?php elseif ($dDead) : ?>
+								<span class="badge badge-light-danger fs-9" title="설정이 비어 있어 자동·수동 차감이 모두 되지 않습니다.">차감 안 됨</span>
+								<?php elseif ($dNext > 0) : ?>
+								<span class="text-gray-800 fw-semibold"><?= $won($dNext) ?></span>
+								<div class="text-muted fs-9"><?= $dFull ? '전액 회수' : (int) ($dGap['gap_days'] ?? 0) . '일치' ?></div>
+								<?php else : ?>
+								<span class="text-gray-500">—</span>
+								<?php endif; ?>
+							</td>
 							<td class="text-gray-600 fs-8">
 								<?php $gap = RiderDebt::accrualGap($d); ?>
 								<?php if ($dk === "lease" && (string) ($d["opened_on"] ?? "") !== "" && (string) ($d["planned_end_on"] ?? "") !== ""): ?>
@@ -448,8 +477,9 @@ $currentUrl = admin_url('deduction/debts');
 			<?php endif; ?>
 			<div class="text-muted fs-8 mt-3">
 				모든 차감은 <strong>정산 엑셀을 업로드·반영할 때</strong> 처리됩니다 — 매일 자동으로 도는 별도 배치는 없습니다.
-				리스/렌탈은 개시일~계약 종료 예정일이 설정되어 있으면, 업로드된 정산기간과 겹치는 일수만큼 자동 계산되어 차감됩니다(같은 기간 재업로드해도 중복 차감되지 않습니다).
-				대여금·선지급금은 자동 계산이 없어 「차감」 버튼으로 직접 실행해야 합니다.
+				<strong>대여금·리스</strong>는 마지막 차감일 다음날부터 정산일까지의 <strong>달력일 × 일납</strong>만큼 자동 차감됩니다(라이더가 쉰 날도 셉니다. 같은 정산을 재반영해도 중복 차감되지 않습니다).
+				<strong>선지급금</strong>은 다음 정산에서 <strong>잔액 전액</strong>을 회수하며, 그날 실지급이 모자라면 걷을 수 있는 만큼만 걷고 나머지는 다음 정산으로 넘어갑니다.
+				회수 순서는 리스 → 대여금 → 선지급금입니다.
 				차감 이력·취소는 라이더 상세의 「미수금」 카드에서 확인합니다.
 			</div>
 		</div>
@@ -483,21 +513,17 @@ $currentUrl = admin_url('deduction/debts');
 						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_title" maxlength="120" placeholder="예: 차량대여금, 오토바이리스" />
 					</div>
 					<div class="col-md-6" id="dn_principal_wrap">
-						<label class="form-label fs-7 fw-semibold">원금(대여금·선지급)</label>
+						<label class="form-label fs-7 fw-semibold required" id="dn_principal_label">원금</label>
 						<input type="number" class="form-control form-control-sm form-control-solid" id="dn_principal" min="0" step="1000" placeholder="예: 1250000" />
-						<div class="form-text fs-8">남은 잔액의 시작값. 리스는 불필요.</div>
+						<div class="form-text fs-8" id="dn_principal_help">남은 잔액의 시작값.</div>
 					</div>
-					<div class="col-md-6">
-						<label class="form-label fs-7 fw-semibold">일납금액</label>
+					<div class="col-md-6" id="dn_daily_wrap">
+						<label class="form-label fs-7 fw-semibold required">일납금액</label>
 						<input type="number" class="form-control form-control-sm form-control-solid" id="dn_daily" min="0" step="100" placeholder="예: 24000" />
-						<div class="form-text fs-8">차감 시 일납×일수로 자동 계산.</div>
+						<div class="form-text fs-8">정산 반영 때 일납 × 경과일수로 자동 차감됩니다.</div>
 					</div>
-					<div class="col-md-6">
-						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
-						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_creditor" maxlength="120" placeholder="예: 본사, XX리스" />
-					</div>
-					<div class="col-md-6">
-						<label class="form-label fs-7 fw-semibold">개시일/출고일</label>
+					<div class="col-md-6" id="dn_opened_wrap">
+						<label class="form-label fs-7 fw-semibold required">개시일/출고일</label>
 						<input type="date" class="form-control form-control-sm form-control-solid" id="dn_opened" />
 					</div>
 					<div class="col-md-6 d-none" id="dn_planned_end_wrap">
@@ -553,6 +579,31 @@ $currentUrl = admin_url('deduction/debts');
 					<div class="col-12">
 						<label class="form-label fs-7 fw-semibold">메모</label>
 						<input type="text" class="form-control form-control-sm form-control-solid" id="dn_note" maxlength="255" />
+					</div>
+					<?php // 기존 계약 이관 — 잔액 기준. 켜지 않으면 개시일부터 전부 미차감으로 보고 소급 부과된다. ?>
+					<div class="col-12" id="dn_migrate_block">
+						<div class="separator separator-dashed my-2"></div>
+						<label class="form-check form-switch form-check-custom form-check-solid align-items-start">
+							<input class="form-check-input me-3 mt-1" type="checkbox" id="dn_migrate" />
+							<span class="d-flex flex-column">
+								<span class="fw-semibold text-gray-800">기존 계약 이관</span>
+								<span class="text-muted fs-8">다른 곳에서 관리하던 계약을 옮겨올 때 켜세요. <strong>남은 잔액</strong>부터 시작하고, 기준일 다음날부터 차감합니다.</span>
+							</span>
+						</label>
+						<div class="row g-4 mt-1 d-none" id="dn_migrate_fields">
+							<div class="col-md-6">
+								<label class="form-label fs-7 fw-semibold required">남은 잔액</label>
+								<input type="number" class="form-control form-control-sm form-control-solid" id="dn_migrate_balance" min="0" step="1000" placeholder="예: 3240000" />
+							</div>
+							<div class="col-md-6">
+								<label class="form-label fs-7 fw-semibold required">이 날짜까지 정산 완료</label>
+								<input type="date" class="form-control form-control-sm form-control-solid" id="dn_migrate_as_of" />
+								<div class="form-text fs-8">이 날 다음날부터 차감이 시작됩니다.</div>
+							</div>
+						</div>
+					</div>
+					<div class="col-12">
+						<div class="bg-light rounded p-3 fs-8" id="dn_preview">라이더와 금액을 입력하면 다음 정산에서 얼마가 차감될지 보여 드립니다.</div>
 					</div>
 				</div>
 			</div>
@@ -663,10 +714,6 @@ $currentUrl = admin_url('deduction/debts');
 						</div>
 					</div>
 					<div class="col-md-6">
-						<label class="form-label fs-7 fw-semibold">채권자/구분</label>
-						<input type="text" class="form-control form-control-sm form-control-solid" id="de_creditor" maxlength="120" />
-					</div>
-					<div class="col-md-6">
 						<label class="form-label fs-7 fw-semibold">상태</label>
 						<select class="form-select form-select-sm form-select-solid" id="de_status">
 							<option value="active">진행 중</option>
@@ -737,14 +784,79 @@ $currentUrl = admin_url('deduction/debts');
 			}
 		}
 
+		// 종류마다 필요한 칸이 다르다 — 선지급금은 금액·메모만, 리스는 계약기간·배분까지.
 		function syncPrincipal() {
-			var isLease = (kindEl.value === 'lease');
+			var kind = kindEl.value, isLease = kind === 'lease', isAdv = kind === 'advance';
 			document.getElementById('dn_principal_wrap').style.display = isLease ? 'none' : '';
+			document.getElementById('dn_principal_label').textContent = isAdv ? '선지급 금액' : '원금';
+			document.getElementById('dn_principal_help').textContent = isAdv
+				? '다음 정산에서 전액 회수합니다. 모자라면 남은 금액은 그다음 정산으로 넘어갑니다.'
+				: '남은 잔액의 시작값.';
+			// 선지급금은 일납·개시일·항목명 없이 금액과 메모만 받는다(2026-09-18 갑).
+			document.getElementById('dn_daily_wrap').classList.toggle('d-none', isAdv);
+			document.getElementById('dn_opened_wrap').classList.toggle('d-none', isAdv);
+			document.getElementById('dn_title').closest('.col-md-8').classList.toggle('d-none', isAdv);
 			document.getElementById('dn_planned_end_wrap').classList.toggle('d-none', !isLease);
 			document.getElementById('dn_lease_wrap').classList.toggle('d-none', !isLease);
+			// 선지급금은 「금액 = 남은 잔액」이라 이관 입력이 따로 필요 없다.
+			document.getElementById('dn_migrate_block').classList.toggle('d-none', isAdv);
+			if (isAdv) { document.getElementById('dn_migrate').checked = false; }
 			if (isLease) { syncFeeFields('dn'); }
+			syncMigrate();
+		}
+		function syncMigrate() {
+			var on = document.getElementById('dn_migrate').checked && kindEl.value !== 'advance';
+			document.getElementById('dn_migrate_fields').classList.toggle('d-none', !on);
+			syncPreview();
+		}
+		/** 저장 전에 «다음 정산에서 얼마가 빠지는지»를 보여준다 — 이관 체크를 깜빡하면 여기 큰 금액이 뜬다. */
+		function syncPreview() {
+			var el = document.getElementById('dn_preview');
+			if (!el) { return; }
+			var kind  = kindEl.value;
+			var num   = function (id) { return Number(document.getElementById(id).value) || 0; };
+			var daily = num('dn_daily');
+			var mig   = document.getElementById('dn_migrate').checked && kind !== 'advance';
+			var from  = mig ? document.getElementById('dn_migrate_as_of').value : document.getElementById('dn_opened').value;
+			// 남은 잔액 상한 — 리스의 총액은 계약에서 자동 계산되므로(입력칸 없음) 상한을 두지 않는다.
+			var bal   = mig ? num('dn_migrate_balance') : (kind === 'lease' ? 0 : num('dn_principal'));
+
+			if (kind === 'advance') {
+				var amt = num('dn_principal');
+				el.className = 'bg-light rounded p-3 fs-8';
+				el.innerHTML = amt > 0
+					? '다음 정산에서 <strong>' + won(amt) + ' 전액</strong>을 회수합니다. 그날 실지급이 모자라면 남은 금액은 다음 정산으로 넘어갑니다.'
+					: '선지급 금액을 입력하세요.';
+				return;
+			}
+			if (!from || daily <= 0) {
+				el.className = 'bg-light rounded p-3 fs-8';
+				el.textContent = mig ? '남은 잔액과 기준일을 입력하세요.' : '개시일과 일납금액을 입력하세요.';
+				return;
+			}
+			// 기준일(또는 개시일 전날) 다음날 ~ 오늘까지의 달력일.
+			// ⚠️ new Date('2026-09-17') 은 UTC 자정이라 로컬(KST) 자정과 9시간 어긋난다 —
+			//    날짜만 꺼내 UTC 기준으로 계산해야 하루가 밀리지 않는다.
+			var toUtc = function (s) { var p = String(s).split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); };
+			var now   = new Date();
+			var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+			var start = toUtc(from) - (mig ? 0 : 86400000);   // 이관은 기준일 다음날부터, 신규는 개시일부터
+			var days  = Math.floor((today - start) / 86400000);
+			if (days < 0) { days = 0; }
+			var amount = daily * days;
+			if (bal > 0 && amount > bal) { amount = bal; }
+			var heavy = days > 14;
+			el.className = 'rounded p-3 fs-8 ' + (heavy ? 'bg-light-danger' : 'bg-light');
+			el.innerHTML = (heavy ? '⚠️ ' : '')
+				+ '다음 정산에서 <strong>' + days + '일치 ' + won(amount) + '</strong>이 한꺼번에 차감됩니다.'
+				+ (heavy && !mig ? '<br>이미 받던 계약을 옮기는 중이라면 <strong>「기존 계약 이관」</strong>을 켜고 남은 잔액과 정산 완료일을 입력하세요.' : '')
+				+ '<br><span class="text-muted">라이더 실지급이 모자라면 걷을 수 있는 만큼만 걷고 나머지는 다음 정산으로 넘어갑니다.</span>';
 		}
 		kindEl.addEventListener('change', syncPrincipal);
+		document.getElementById('dn_migrate').addEventListener('change', syncMigrate);
+		['dn_daily', 'dn_principal', 'dn_opened', 'dn_migrate_balance', 'dn_migrate_as_of'].forEach(function (i) {
+			document.getElementById(i).addEventListener('input', syncPreview);
+		});
 		document.getElementById('dn_lease_provider').addEventListener('change', function () { syncFeeFields('dn'); });
 		document.getElementById('de_lease_provider').addEventListener('change', function () { syncFeeFields('de'); });
 		['dn_daily', 'dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) {
@@ -755,7 +867,9 @@ $currentUrl = admin_url('deduction/debts');
 		});
 
 		document.getElementById('btn_debt_new').addEventListener('click', function () {
-			['dn_title', 'dn_principal', 'dn_daily', 'dn_creditor', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_id', 'dn_vin'].forEach(function (i) { document.getElementById(i).value = ''; });
+			['dn_title', 'dn_principal', 'dn_daily', 'dn_opened', 'dn_planned_end', 'dn_note', 'dn_rider_id', 'dn_vin',
+			 'dn_migrate_balance', 'dn_migrate_as_of'].forEach(function (i) { document.getElementById(i).value = ''; });
+			document.getElementById('dn_migrate').checked = false;
 			['dn_fee_hq', 'dn_fee_distributor', 'dn_fee_agency'].forEach(function (i) { document.getElementById(i).value = 0; });
 			document.getElementById('dn_lease_provider').value = 'hq';
 			document.getElementById('dn_rider_picked').textContent = '';
@@ -818,23 +932,44 @@ $currentUrl = admin_url('deduction/debts');
 			var rid = parseInt(document.getElementById('dn_rider_id').value, 10) || 0;
 			if (!rid) { setAlert('debt_new_alert', '라이더를 검색해서 선택하세요.'); return; }
 			var btn = this; btn.disabled = true;
-			post({
+			var mig = document.getElementById('dn_migrate').checked && kindEl.value !== 'advance';
+			var payload = {
 				action: 'create', rider_id: rid, kind: kindEl.value,
 				title: document.getElementById('dn_title').value.trim(),
 				principal_amount: Number(document.getElementById('dn_principal').value) || 0,
 				daily_amount: Number(document.getElementById('dn_daily').value) || 0,
-				creditor: document.getElementById('dn_creditor').value.trim(),
 				opened_on: document.getElementById('dn_opened').value,
 				planned_end_on: document.getElementById('dn_planned_end').value,
+				is_migrated: mig ? 1 : 0,
+				migrate_balance: mig ? (Number(document.getElementById('dn_migrate_balance').value) || 0) : 0,
+				migrate_as_of: mig ? document.getElementById('dn_migrate_as_of').value : '',
 				lease_provider: document.getElementById('dn_lease_provider').value,
 				vin: document.getElementById('dn_vin').value.trim(),
 				fee_hq: Number(document.getElementById('dn_fee_hq').value) || 0,
 				fee_distributor: Number(document.getElementById('dn_fee_distributor').value) || 0,
 				fee_agency: Number(document.getElementById('dn_fee_agency').value) || 0,
 				note: document.getElementById('dn_note').value.trim()
-			}).then(function (d) {
-				if (d.ok) { location.reload(); } else { setAlert('debt_new_alert', d.message || '오류'); btn.disabled = false; }
-			}).catch(function () { setAlert('debt_new_alert', '네트워크 오류'); btn.disabled = false; });
+			};
+			var send = function () {
+				return post(payload).then(function (d) {
+					if (d.ok) { location.reload(); return; }
+					// 같은 종류가 이미 진행 중 — 서버가 목록을 돌려준다. 확인하면 그대로 다시 보낸다.
+					if (d.duplicate && !payload.confirm_duplicate) {
+						var lines = d.duplicate.map(function (x) {
+							return '· ' + (x.title || '(제목 없음)') + ' · 잔액 ' + won(x.balance) + (x.opened ? ' · ' + x.opened + ' 개시' : '');
+						}).join('\n');
+						if (confirm(d.message + '\n\n' + lines)) {
+							payload.confirm_duplicate = 1;
+							return send();
+						}
+						btn.disabled = false;
+						return;
+					}
+					setAlert('debt_new_alert', d.message || '오류');
+					btn.disabled = false;
+				});
+			};
+			send().catch(function () { setAlert('debt_new_alert', '네트워크 오류'); btn.disabled = false; });
 		});
 
 		// ── 차감 ──
@@ -880,7 +1015,6 @@ $currentUrl = admin_url('deduction/debts');
 				document.getElementById('de_debt_id').value = b.dataset.id;
 				document.getElementById('de_title').value = b.dataset.title || '';
 				document.getElementById('de_daily').value = b.dataset.daily || 0;
-				document.getElementById('de_creditor').value = b.dataset.creditor || '';
 				document.getElementById('de_status').value = b.dataset.status || 'active';
 				document.getElementById('de_balance').value = b.dataset.balance || 0;
 				document.getElementById('de_balance_wrap').style.display = (b.dataset.amort === '1') ? '' : 'none';
@@ -906,7 +1040,6 @@ $currentUrl = admin_url('deduction/debts');
 				action: 'update', debt_id: Number(document.getElementById('de_debt_id').value),
 				title: document.getElementById('de_title').value.trim(),
 				daily_amount: Number(document.getElementById('de_daily').value) || 0,
-				creditor: document.getElementById('de_creditor').value.trim(),
 				status: document.getElementById('de_status').value
 			};
 			if (document.getElementById('de_balance_wrap').style.display !== 'none') {

@@ -162,6 +162,46 @@ if (db_table_exists('rider_carry_forward')) {
         : $wrn("미회수 이월 {$cf['c']}건 {$n($cf['s'])}원 (다음 정산에서 자동 회수 대상)");
 }
 
+// ── ⑥-C 미수금 차감이 정산에 안 걸린 건 ────────────────────────────────────
+// buildFeeItems 는 `applied_date = settlement_date` 가 **정확히 같은** deduction_entries 만
+// 가져간다. 그래서 그 라이더에게 그 날짜 사이클이 영영 안 생기면, 원장(rider_debts)에서는
+// 잔액이 줄었는데 라이더 실지급에서는 한 푼도 안 빠진 «받은 척» 상태가 된다.
+$hd('⑥-C 미수금 차감 미소비  (원장은 줄었는데 정산에서 안 걷힌 건)');
+if (db_table_exists('rider_debt_entries')) {
+    $orph = db_rows(
+        "SELECT d.id, d.rider_id, d.applied_date, d.amount, e.memo,
+                (SELECT MAX(c.settlement_date) FROM settlement_rider_cycles c WHERE c.rider_id = d.rider_id) AS last_cycle
+           FROM deduction_entries d
+           LEFT JOIN rider_debt_entries e ON e.deduction_entry_id = d.id
+          WHERE d.kind IN ('loan','lease','advance','rental')
+            AND NOT EXISTS (SELECT 1 FROM settlement_rider_cycles c
+                             WHERE c.rider_id = d.rider_id AND c.settlement_date = d.applied_date)"
+    );
+    $lost = 0;
+    $wait = 0;
+    foreach ($orph as $o) {
+        // 아직 그 날짜 정산이 안 올라온 것뿐이면 나중에 걷힌다 — 이미 지난 구간만 «유실»로 본다.
+        if ($o['last_cycle'] === null || (string) $o['applied_date'] > (string) $o['last_cycle']) {
+            $wait += (int) $o['amount'];
+            continue;
+        }
+        $lost += (int) $o['amount'];
+    }
+    if ($orph === []) {
+        $ok('미소비 미수금 차감 없음');
+    } else {
+        if ($lost > 0) {
+            $bad('정산이 이미 지난 날짜로 잡힌 차감 ' . $n($lost) . '원 — 원장만 줄고 실제로 안 걷혔다');
+        }
+        if ($wait > 0) {
+            $wrn('아직 정산이 안 올라온 날짜의 차감 ' . $n($wait) . '원 (그 날짜 정산이 반영되면 걷힌다)');
+        }
+        if ($lost === 0 && $wait === 0) {
+            $ok('미소비 미수금 차감 없음');
+        }
+    }
+}
+
 // ── ⑦ 음수 잔액 ────────────────────────────────────────────────────────────
 $hd('⑦ 음수 잔액 (자금 부족 신호)');
 $r = db_row('SELECT COUNT(*) AS c, COALESCE(SUM(balance),0) AS s FROM rider_wallets WHERE balance < 0');

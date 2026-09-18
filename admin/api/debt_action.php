@@ -84,14 +84,42 @@ $action = trim((string) ($body['action'] ?? ''));
 try {
     if ($action === 'create') {
         $rider = $loadRider((int) ($body['rider_id'] ?? 0));
+        $kind  = (string) ($body['kind'] ?? '');
+
+        // 같은 종류가 이미 진행 중이면 한 번 확인받는다 — 차단은 하지 않는다(대여금은 여러 건이 정상).
+        // 리스를 두 번 등록해 매 정산마다 두 배로 떼이는 사고를 막는 게 목적이다.
+        if (empty($body['confirm_duplicate'])) {
+            $dup = RiderDebt::activeSameKind((int) $rider['id'], $kind);
+            if ($dup !== []) {
+                echo json_encode([
+                    'ok'        => false,
+                    'duplicate' => array_map(static fn (array $d): array => [
+                        'title'   => (string) ($d['title'] ?? ''),
+                        'balance' => (int) $d['balance_amount'],
+                        'daily'   => (int) $d['daily_amount'],
+                        'opened'  => (string) ($d['opened_on'] ?? ''),
+                    ], $dup),
+                    'message'   => sprintf(
+                        '이 라이더에게 진행 중인 %s이 %d건 있습니다. 그래도 등록할까요?',
+                        RiderDebt::kindLabel($kind),
+                        count($dup)
+                    ),
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+        }
+
         $id = RiderDebt::create([
             'rider_id'         => (int) $rider['id'],
-            'kind'             => (string) ($body['kind'] ?? ''),
+            'kind'             => $kind,
             'title'            => (string) ($body['title'] ?? ''),
             'principal_amount' => (int) ($body['principal_amount'] ?? 0),
             'daily_amount'     => (int) ($body['daily_amount'] ?? 0),
-            'creditor'         => (string) ($body['creditor'] ?? ''),
             'opened_on'        => (string) ($body['opened_on'] ?? ''),
+            // 기존 계약 이관 — 잔액 기준, 기준일 다음날부터 차감
+            'is_migrated'      => !empty($body['is_migrated']),
+            'migrate_balance'  => (int) ($body['migrate_balance'] ?? 0),
+            'migrate_as_of'    => (string) ($body['migrate_as_of'] ?? ''),
             'planned_end_on'   => (string) ($body['planned_end_on'] ?? ''),
             'note'             => (string) ($body['note'] ?? ''),
             // 리스 전용 — 제공 주체·차대번호·수수료 배분(일 단위 정액)
@@ -116,7 +144,7 @@ try {
 
     if ($action === 'update') {
         $fields = array_intersect_key($body, array_flip([
-            'title', 'daily_amount', 'creditor', 'note', 'opened_on', 'planned_end_on', 'status', 'balance_amount', 'principal_amount',
+            'title', 'daily_amount', 'note', 'opened_on', 'planned_end_on', 'status', 'balance_amount', 'principal_amount',
             'lease_provider', 'vin', 'fee_hq', 'fee_distributor', 'fee_agency',
         ]));
         RiderDebt::update($debtId, $fields);
@@ -132,6 +160,21 @@ try {
             ? (int) $body['amount']
             : null;
         $memo = (string) ($body['memo'] ?? '');
+
+        // ⚠️ 차감은 «귀속일과 정산일이 같은 사이클» 이 소비한다(SettlementLedger::buildFeeItems).
+        //    이미 정산이 반영된 날짜로 차감하면 원장 잔액만 줄고 **실제로는 한 푼도 안 걷힌다**
+        //    (개발 DB 실측: 이렇게 뜬 차감 71건·1,650,000원). 저장 전에 막는다.
+        $settled = db_row(
+            'SELECT settlement_date FROM settlement_rider_cycles WHERE rider_id = ? AND settlement_date = ? LIMIT 1',
+            [(int) $rider['id'], $appliedDate]
+        );
+        if ($settled !== null) {
+            $err(sprintf(
+                '%s 정산은 이미 반영돼 있어 이 날짜로 차감하면 실제 정산에서 걷히지 않습니다. 아직 반영하지 않은 날짜(다음 정산일)를 지정하세요.',
+                $appliedDate
+            ));
+        }
+
         $r = RiderDebt::applyRepayment($debtId, $appliedDate, $days, $amount, $memo);
         AuditLog::record('rider.debt.repay', (string) $rider['rider_code'], sprintf('미수금 #%d 차감 %s원(잔액 %s)', $debtId, number_format($r['amount']), number_format($r['balance_after'])));
         echo json_encode([

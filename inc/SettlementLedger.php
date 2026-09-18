@@ -151,24 +151,39 @@ final class SettlementLedger
             return;
         }
 
-        $dates = array_column($rows, 'settlement_date');
-        if ($dates === []) {
+        // ⚠️ 귀속일은 **라이더별 마지막 정산일**이다(2026-09-18 수정).
+        // 예전엔 업로드 전체의 max 날짜를 썼다. 파일에 여러 날짜가 들어 있고 어떤 라이더가
+        // 그 마지막 날 일하지 않았으면, 그 라이더에겐 그 날짜의 사이클이 없어서
+        // deduction_entries 가 **아무 정산에도 소비되지 않는다** — 원장에는 걷었다고 남고
+        // 실제로는 한 푼도 안 걷히는 상태가 된다(buildFeeItems 는 applied_date = settlement_date
+        // 인 행만 가져간다). 라이더 본인의 날짜로 붙여야 반드시 그 사이클이 소비한다.
+        $riderPeriodEnd = [];
+        foreach ($rows as $row) {
+            $rid  = (int) ($row['rider_id'] ?? 0);
+            $date = (string) ($row['settlement_date'] ?? '');
+            if ($rid < 1 || $date === '') {
+                continue;
+            }
+            if (!isset($riderPeriodEnd[$rid]) || $date > $riderPeriodEnd[$rid]) {
+                $riderPeriodEnd[$rid] = $date;
+            }
+        }
+        if ($riderPeriodEnd === []) {
             return;
         }
-        $periodEnd = max($dates);
 
-        $riderIds = array_unique(array_filter(array_map(
-            static fn ($r) => (int) ($r['rider_id'] ?? 0),
-            $rows
-        )));
+        $riderIds = array_keys($riderPeriodEnd);
 
         // 라이더별 "그날 걷을 수 있는 여유분" — 미수금 차감을 넣기 **전** 상태의 실지급 예상액.
         // previewFromDailyRow 가 법정공제·시간제보험·엑셀차감·대행수수료·기존 이월분을 모두
         // 반영한 net 을 주므로, 그게 곧 미수금에 쓸 수 있는 한도다.
+        // ⚠️ 차감은 라이더의 **마지막 정산일 사이클 하나**에서만 빠지므로, 여유분도 그 날짜 것만
+        //    세야 한다. 여러 날짜를 합쳐 세면 그 사이클이 감당 못 할 금액을 부과하게 되고,
+        //    초과분은 이월로 떠밀려 라이더 실지급만 계속 0 이 된다(2026-09-18 수정).
         $headroom = [];
         foreach ($rows as $row) {
             $rid = (int) ($row['rider_id'] ?? 0);
-            if ($rid < 1) {
+            if ($rid < 1 || (string) ($row['settlement_date'] ?? '') !== ($riderPeriodEnd[$rid] ?? '')) {
                 continue;
             }
             try {
@@ -181,16 +196,22 @@ final class SettlementLedger
         foreach ($riderIds as $riderId) {
             $left = (int) ($headroom[$riderId] ?? 0);
 
-            // 리스 먼저 — 계약 종료일이 있어 부과 창이 닫히고, 걷은 리스료는 상위 조직에
-            // 배분할 의무가 붙는다. 그 다음은 오래된 채권부터.
+            // 회수 순서: 리스 → 대여금 → 선지급금(2026-09-18 갑).
+            // 리스는 미납이 계약 해지 사유라 가장 먼저 지키고, 선지급금은 전액 회수라
+            // 여유분을 통째로 먹기 때문에 맨 뒤에 둔다. 같은 종류는 오래된 채권부터.
             $debts = RiderDebt::forRider($riderId, true);
             usort($debts, static function (array $a, array $b): int {
-                $rank = static fn (array $d): int => (string) $d['kind'] === 'lease' ? 0 : 1;
+                $rank = static fn (array $d): int => match ((string) $d['kind']) {
+                    'lease'   => 0,
+                    'advance' => 2,
+                    default   => 1,
+                };
 
                 return [$rank($a), (string) ($a['opened_on'] ?? ''), (int) $a['id']]
                    <=> [$rank($b), (string) ($b['opened_on'] ?? ''), (int) $b['id']];
             });
 
+            $periodEnd = $riderPeriodEnd[$riderId];
             foreach ($debts as $debt) {
                 try {
                     $r = RiderDebt::applyDailyAccrualForPeriod((int) $debt['id'], (string) $periodEnd, $left);
