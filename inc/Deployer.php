@@ -86,13 +86,14 @@ final class Deployer
      *
      * @return list<array<string,mixed>>
      */
-    public static function history(int $limit = 20): array
+    public static function history(int $limit = 20, int $offset = 0): array
     {
         if (!db_table_exists('deploy_history')) {
             return [];
         }
-        $limit = max(1, min(100, $limit));
-        $rows  = db_rows("SELECT * FROM deploy_history ORDER BY id DESC LIMIT {$limit}");
+        $limit  = max(1, min(100, $limit));
+        $offset = max(0, $offset);
+        $rows   = db_rows("SELECT * FROM deploy_history ORDER BY id DESC LIMIT {$limit} OFFSET {$offset}");
         foreach ($rows as &$r) {
             $r['commits'] = $r['commits_json'] !== null
                 ? (array) json_decode((string) $r['commits_json'], true)

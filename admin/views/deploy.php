@@ -17,7 +17,14 @@ $apiUrl   = ADMIN_BASE . '/api/deploy.php';
 $ready    = Deployer::ready();
 $current  = $ready ? Deployer::currentCommit() : null;
 // 배포 이력(릴리즈 노트) — 배포 서버가 아니어도 지난 기록은 보여준다(기록은 DB에 있다).
-$history  = Deployer::history(20);
+// 첫 페이지만 서버에서 그리고, 스크롤이 바닥에 닿으면 JS 가 이어서 불러온다(무한 스크롤).
+$histPage = 15;
+$history  = Deployer::history($histPage + 1);
+$histMore = count($history) > $histPage;
+$history  = array_slice($history, 0, $histPage);
+$histTotal = db_table_exists('deploy_history')
+    ? (int) (db_row('SELECT COUNT(*) c FROM deploy_history')['c'] ?? 0)
+    : 0;
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -199,7 +206,7 @@ $history  = Deployer::history(20);
 	      // 커밋 날짜로는 «언제 서버에 반영됐는지» 를 알 수 없어, 누를 때마다 그 묶음을 저장해 둔다. ?>
 	<div class="card card-flush mt-6">
 		<div class="card-header pt-5">
-			<h3 class="card-title fw-bold">배포 이력 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($history)) ?>건</span></h3>
+			<h3 class="card-title fw-bold">배포 이력 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format($histTotal) ?>건</span></h3>
 		</div>
 		<div class="card-body pt-2">
 			<?php if ($history === []) : ?>
@@ -207,7 +214,7 @@ $history  = Deployer::history(20);
 				아직 기록이 없습니다. 다음 배포부터 «언제 · 누가 · 무엇이» 올라갔는지 여기에 쌓입니다.
 			</div>
 			<?php else : ?>
-			<div class="timeline">
+			<div class="timeline" id="dp_hist_list">
 				<?php foreach ($history as $h) :
 					$isMig  = (string) $h['kind'] === 'migrate';
 					$failed = (int) $h['ok'] !== 1;
@@ -241,8 +248,86 @@ $history  = Deployer::history(20);
 				</div>
 				<?php endforeach; ?>
 			</div>
+			<?php // 스크롤이 여기 닿으면 다음 페이지를 불러온다. 자동 로드가 막히면 버튼으로도 받을 수 있다. ?>
+			<div id="dp_hist_more_wrap" class="text-center pt-2 <?= $histMore ? '' : 'd-none' ?>">
+				<button type="button" class="btn btn-sm btn-light" id="dp_hist_more">더 보기</button>
+				<div class="text-muted fs-8 mt-2 d-none" id="dp_hist_loading">불러오는 중…</div>
+			</div>
+			<div class="text-muted fs-8 text-center pt-2 d-none" id="dp_hist_end">마지막까지 다 봤습니다.</div>
 			<?php endif; ?>
 		</div>
 	</div>
+
+	<script>
+	(function () {
+		var list = document.getElementById('dp_hist_list');
+		if (!list) { return; }
+		var API      = <?= json_encode(ADMIN_BASE . '/api/deploy.php', JSON_UNESCAPED_UNICODE) ?>;
+		var PAGE     = <?= (int) $histPage ?>;
+		var offset   = <?= (int) count($history) ?>;
+		var hasMore  = <?= $histMore ? 'true' : 'false' ?>;
+		var loading  = false;
+		var wrap     = document.getElementById('dp_hist_more_wrap');
+		var btn      = document.getElementById('dp_hist_more');
+		var spinner  = document.getElementById('dp_hist_loading');
+		var endMsg   = document.getElementById('dp_hist_end');
+
+		function esc(v) {
+			return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+			});
+		}
+		// 서버(PHP)가 그리는 마크업과 같은 모양이어야 이어 붙였을 때 티가 안 난다.
+		function row(h) {
+			var isMig = h.kind === 'migrate';
+			var color = !h.ok ? 'danger' : (isMig ? 'info' : 'success');
+			var commits = (h.commits || []).map(function (c) {
+				return '<li class="fs-8 text-gray-800 mb-1"><code class="text-muted">' + esc(c.hash) + '</code> '
+					+ esc(c.subject) + ' <span class="text-muted">· ' + esc(c.author) + '</span></li>';
+			}).join('');
+			return '<div class="d-flex border-start border-4 border-' + color + ' ps-4 pb-5"><div class="flex-grow-1">'
+				+ '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">'
+				+ '<span class="badge badge-light-' + color + '">' + (isMig ? 'DB 마이그레이션' : '배포') + (h.ok ? '' : ' 실패') + '</span>'
+				+ '<span class="fw-bold text-gray-800 fs-7">' + esc(h.created_at) + '</span>'
+				+ '<span class="text-muted fs-8">' + esc(h.actor_login || '—') + '</span>'
+				+ (!isMig && h.commit_count > 0 ? '<span class="text-muted fs-8">· 커밋 ' + h.commit_count + '개</span>' : '')
+				+ '</div>'
+				+ '<div class="text-gray-600 fs-8 mb-2" style="white-space:pre-line">' + esc(h.note) + '</div>'
+				+ (commits ? '<ul class="list-unstyled mb-0">' + commits + '</ul>' : '')
+				+ '</div></div>';
+		}
+
+		function load() {
+			if (loading || !hasMore) { return; }
+			loading = true;
+			btn.classList.add('d-none');
+			spinner.classList.remove('d-none');
+			fetch(API, {
+				method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+				body: JSON.stringify({ action: 'history', offset: offset, limit: PAGE })
+			})
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					loading = false;
+					spinner.classList.add('d-none');
+					if (!res.ok) { btn.classList.remove('d-none'); return; }
+					list.insertAdjacentHTML('beforeend', (res.rows || []).map(row).join(''));
+					offset += (res.rows || []).length;
+					hasMore = !!res.has_more;
+					if (hasMore) { btn.classList.remove('d-none'); }
+					else { wrap.classList.add('d-none'); endMsg.classList.remove('d-none'); }
+				})
+				.catch(function () { loading = false; spinner.classList.add('d-none'); btn.classList.remove('d-none'); });
+		}
+
+		btn.addEventListener('click', load);
+		// 바닥이 보이면 자동으로 다음 페이지 — 버튼은 자동 로드가 안 될 때를 위한 대비책이다.
+		if ('IntersectionObserver' in window) {
+			new IntersectionObserver(function (entries) {
+				if (entries[0].isIntersecting) { load(); }
+			}, { rootMargin: '200px' }).observe(wrap);
+		}
+	})();
+	</script>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>
