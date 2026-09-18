@@ -152,7 +152,9 @@ final class Notice
      */
     public static function loginPopupQueue(int $agencyId = 0): array
     {
-        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', '(ends_at IS NULL OR ends_at >= NOW())', "(pinned = 1 OR category = '긴급')"];
+        // 2026-09-18 갑: "공지사항 내용이 있을때 라이더 메뉴에서 팝업으로 노출" →
+        // 예전엔 고정·긴급만 띄웠지만 이제 **공개된 공지 전부**가 대상이다(고정이 먼저).
+        $where  = ["status = 'published'", '(published_at IS NULL OR published_at <= NOW())', '(ends_at IS NULL OR ends_at >= NOW())'];
         $params = [];
         [$orgSql, $orgParams] = self::riderOrgVisibility($agencyId);
         if ($orgSql !== '') {
