@@ -8,7 +8,6 @@ $listError = null;
 $banners   = [];
 $apiUrl       = ADMIN_BASE . '/api/banners.php';
 $uploadApiUrl = ADMIN_BASE . '/api/banner_upload.php';
-$slotLabels = Banner::SLOT_LABELS;
 
 try {
     $banners = Banner::listAdmin();
@@ -81,7 +80,7 @@ $needsMigrate = $listError !== null
 							<th class="min-w-50px"></th>
 							<th class="min-w-120px">광고 ID</th>
 							<th class="min-w-200px">광고명 / 문구</th>
-							<th class="min-w-140px">노출 위치</th>
+							<th class="min-w-160px">라이더 앱 노출</th>
 							<th class="min-w-70px text-center">순서</th>
 							<th class="min-w-90px">송출</th>
 							<th class="min-w-120px">집행 기간</th>
@@ -112,7 +111,14 @@ $needsMigrate = $listError !== null
 								<a href="<?= htmlspecialchars($row['link_url'], ENT_QUOTES, 'UTF-8') ?>" class="fs-7 d-block text-primary text-hover-primary" target="_blank" rel="noopener">랜딩</a>
 								<?php endif; ?>
 							</td>
-							<td><span class="badge badge-light-primary"><?= htmlspecialchars($row['slot_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
+							<td>
+								<?php if ($row['live']) : ?>
+								<span class="badge badge-light-success">노출 중</span>
+								<?php else : ?>
+								<span class="badge badge-light-warning">노출 안 됨</span>
+								<span class="text-muted fs-8 d-block"><?= htmlspecialchars($row['live_reason'], ENT_QUOTES, 'UTF-8') ?></span>
+								<?php endif; ?>
+							</td>
 							<td class="text-center fw-bold"><?= (int) $row['sort_order'] ?></td>
 							<td><span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($row['status_label'], ENT_QUOTES, 'UTF-8') ?></span></td>
 							<td class="fs-7 text-gray-700"><?= htmlspecialchars($period, ENT_QUOTES, 'UTF-8') ?></td>
@@ -175,16 +181,9 @@ $needsMigrate = $listError !== null
 						</div>
 						<div class="row g-6 mb-6">
 							<div class="col-md-6">
-								<label class="form-label">노출 위치</label>
-								<select class="form-select form-select-solid" id="banner_slot">
-									<?php foreach ($slotLabels as $val => $label) : ?>
-									<option value="<?= htmlspecialchars($val, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></option>
-									<?php endforeach; ?>
-								</select>
-							</div>
-							<div class="col-md-6">
 								<label class="form-label">송출 순서</label>
 								<input type="number" class="form-control form-control-solid" id="banner_sort_order" value="100" min="0" max="9999" />
+								<div class="form-text">숫자가 작을수록 먼저 나옵니다.</div>
 							</div>
 						</div>
 						<div class="mb-6">
@@ -293,7 +292,6 @@ $needsMigrate = $listError !== null
 			document.getElementById('banner_image_url').value = '';
 			document.getElementById('banner_image_file').value = '';
 			setImagePreview('');
-			document.getElementById('banner_slot').value = 'rider_app';
 			document.getElementById('banner_sort_order').value = '100';
 			document.getElementById('banner_status').value = 'active';
 			document.getElementById('banner_start_at').value = '';
@@ -309,7 +307,6 @@ $needsMigrate = $listError !== null
 			document.getElementById('banner_image_url').value = row.image_url || '';
 			document.getElementById('banner_image_file').value = '';
 			setImagePreview(row.image_src || '');
-			document.getElementById('banner_slot').value = row.slot || 'rider_app';
 			document.getElementById('banner_sort_order').value = String(row.sort_order);
 			document.getElementById('banner_status').value = row.status || 'inactive';
 			document.getElementById('banner_start_at').value = row.start_at || '';
@@ -380,7 +377,7 @@ $needsMigrate = $listError !== null
 					subtitle: document.getElementById('banner_subtitle').value.trim(),
 					link_url: document.getElementById('banner_link_url').value.trim(),
 					image_url: document.getElementById('banner_image_url').value.trim(),
-					slot: document.getElementById('banner_slot').value,
+					slot: 'rider_app',
 					sort_order: parseInt(document.getElementById('banner_sort_order').value, 10) || 0,
 					status: document.getElementById('banner_status').value,
 					start_at: document.getElementById('banner_start_at').value,
