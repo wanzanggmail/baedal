@@ -237,6 +237,26 @@ final class Org
     }
 
     /**
+     * 라이더에게 «보여도 되는» 작성 조직 id — 공지·배너 broadcast 판정용 (2026-09-19).
+     *
+     * 자기 대리점 + 상위(총판·본사)뿐 아니라 **본사·개발사 조직을 항상 포함**한다.
+     * 조상만 따지면, 본사 계정이 아닌 개발사 계정으로 쓴 글이나 상위 연결이 끊긴 대리점의
+     * 라이더에게 본사 공지가 안 보인다 — 실제로 «배너를 등록했는데 라이더 홈에 안 나온다»
+     * 는 신고의 원인이었다. 본사·개발사가 쓰는 글은 설계상 전 조직 broadcast 다.
+     *
+     * @return list<int>
+     */
+    public static function broadcastOrgIds(int $orgId): array
+    {
+        $ids = self::ancestorOrgIds($orgId);
+        foreach (db_rows("SELECT id FROM organizations WHERE level IN ('admin','developer')") as $r) {
+            $ids[] = (int) $r['id'];
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
      * 주어진 조직 + 모든 상위(조상) 조직 id (자신 포함, 루트까지).
      * 라이더 공지·배너 broadcast 가시성 계산용 (대리점 + 상위 총판·본사).
      *
