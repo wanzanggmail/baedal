@@ -7,14 +7,18 @@ declare(strict_types=1);
  */
 final class Banner
 {
-    /** @var array<string, string> */
+    /**
+     * 노출 위치는 **라이더 홈 배너 하나뿐**이다. 예전엔 home_top·home_middle 도 고를 수 있었지만
+     * 그 두 자리는 어느 화면에도 그려지지 않아, 고르면 «등록은 됐는데 아무 데도 안 나오는» 광고가 됐다
+     * (2026-09-19 갑 신고). 선택지를 지우고 기존 행은 마이그레이션으로 rider_app 으로 옮긴다.
+     *
+     * @var array<string, string>
+     */
     public const SLOT_LABELS = [
-        'home_top'    => '앱 홈 상단 광고',
-        'home_middle' => '앱 홈 중단 광고',
-        'rider_app'   => '라이더 홈 배너',
+        'rider_app' => '라이더 홈 배너',
     ];
 
-    /** 라이더 홈 하단 롤링 캐러셀 슬롯 (home_top·home_middle 은 별도 영역용) */
+    /** 라이더 홈 하단 롤링 캐러셀 슬롯 — 지금은 이것이 유일한 노출 위치다. */
     public const RIDER_HOME_CAROUSEL_SLOT = 'rider_app';
 
     public static function slots(): array
@@ -326,8 +330,11 @@ final class Banner
     private static function mapAdminRow(array $row): array
     {
         $st = (string) ($row['status'] ?? 'inactive');
+        [$live, $liveReason] = self::visibility($row);
 
         return [
+            'live'         => $live,
+            'live_reason'  => $liveReason,
             'id'              => (int) $row['id'],
             'public_id'       => (string) $row['public_id'],
             'title'           => (string) $row['title'],
@@ -366,6 +373,52 @@ final class Banner
             'image_src' => self::imageSrc($img, true),
             'slot'      => (string) ($row['slot'] ?? ''),
         ];
+    }
+
+    /**
+     * 지금 라이더 홈에 나오는지, 아니면 왜 안 나오는지. 등록해 놓고 «안 보인다» 는 문의가
+     * 대부분 상태·기간·위치 중 하나라서, 목록에서 바로 보이게 한다.
+     *
+     * @param array<string, mixed> $row
+     * @return array{0:bool, 1:string}
+     */
+    private static function visibility(array $row): array
+    {
+        $today = date('Y-m-d');
+        $why   = [];
+        if ((string) ($row['status'] ?? '') !== 'active') {
+            $why[] = '송출 중지';
+        }
+        $start = self::formatDate($row['start_at'] ?? null);
+        $end   = self::formatDate($row['end_at'] ?? null);
+        if ($start !== '' && $start > $today) {
+            $why[] = '시작일 전';
+        }
+        if ($end !== '' && $end < $today) {
+            $why[] = '집행 종료';
+        }
+        if (!isset(self::SLOT_LABELS[(string) ($row['slot'] ?? '')])) {
+            $why[] = '쓰지 않는 노출 위치';
+        }
+        if (self::imageFileMissing((string) ($row['image_url'] ?? ''))) {
+            $why[] = '이미지 파일 없음';
+        }
+
+        return [$why === [], implode(' · ', $why)];
+    }
+
+    /** 서버에 실제 파일이 있는지 — 다른 서버에서 올린 이미지는 여기 없다. 외부 URL 은 확인하지 않는다. */
+    private static function imageFileMissing(string $imageUrl): bool
+    {
+        $u = trim($imageUrl);
+        if ($u === '' || preg_match('#^https?://#i', $u)) {
+            return $u === '';
+        }
+        if (!preg_match('#^/(uploads|assets)/[a-zA-Z0-9_./-]+$#', $u)) {
+            return true;
+        }
+
+        return !is_file(ROOT_PATH . $u);
     }
 
     private static function formatDate(mixed $v): string

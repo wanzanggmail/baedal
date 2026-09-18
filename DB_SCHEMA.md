@@ -361,7 +361,7 @@ PK=`agency_id`. **행의 역할이 조직 레벨에 따라 다르다**(갑 확�
 
 ### `content_notices` / `content_banners`
 `org_id`(작성 조직, broadcast 기준) — **2026-07 재설계로 본사만 작성**(`admin_can_write('content')`에 HQ 레벨 체크 추가), 총판·대리점은 조회만.
-`content_banners.slot`: `home_top`/`home_middle`/`rider_app`(라이더 홈 캐러셀).
+`content_banners.slot`: `rider_app`(라이더 홈 캐러셀) **하나뿐**. 예전 `home_top`/`home_middle` 은 어느 화면에도 그려지지 않아 2026-09-19 마이그레이션으로 전부 `rider_app` 으로 옮겼다.
 ⚠️ 본사만 작성이면 `org_id`가 항상 본사 id로 고정돼 사실상 무의미 — 컬럼 유지 여부는 미정(§8-B 참고).
 
 ---

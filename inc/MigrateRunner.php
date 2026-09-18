@@ -104,6 +104,7 @@ final class MigrateRunner
         self::migrateSettlementApplyJobs();
         self::migrateDebtMigratedFlag();
         self::migrateDeployHistory();
+        self::migrateBannerSlotSingle();
 
         echo "\n완료.\n";
     }
@@ -3983,5 +3984,30 @@ final class MigrateRunner
               COMMENT='배포 이력(릴리즈 노트)'"
         );
         echo "OK    deploy_history 생성\n";
+    }
+
+    /**
+     * 광고 배너 노출 위치 일원화 (2026-09-19) — home_top·home_middle 로 등록된 광고를 살린다.
+     *
+     * 그 두 위치는 어느 화면에도 그려지지 않아, 고른 광고는 «등록은 됐는데 아무 데도 안 나오는»
+     * 상태였다. 유일하게 실제로 노출되는 rider_app 으로 옮긴다(노출 여부는 status·기간이 따로 정한다).
+     */
+    private static function migrateBannerSlotSingle(): void
+    {
+        echo "== content_banners.slot 일원화 ==\n";
+
+        if (!db_table_exists('content_banners')) {
+            echo "SKIP  content_banners 없음\n";
+
+            return;
+        }
+        $n = (int) (db_row("SELECT COUNT(*) c FROM content_banners WHERE slot <> 'rider_app'")['c'] ?? 0);
+        if ($n === 0) {
+            echo "SKIP  옮길 광고 없음\n";
+
+            return;
+        }
+        db_execute("UPDATE content_banners SET slot = 'rider_app' WHERE slot <> 'rider_app'");
+        echo "OK    광고 {$n}건을 라이더 홈 배너로 이동\n";
     }
 }
