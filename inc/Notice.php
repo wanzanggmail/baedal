@@ -126,7 +126,7 @@ final class Notice
     }
 
     /**
-     * 라이더(대리점 소속)가 볼 수 있는 공지 org 범위: 자기 대리점 + 상위(총판·본사) + 전역(NULL).
+     * 라이더(대리점 소속)가 볼 수 있는 공지 org 범위: 자기 대리점 + 상위(총판·본사) + 본사·개발사 + 전역(NULL).
      * agencyId 0 이면 제한 없음(레거시·전역).
      *
      * @return array{0:string,1:list<int>}
@@ -136,7 +136,7 @@ final class Notice
         if ($agencyId < 1) {
             return ['', []];
         }
-        $orgIds = Org::ancestorOrgIds($agencyId);
+        $orgIds = Org::broadcastOrgIds($agencyId);
         if ($orgIds === []) {
             return ['org_id IS NULL', []];
         }

@@ -142,10 +142,10 @@ final class Banner
         $placeholders = implode(',', array_fill(0, count($slots), '?'));
         $params = $slots;
 
-        // 멀티테넌시: 라이더 대리점 + 상위(총판·본사) broadcast + 전역(NULL)
+        // 멀티테넌시: 라이더 대리점 + 상위(총판·본사) + 본사·개발사 broadcast + 전역(NULL)
         $orgCond = '';
         if ($agencyId > 0) {
-            $orgIds = Org::ancestorOrgIds($agencyId);
+            $orgIds = Org::broadcastOrgIds($agencyId);
             if ($orgIds === []) {
                 $orgCond = ' AND org_id IS NULL';
             } else {
@@ -155,13 +155,18 @@ final class Banner
             }
         }
 
+        // 오늘 날짜는 DB 의 CURDATE() 가 아니라 PHP 에서 넘긴다 — 웹서버와 DB 의 시간대가
+        // 다르면 관리자 화면 판정(date())과 어긋나 «관리자엔 노출 중, 라이더엔 없음» 이 된다.
+        $today   = date('Y-m-d');
+        $params  = array_merge($params, [$today, $today]);
+
         $sql = "SELECT id, public_id, title, subtitle, link_url, image_url, slot, sort_order
                 FROM content_banners
                 WHERE status = 'active'
                   AND slot IN ({$placeholders})
-                  AND (start_at IS NULL OR start_at <= CURDATE())
-                  AND (end_at IS NULL OR end_at >= CURDATE())
                   {$orgCond}
+                  AND (start_at IS NULL OR start_at <= ?)
+                  AND (end_at IS NULL OR end_at >= ?)
                 ORDER BY sort_order ASC, id DESC
                 LIMIT " . max(1, min(50, $limit));
 
@@ -330,11 +335,12 @@ final class Banner
     private static function mapAdminRow(array $row): array
     {
         $st = (string) ($row['status'] ?? 'inactive');
-        [$live, $liveReason] = self::visibility($row);
+        [$live, $liveReason, $scopeNote] = self::visibility($row);
 
         return [
             'live'         => $live,
             'live_reason'  => $liveReason,
+            'scope_note'   => $scopeNote,
             'id'              => (int) $row['id'],
             'public_id'       => (string) $row['public_id'],
             'title'           => (string) $row['title'],
@@ -380,7 +386,7 @@ final class Banner
      * 대부분 상태·기간·위치 중 하나라서, 목록에서 바로 보이게 한다.
      *
      * @param array<string, mixed> $row
-     * @return array{0:bool, 1:string}
+     * @return array{0:bool, 1:string, 2:string}
      */
     private static function visibility(array $row): array
     {
@@ -404,7 +410,17 @@ final class Banner
             $why[] = '이미지 파일 없음';
         }
 
-        return [$why === [], implode(' · ', $why)];
+        // 작성 조직이 대리점·총판이면 그 아래 라이더만 본다(본사·개발사 글은 전 조직 broadcast).
+        $scope = '';
+        $orgId = (int) ($row['org_id'] ?? 0);
+        if ($orgId > 0) {
+            $org = Org::find($orgId);
+            if ($org !== null && !in_array((string) $org['level'], ['admin', 'developer'], true)) {
+                $scope = (string) $org['name'] . ' 소속 라이더에게만';
+            }
+        }
+
+        return [$why === [], implode(' · ', $why), $scope];
     }
 
     /** 서버에 실제 파일이 있는지 — 다른 서버에서 올린 이미지는 여기 없다. 외부 URL 은 확인하지 않는다. */

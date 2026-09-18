@@ -118,6 +118,9 @@ $needsMigrate = $listError !== null
 								<span class="badge badge-light-warning">노출 안 됨</span>
 								<span class="text-muted fs-8 d-block"><?= htmlspecialchars($row['live_reason'], ENT_QUOTES, 'UTF-8') ?></span>
 								<?php endif; ?>
+								<?php if ($row['scope_note'] !== '') : ?>
+								<span class="text-muted fs-8 d-block"><?= htmlspecialchars($row['scope_note'], ENT_QUOTES, 'UTF-8') ?></span>
+								<?php endif; ?>
 							</td>
 							<td class="text-center fw-bold"><?= (int) $row['sort_order'] ?></td>
 							<td><span class="badge badge-light-<?= htmlspecialchars($row['status_class'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($row['status_label'], ENT_QUOTES, 'UTF-8') ?></span></td>

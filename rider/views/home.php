@@ -254,68 +254,6 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 	</div>
 	<!--end::바로가기-->
 
-	<!--begin::최근 정산-->
-	<?php if ($recentCycles !== []) : ?>
-	<div class="card card-flush shadow-sm mb-4">
-		<div class="card-header border-0 min-h-auto pt-4">
-			<h2 class="card-title fw-bold fs-6 mb-0">최근 정산</h2>
-			<div class="card-toolbar">
-				<a href="<?= $esc(rider_url('settlement/fees')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
-			</div>
-		</div>
-		<div class="card-body pt-2">
-			<?php foreach ($recentCycles as $c) : ?>
-			<?php // 눌린 항목의 **그 날짜** 정산 상세로 보낸다. 예전엔 전부 목록(settlement/fees)으로
-			      // 걸려 있어 어느 줄을 눌러도 같은 화면이 떴다. ?>
-			<a href="<?= $esc(rider_url('settlement/detail') . (str_contains(rider_url('settlement/detail'), '?') ? '&' : '?') . 'date=' . urlencode((string) $c['settlement_date'])) ?>" class="rider-home-cycle text-decoration-none">
-				<div class="min-w-0">
-					<div class="rider-home-cycle-date"><?= $esc((string) $c['settlement_date']) ?></div>
-					<div class="rider-home-cycle-sub text-truncate">
-						<?= $esc((string) $c['platform_label']) ?> · <?= number_format((int) $c['order_count']) ?>건
-					</div>
-				</div>
-				<div class="text-end flex-shrink-0">
-					<div class="rider-home-cycle-amount">+<?= $esc($won((int) $c['net_amount'])) ?></div>
-					<?php if ((int) $c['total_fee_amount'] > 0) : ?>
-					<div class="rider-home-cycle-fee">수수료 <?= $esc($won((int) $c['total_fee_amount'])) ?></div>
-					<?php endif; ?>
-				</div>
-			</a>
-			<?php endforeach; ?>
-		</div>
-	</div>
-	<?php endif; ?>
-	<!--end::최근 정산-->
-
-	<!--begin::공지-->
-	<?php if ($homeNotices !== []) : ?>
-	<div class="card card-flush shadow-sm rider-home-notices mb-4">
-		<div class="card-header border-0 min-h-auto pt-4">
-			<h2 class="card-title fw-bold fs-6 mb-0">공지</h2>
-			<div class="card-toolbar">
-				<a href="<?= $esc(rider_url('notices')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
-			</div>
-		</div>
-		<div class="card-body pt-2">
-			<ul class="list-unstyled mb-0 rider-home-notice-list">
-				<?php foreach (array_slice($homeNotices, 0, 3) as $n) : ?>
-				<li>
-					<a href="<?= $esc(rider_notice_detail_url((int) $n['id'])) ?>"
-						class="rider-home-notice-item d-flex align-items-center gap-2 text-gray-800 text-hover-primary text-decoration-none">
-						<?php if ($n['pinned']) : ?>
-						<span class="badge badge-light-success fs-9 flex-shrink-0 py-1 px-2">고정</span>
-						<?php endif; ?>
-						<span class="flex-grow-1 text-truncate fs-7 fw-medium"><?= $esc((string) $n['title']) ?></span>
-						<span class="fs-8 text-muted flex-shrink-0"><?= $esc((string) ($n['published_date'] ?: '')) ?></span>
-					</a>
-				</li>
-				<?php endforeach; ?>
-			</ul>
-		</div>
-	</div>
-	<?php endif; ?>
-	<!--end::공지-->
-
 	<!--begin::배너-->
 	<?php if ($homeBanners !== []) : ?>
 	<div class="rider-home-banners">
@@ -369,4 +307,66 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 	</div>
 	<?php endif; ?>
 	<!--end::배너-->
+
+	<!--begin::공지-->
+	<?php if ($homeNotices !== []) : ?>
+	<div class="card card-flush shadow-sm rider-home-notices mb-4">
+		<div class="card-header border-0 min-h-auto pt-4">
+			<h2 class="card-title fw-bold fs-6 mb-0">공지</h2>
+			<div class="card-toolbar">
+				<a href="<?= $esc(rider_url('notices')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
+			</div>
+		</div>
+		<div class="card-body pt-2">
+			<ul class="list-unstyled mb-0 rider-home-notice-list">
+				<?php foreach (array_slice($homeNotices, 0, 3) as $n) : ?>
+				<li>
+					<a href="<?= $esc(rider_notice_detail_url((int) $n['id'])) ?>"
+						class="rider-home-notice-item d-flex align-items-center gap-2 text-gray-800 text-hover-primary text-decoration-none">
+						<?php if ($n['pinned']) : ?>
+						<span class="badge badge-light-success fs-9 flex-shrink-0 py-1 px-2">고정</span>
+						<?php endif; ?>
+						<span class="flex-grow-1 text-truncate fs-7 fw-medium"><?= $esc((string) $n['title']) ?></span>
+						<span class="fs-8 text-muted flex-shrink-0"><?= $esc((string) ($n['published_date'] ?: '')) ?></span>
+					</a>
+				</li>
+				<?php endforeach; ?>
+			</ul>
+		</div>
+	</div>
+	<?php endif; ?>
+	<!--end::공지-->
+
+	<!--begin::최근 정산-->
+	<?php if ($recentCycles !== []) : ?>
+	<div class="card card-flush shadow-sm mb-4">
+		<div class="card-header border-0 min-h-auto pt-4">
+			<h2 class="card-title fw-bold fs-6 mb-0">최근 정산</h2>
+			<div class="card-toolbar">
+				<a href="<?= $esc(rider_url('settlement/fees')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
+			</div>
+		</div>
+		<div class="card-body pt-2">
+			<?php foreach ($recentCycles as $c) : ?>
+			<?php // 눌린 항목의 **그 날짜** 정산 상세로 보낸다. 예전엔 전부 목록(settlement/fees)으로
+			      // 걸려 있어 어느 줄을 눌러도 같은 화면이 떴다. ?>
+			<a href="<?= $esc(rider_url('settlement/detail') . (str_contains(rider_url('settlement/detail'), '?') ? '&' : '?') . 'date=' . urlencode((string) $c['settlement_date'])) ?>" class="rider-home-cycle text-decoration-none">
+				<div class="min-w-0">
+					<div class="rider-home-cycle-date"><?= $esc((string) $c['settlement_date']) ?></div>
+					<div class="rider-home-cycle-sub text-truncate">
+						<?= $esc((string) $c['platform_label']) ?> · <?= number_format((int) $c['order_count']) ?>건
+					</div>
+				</div>
+				<div class="text-end flex-shrink-0">
+					<div class="rider-home-cycle-amount">+<?= $esc($won((int) $c['net_amount'])) ?></div>
+					<?php if ((int) $c['total_fee_amount'] > 0) : ?>
+					<div class="rider-home-cycle-fee">수수료 <?= $esc($won((int) $c['total_fee_amount'])) ?></div>
+					<?php endif; ?>
+				</div>
+			</a>
+			<?php endforeach; ?>
+		</div>
+	</div>
+	<?php endif; ?>
+	<!--end::최근 정산-->
 </div>
