@@ -647,7 +647,10 @@ final class SettlementLedger
     private const DEFER_PRIORITY = [
         'excel_deduction', 'manual', 'vat',
         'carry_forward',
-        'loan', 'lease', 'rental', 'advance',
+        // 미수금은 **회수 순서의 역순**으로 이월한다(2026-09-18) — 걷는 순서가 리스 → 대여금 →
+        // 선지급금이므로, 돈이 모자랄 때 먼저 포기하는 건 선지급금이고 리스가 가장 마지막이다.
+        // (리스는 미납이 계약 해지 사유라 가장 확실히 걷혀야 한다.)
+        'advance', 'loan', 'rental', 'lease',
         'hourly_ins',
         'agency_fee',
         'withholding', 'employment_ins', 'accident_ins',
