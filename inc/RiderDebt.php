@@ -280,10 +280,43 @@ final class RiderDebt
             $openedOn ??= date('Y-m-d');
         }
 
-        $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
+        // ── 기존 계약 이관 — 잔액 기준 (2026-09-18 갑) ─────────────────────────────
+        // 이관 표시가 없으면 개시일부터 오늘까지 전부 미차감으로 보고 **소급 부과**된다
+        // (실측: 180일 전 개시 리스가 첫 정산에서 4,887,000원). 이관 건은 남은 잔액과
+        // 「이 날짜까지 정산 완료」를 받아 그다음 날부터만 부과한다.
+        //
+        // ⚠️ 이관이면 **잔액이 유일한 기준**이다(2026-09-18 재정비). 원 계약 총액을 같이 받으면
+        //    둘이 어긋날 때 무엇이 맞는지 알 수 없다 — 예전엔 총액을 조용히 잔액으로 덮어써서
+        //    입력값이 사라졌고, «잔액 > 총액» 같은 모순도 그대로 통과했다. 이제 총액은 받지 않는다.
+        // 선지급금은 입력한 금액이 곧 남은 잔액이라 이관 입력이 의미가 없다 — 들어와도 무시한다.
+        $isMigrated = !empty($in['is_migrated']) && $kind !== 'advance';
+        $dueUpdated = null;
+        if ($isMigrated) {
+            $balance    = max(0, (int) ($in['migrate_balance'] ?? 0));
+            $dueUpdated = self::normDate($in['migrate_as_of'] ?? null);
+            if ($balance <= 0) {
+                throw new InvalidArgumentException('이관할 남은 잔액을 입력하세요.');
+            }
+            if ($dueUpdated === null) {
+                throw new InvalidArgumentException('「이 날짜까지 정산 완료」를 입력하세요. 그다음 날부터 차감이 시작됩니다.');
+            }
+            // 미래 날짜를 넣으면 그날까지 차감이 멈춘 채 조용히 지나간다 — 사람이 알아채기 어렵다.
+            if ($dueUpdated > date('Y-m-d')) {
+                throw new InvalidArgumentException('정산 완료일은 오늘보다 뒤일 수 없습니다. (그날까지 차감이 멈춥니다)');
+            }
+            // 개시일을 모르면 기준일로 채운다 — 옮겨오는 계약이라 원 개시일이 없을 수 있다.
+            $openedOn ??= $dueUpdated;
+            if ($dueUpdated < $openedOn) {
+                throw new InvalidArgumentException('정산 완료일은 개시일보다 앞설 수 없습니다.');
+            }
+            // 이관 건의 «총액» 은 이관 시작 잔액이다 — 진행률이 이관 이후 기준으로 보인다.
+            $principal = $balance;
+        } else {
+            $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
+        }
 
         // ── 차감이 영영 안 되는 계약을 막는다 (2026-09-18) ──────────────────────────
-        // 예전엔 일납 0·개시일 없음·리스 종료일 없음이 그대로 저장돼, 자동 부과도 수동 차감도
+        // 예전엔 일납 0·개시일 없음·금액 0 이 그대로 저장돼, 자동 부과도 수동 차감도
         // 안 되는 «죽은 계약» 이 조용히 만들어졌다(목록에서 구분도 안 됐다).
         if ($openedOn === null) {
             throw new InvalidArgumentException('개시일을 입력하세요.');
@@ -297,29 +330,6 @@ final class RiderDebt
                 'lease'   => '리스/렌탈 총 금액을 입력하세요. (종료일은 총액 ÷ 일납으로 계산됩니다)',
                 default   => '원금을 입력하세요.',
             });
-        }
-
-        // ── 기존 계약 이관 — 잔액 기준 (2026-09-18 갑) ─────────────────────────────
-        // 이관 표시가 없으면 개시일부터 오늘까지 전부 미차감으로 보고 **소급 부과**된다
-        // (실측: 180일 전 개시 리스가 첫 정산에서 4,887,000원). 이관 건은 남은 잔액과
-        // 「이 날짜까지 정산 완료」를 받아 그다음 날부터만 부과한다.
-        // 선지급금은 입력한 금액이 곧 남은 잔액이라 이관 입력이 의미가 없다 — 들어와도 무시한다.
-        $isMigrated = !empty($in['is_migrated']) && $kind !== 'advance';
-        $dueUpdated = null;
-        if ($isMigrated) {
-            $balance    = max(0, (int) ($in['migrate_balance'] ?? 0));
-            $dueUpdated = self::normDate($in['migrate_as_of'] ?? null);
-            if ($balance <= 0) {
-                throw new InvalidArgumentException('이관할 남은 잔액을 입력하세요.');
-            }
-            if ($dueUpdated === null) {
-                throw new InvalidArgumentException('「이 날짜까지 정산 완료」를 입력하세요. 그다음 날부터 차감이 시작됩니다.');
-            }
-            if ($dueUpdated < $openedOn) {
-                throw new InvalidArgumentException('정산 완료일은 개시일보다 앞설 수 없습니다.');
-            }
-            // 이관 건의 «총액» 은 이관 시작 잔액이다 — 진행률이 이관 이후 기준으로 보이게 한다.
-            $principal = $balance;
         }
 
         // 리스 종료예정일 = 부과 시작일부터 «총액 ÷ 일납» 일수만큼. 이관이면 기준일 다음날부터 센다.
