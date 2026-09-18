@@ -810,6 +810,10 @@ $currentUrl = admin_url('deduction/debts');
 		function syncMigrate() {
 			var on = document.getElementById('dn_migrate').checked && kindEl.value !== 'advance';
 			document.getElementById('dn_migrate_fields').classList.toggle('d-none', !on);
+			// 이관이면 «남은 잔액»이 유일한 기준이다 — 총 금액/원금 칸을 같이 두면 어느 쪽이
+			// 맞는지 알 수 없다(서버도 잔액만 쓴다). 켜는 순간 감추고 값을 비운다.
+			document.getElementById('dn_principal_wrap').style.display = on ? 'none' : '';
+			if (on) { document.getElementById('dn_principal').value = ''; }
 			syncPreview();
 		}
 		/** 리스 종료예정일 = 부과 시작일 + (총액 ÷ 일납) − 1일. 서버(RiderDebt::leaseEndDate)와 같은 식. */
