@@ -281,6 +281,24 @@
 	margin-top: 0.5rem;
 }
 
+/* ───────────────────────── 홈 광고 배너 ───────────────────────── */
+/* 규격은 4:1(권장 1200×300). height 속성(200)만으로는 화면이 넓어질 때 세로로
+   늘어나 버리므로 비율을 고정하고, 규격이 다른 이미지는 가운데를 잘라 채운다. */
+.rider-home-banner-img {
+	height: auto;
+	aspect-ratio: 4 / 1;
+	object-fit: cover;
+	background: var(--bs-gray-100);
+}
+
+/* 이미지 없이 제목만 등록한 광고 — 자리를 똑같이 차지해야 슬라이드가 안 튄다. */
+.rider-home-banner-fallback {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	aspect-ratio: 4 / 1;
+}
+
 /* ───────────────────────── 하단 탭바(전 화면 공통) ─────────────────────── */
 .rider-tabbar {
 	position: fixed;

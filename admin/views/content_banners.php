@@ -56,7 +56,7 @@ $needsMigrate = $listError !== null
 	<div class="alert alert-dismissible bg-light-primary d-flex flex-column flex-sm-row p-5 mb-8">
 		<i class="ki-duotone ki-picture fs-2hx text-primary me-4 mb-5 mb-sm-0"><span class="path1"></span><span class="path2"></span></i>
 		<div class="fs-7 text-gray-800">
-			<strong>집행 중</strong>이고 기간 내인 광고가 라이더 앱 홈 롤링 배너에 노출됩니다. 이미지는 <strong>파일 업로드</strong> 또는 URL로 등록할 수 있습니다.
+			<strong>집행 중</strong>이고 기간 내인 광고가 라이더 앱 홈 롤링 배너에 노출됩니다. 이미지는 <strong>파일 업로드</strong> 또는 URL로 등록할 수 있습니다. 권장 규격은 <strong>1200 × 300px(4:1)</strong> 입니다.
 		</div>
 	</div>
 	<?php endif; ?>
@@ -166,6 +166,9 @@ $needsMigrate = $listError !== null
 									<button type="button" class="btn btn-sm btn-light-primary fw-bold" id="banner_image_upload_btn">업로드</button>
 								</div>
 								<div class="form-text mt-2">JPG·PNG·WebP·GIF, 최대 5MB</div>
+								<div class="form-text">권장 <strong>1200 × 300px</strong> (가로:세로 <strong>4:1</strong>) · 최소 800 × 200px · 고해상도 화면까지 감안하면 1600 × 400px</div>
+								<div class="form-text">비율이 다르면 4:1 로 <strong>가운데만 남기고 위·아래가 잘립니다.</strong> 글자는 가장자리에서 10% 안쪽에 두세요.</div>
+								<div class="form-text mt-1 d-none" id="banner_image_dim"></div>
 							</div>
 							<label class="form-label fs-7 text-muted">이미지 경로 (업로드 시 자동 입력 · CDN/기존 자산 URL도 가능)</label>
 							<input type="text" class="form-control form-control-solid" id="banner_image_url" required placeholder="/uploads/banners/… 또는 /assets/media/banners/…" />
@@ -254,13 +257,30 @@ $needsMigrate = $listError !== null
 		function setImagePreview(src) {
 			var wrap = document.getElementById('banner_image_preview_wrap');
 			var img = document.getElementById('banner_image_preview');
+			var dim = document.getElementById('banner_image_dim');
 			if (!wrap || !img) return;
 			if (src) {
+				// onload 는 src 보다 먼저 걸어야 캐시된 이미지에서도 실행된다.
+				img.onload = function () {
+					if (!dim) return;
+					var w = img.naturalWidth, h = img.naturalHeight;
+					var offRatio = Math.abs((w / h) - 4) > 0.4;   // 4:1 에서 10% 넘게 벗어나면 알려준다
+					var tooSmall = w < 800;
+					var msg = w + ' × ' + h + 'px';
+					if (offRatio) { msg += ' · 4:1 이 아니라 위·아래가 잘립니다.'; }
+					if (tooSmall) { msg += ' · 800px 보다 좁아 흐리게 보일 수 있습니다.'; }
+					if (!offRatio && !tooSmall) { msg += ' · 규격에 맞습니다.'; }
+					dim.textContent = msg;
+					dim.classList.toggle('text-warning', offRatio || tooSmall);
+					dim.classList.toggle('text-success', !offRatio && !tooSmall);
+					dim.classList.remove('d-none');
+				};
 				img.src = src;
 				wrap.classList.remove('d-none');
 			} else {
 				img.removeAttribute('src');
 				wrap.classList.add('d-none');
+				if (dim) { dim.classList.add('d-none'); dim.textContent = ''; }
 			}
 		}
 
