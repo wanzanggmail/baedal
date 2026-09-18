@@ -270,7 +270,8 @@ final class RiderDebt
         $daily     = max(0, (int) ($in['daily_amount'] ?? 0));
 
         $openedOn   = self::normDate($in['opened_on'] ?? null);
-        $plannedEnd = $kind === 'lease' ? self::normDate($in['planned_end_on'] ?? null) : null;
+        // 리스 종료예정일은 **입력받지 않고 계산한다** — 총 금액 ÷ 일납 = 걸리는 일수(2026-09-18 갑).
+        $plannedEnd = null;
 
         // 선지급금(가불)은 **다음 정산에서 전액 회수**라 일납·계약기간 개념이 없다(2026-09-18 갑).
         // 입력도 금액·메모뿐이므로 개시일은 등록일로 채운다(자동 부과가 개시일을 기준으로 삼는다).
@@ -279,15 +280,7 @@ final class RiderDebt
             $openedOn ??= date('Y-m-d');
         }
 
-        // 리스 총액은 입력받지 않고 **계약에서 계산**한다 — 일납 × 계약일수.
-        // 오타로 과다·과소 징수가 나는 걸 막고, 계약 정보와 항상 일치시킨다.
-        if ($kind === 'lease') {
-            $principal = self::leasePrincipal($daily, $openedOn, $plannedEnd);
-        }
         $balance = in_array($kind, self::AMORTIZING, true) ? $principal : 0;
-        if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
-            throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
-        }
 
         // ── 차감이 영영 안 되는 계약을 막는다 (2026-09-18) ──────────────────────────
         // 예전엔 일납 0·개시일 없음·리스 종료일 없음이 그대로 저장돼, 자동 부과도 수동 차감도
@@ -298,11 +291,12 @@ final class RiderDebt
         if ($kind !== 'advance' && $daily <= 0) {
             throw new InvalidArgumentException('일납금액을 입력하세요. (0이면 차감이 되지 않습니다)');
         }
-        if ($kind === 'lease' && $plannedEnd === null) {
-            throw new InvalidArgumentException('리스/렌탈은 계약 종료 예정일이 필요합니다. (총액·차감일수가 여기서 계산됩니다)');
-        }
-        if ($kind !== 'lease' && $principal <= 0) {
-            throw new InvalidArgumentException($kind === 'advance' ? '선지급 금액을 입력하세요.' : '원금을 입력하세요.');
+        if ($principal <= 0) {
+            throw new InvalidArgumentException(match ($kind) {
+                'advance' => '선지급 금액을 입력하세요.',
+                'lease'   => '리스/렌탈 총 금액을 입력하세요. (종료일은 총액 ÷ 일납으로 계산됩니다)',
+                default   => '원금을 입력하세요.',
+            });
         }
 
         // ── 기존 계약 이관 — 잔액 기준 (2026-09-18 갑) ─────────────────────────────
@@ -325,6 +319,15 @@ final class RiderDebt
             }
             // 이관 건의 «총액» 은 이관 시작 잔액이다 — 진행률이 이관 이후 기준으로 보이게 한다.
             $principal = $balance;
+        }
+
+        // 리스 종료예정일 = 부과 시작일부터 «총액 ÷ 일납» 일수만큼. 이관이면 기준일 다음날부터 센다.
+        if ($kind === 'lease') {
+            $plannedEnd = self::leaseEndDate(
+                $principal,
+                $daily,
+                $isMigrated ? self::addDays((string) $dueUpdated, 1) : $openedOn
+            );
         }
 
         // 리스 전용 — 제공 주체·배분액·차대번호. 대여금/선지급은 해당 없음.
@@ -402,15 +405,7 @@ final class RiderDebt
             $sets[]   = 'vin = ?';
             $params[] = mb_substr(trim((string) $in['vin']), 0, 30);
         }
-        if (array_key_exists('planned_end_on', $in) && (string) $debt['kind'] === 'lease') {
-            $plannedEnd = self::normDate($in['planned_end_on']);
-            $openedOn   = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
-            if ($plannedEnd !== null && $openedOn !== null && $plannedEnd < $openedOn) {
-                throw new InvalidArgumentException('계약 종료 예정일은 시작일보다 앞설 수 없습니다.');
-            }
-            $sets[]   = 'planned_end_on = ?';
-            $params[] = $plannedEnd;
-        }
+        // 종료예정일은 자동 계산이라 직접 받지 않는다(아래에서 잔액 ÷ 일납으로 다시 잡는다).
         if (array_key_exists('status', $in)) {
             $status = (string) $in['status'];
             if (!in_array($status, ['active', 'paused', 'closed'], true)) {
@@ -421,31 +416,33 @@ final class RiderDebt
             $sets[]   = 'closed_on = ?';
             $params[] = $status === 'closed' ? date('Y-m-d') : null;
         }
-        // 리스 계약이 바뀌면 총액·잔액을 다시 계산한다 — 총액 = 일납 × 계약일수.
-        // 리스 계약서(제5조)가 "365일 기준 예정 총액"을 명시하는 구조라 계약과 총액이
-        // 어긋나면 안 된다. 잔액은 이미 걷은 만큼을 빼서 유지한다.
-        // ⚠️ 이관 건은 제외 — 이관 잔액이 「일납 × 계약 전체일수」로 덮어써지면
-        //    이미 상환한 몫까지 다시 물리게 된다(2026-09-18).
-        if ((string) $debt['kind'] === 'lease'
-            && empty($debt['is_migrated'])
-            && (array_key_exists('daily_amount', $in)
-                || array_key_exists('opened_on', $in)
-                || array_key_exists('planned_end_on', $in))
-            && !array_key_exists('balance_amount', $in)
-        ) {
+        // 리스 계약이 바뀌면 **종료예정일을 다시 계산한다** — 남은 잔액 ÷ 일납 (2026-09-18 갑).
+        // 예전엔 반대로 «종료일 → 총액»을 계산했는데, 갑이 총 금액을 기준으로 잡기로 해서 방향이 뒤집혔다.
+        // 총 금액을 고치면 아직 안 걷힌 만큼을 잔액에 반영하고, 그 잔액으로 종료일을 다시 잡는다.
+        if ((string) $debt['kind'] === 'lease') {
             $newDaily = array_key_exists('daily_amount', $in) ? max(0, (int) $in['daily_amount']) : (int) $debt['daily_amount'];
-            $newOpen  = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
-            $newEnd   = array_key_exists('planned_end_on', $in) ? self::normDate($in['planned_end_on']) : self::normDate($debt['planned_end_on'] ?? null);
-            $newPrincipal = self::leasePrincipal($newDaily, $newOpen, $newEnd);
-            if ($newPrincipal > 0) {
+            $newBal   = (int) $debt['balance_amount'];
+            if (array_key_exists('principal_amount', $in)) {
                 $collected = (int) (db_row(
                     'SELECT COALESCE(SUM(amount), 0) AS s FROM rider_debt_entries WHERE debt_id = ?',
                     [$id]
                 )['s'] ?? 0);
-                $sets[]   = 'principal_amount = ?';
-                $params[] = $newPrincipal;
+                // 이관 건은 «이관 시작 잔액» 기준이라 그 뒤 걷은 것만 뺀다(이관 전 상환분은 이미 빠져 있다).
+                $newBal   = max(0, (int) $in['principal_amount'] - $collected);
                 $sets[]   = 'balance_amount = ?';
-                $params[] = max(0, $newPrincipal - $collected);
+                $params[] = $newBal;
+            }
+            if (array_key_exists('balance_amount', $in)) {
+                $newBal = max(0, (int) $in['balance_amount']);
+            }
+            // 부과가 시작되는 날 = 마지막 차감일 다음날(없으면 개시일)
+            $lastCovered = self::normDate($debt['due_updated_on'] ?? null);
+            $newOpen     = array_key_exists('opened_on', $in) ? self::normDate($in['opened_on']) : self::normDate($debt['opened_on'] ?? null);
+            $from        = $lastCovered !== null ? self::addDays($lastCovered, 1) : $newOpen;
+            $newEnd      = self::leaseEndDate($newBal, $newDaily, $from);
+            if ($newEnd !== null) {
+                $sets[]   = 'planned_end_on = ?';
+                $params[] = $newEnd;
             }
         }
 
@@ -991,6 +988,27 @@ final class RiderDebt
         $days = (int) (new DateTime($openedOn))->diff(new DateTime($plannedEnd))->days + 1;
 
         return $daily * $days;
+    }
+
+    /**
+     * 리스 종료예정일 자동 계산 (2026-09-18 갑) — **총 금액 ÷ 일납 = 걸리는 일수**.
+     *
+     *   "총 금액을 넣고 시작일과 일금액을 넣으면 언제 종료가 되는지 종료일자를 자동으로 계산"
+     *
+     * 나누어떨어지지 않으면 마지막 날은 남은 금액만 걷으므로 **올림**한다
+     * (예: 1,000,000 ÷ 27,000 = 37.03일 → 38일째에 잔액 1,000원을 걷고 끝).
+     * 차감 로직은 잔액을 넘겨 걷지 않으므로 이 하루가 과징수가 되지 않는다.
+     *
+     * @param string $startOn 부과가 시작되는 날(신규=개시일, 이관=기준일 다음날)
+     */
+    public static function leaseEndDate(int $amount, int $daily, ?string $startOn): ?string
+    {
+        $startOn = self::normDate($startOn);
+        if ($amount <= 0 || $daily <= 0 || $startOn === null) {
+            return null;
+        }
+
+        return self::addDays($startOn, (int) ceil($amount / $daily) - 1);
     }
     private static function addDays(string $date, int $days): string
     {
