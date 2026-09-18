@@ -52,6 +52,17 @@ if ($action === 'deploy') {
         (string) $after['short'],
         sprintf('%s → %s (%s)', $before['short'], $after['short'], $res['ok'] ? '성공' : '실패')
     );
+    // 릴리즈 노트 — 이 배포에 실제로 들어간 커밋을 그대로 남긴다(장애 때 되짚기용).
+    Deployer::record(
+        'deploy',
+        $res['ok'],
+        (string) $before['hash'],
+        (string) $after['hash'],
+        Deployer::commitsBetween((string) $before['hash'], (string) $after['hash']),
+        $res['ok']
+            ? sprintf('%s → %s', $before['short'], $after['short'])
+            : '배포 실패 · ' . mb_substr(trim((string) $res['output']), -300)
+    );
     echo json_encode(['ok' => $res['ok'], 'output' => $res['output'], 'current' => $after], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -59,6 +70,24 @@ if ($action === 'deploy') {
 if ($action === 'migrate') {
     $res = Deployer::migrate();
     AuditLog::record('deploy.migrate', '', 'DB 마이그레이션 ' . ($res['ok'] ? '성공' : '실패'));
+    // 마이그레이션도 같은 줄에 남겨야 «배포는 했는데 스키마는 안 올린» 상태가 눈에 띈다.
+    $applied = [];
+    foreach (explode("\n", (string) $res['output']) as $line) {
+        $line = trim($line);
+        if (str_starts_with($line, 'OK')) {
+            $applied[] = trim((string) preg_replace('/\s+/', ' ', substr($line, 2)));
+        }
+    }
+    Deployer::record(
+        'migrate',
+        $res['ok'],
+        '',
+        (string) Deployer::currentCommit()['hash'],
+        [],
+        $res['ok']
+            ? ($applied === [] ? '변경 없음(전부 SKIP)' : '적용 ' . count($applied) . '건 · ' . implode(' · ', array_slice($applied, 0, 8)))
+            : '마이그레이션 실패 · ' . mb_substr(trim((string) $res['output']), -300)
+    );
     echo json_encode(['ok' => $res['ok'], 'output' => $res['output']], JSON_UNESCAPED_UNICODE);
     exit;
 }

@@ -16,6 +16,8 @@ $esc      = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'U
 $apiUrl   = ADMIN_BASE . '/api/deploy.php';
 $ready    = Deployer::ready();
 $current  = $ready ? Deployer::currentCommit() : null;
+// 배포 이력(릴리즈 노트) — 배포 서버가 아니어도 지난 기록은 보여준다(기록은 DB에 있다).
+$history  = Deployer::history(20);
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -92,6 +94,7 @@ $current  = $ready ? Deployer::currentCommit() : null;
 			</div>
 		</div>
 	</div>
+
 
 	<div class="card card-flush mt-6">
 		<div class="card-header pt-5"><h3 class="card-title fw-bold">실행 로그</h3></div>
@@ -191,5 +194,55 @@ $current  = $ready ? Deployer::currentCommit() : null;
 	</script>
 
 	<?php endif; ?>
+
+	<?php // ── 배포 이력(릴리즈 노트) ──────────────────────────────────────────
+	      // 커밋 날짜로는 «언제 서버에 반영됐는지» 를 알 수 없어, 누를 때마다 그 묶음을 저장해 둔다. ?>
+	<div class="card card-flush mt-6">
+		<div class="card-header pt-5">
+			<h3 class="card-title fw-bold">배포 이력 <span class="text-gray-500 fs-7 fw-semibold ms-2"><?= number_format(count($history)) ?>건</span></h3>
+		</div>
+		<div class="card-body pt-2">
+			<?php if ($history === []) : ?>
+			<div class="text-gray-500 fs-7 py-6 text-center">
+				아직 기록이 없습니다. 다음 배포부터 «언제 · 누가 · 무엇이» 올라갔는지 여기에 쌓입니다.
+			</div>
+			<?php else : ?>
+			<div class="timeline">
+				<?php foreach ($history as $h) :
+					$isMig  = (string) $h['kind'] === 'migrate';
+					$failed = (int) $h['ok'] !== 1;
+					$commits = (array) ($h['commits'] ?? []);
+				?>
+				<div class="d-flex border-start border-4 border-<?= $failed ? 'danger' : ($isMig ? 'info' : 'success') ?> ps-4 pb-5">
+					<div class="flex-grow-1">
+						<div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+							<span class="badge badge-light-<?= $failed ? 'danger' : ($isMig ? 'info' : 'success') ?>">
+								<?= $isMig ? 'DB 마이그레이션' : '배포' ?><?= $failed ? ' 실패' : '' ?>
+							</span>
+							<span class="fw-bold text-gray-800 fs-7"><?= $esc((string) $h['created_at']) ?></span>
+							<span class="text-muted fs-8"><?= $esc((string) ($h['actor_login'] ?? '—')) ?></span>
+							<?php if (!$isMig && (int) $h['commit_count'] > 0) : ?>
+							<span class="text-muted fs-8">· 커밋 <?= (int) $h['commit_count'] ?>개</span>
+							<?php endif; ?>
+						</div>
+						<div class="text-gray-600 fs-8 mb-2" style="white-space:pre-line"><?= $esc((string) ($h['note'] ?? '')) ?></div>
+						<?php if ($commits !== []) : ?>
+						<ul class="list-unstyled mb-0">
+							<?php foreach ($commits as $c) : ?>
+							<li class="fs-8 text-gray-800 mb-1">
+								<code class="text-muted"><?= $esc((string) ($c['hash'] ?? '')) ?></code>
+								<?= $esc((string) ($c['subject'] ?? '')) ?>
+								<span class="text-muted">· <?= $esc((string) ($c['author'] ?? '')) ?></span>
+							</li>
+							<?php endforeach; ?>
+						</ul>
+						<?php endif; ?>
+					</div>
+				</div>
+				<?php endforeach; ?>
+			</div>
+			<?php endif; ?>
+		</div>
+	</div>
 
 <?php require_once INC_PATH . '/app_content_close.php'; ?>

@@ -103,6 +103,7 @@ final class MigrateRunner
         self::migrateFeeShareAdditive();
         self::migrateSettlementApplyJobs();
         self::migrateDebtMigratedFlag();
+        self::migrateDeployHistory();
 
         echo "\n완료.\n";
     }
@@ -3946,5 +3947,41 @@ final class MigrateRunner
                 COMMENT '기존 계약 이관 등록(잔액 기준) — 총액 자동 재계산 제외'"
         );
         echo "OK    rider_debts.is_migrated 추가\n";
+    }
+    /**
+     * 배포 이력 (2026-09-18) — 관리자 패널에서 누른 배포마다 «무엇이 올라갔는지» 남긴다.
+     *
+     * git 로그만으로는 «언제 어느 묶음이 반영됐는지» 를 알 수 없다(커밋 날짜 ≠ 배포 시각).
+     * 장애가 났을 때 "그때 뭐가 바뀌었지" 를 바로 볼 수 있어야 해서 배포 시점에 기록한다.
+     */
+    private static function migrateDeployHistory(): void
+    {
+        echo "== deploy_history ==\n";
+
+        if (db_table_exists('deploy_history')) {
+            echo "SKIP  deploy_history (이미 있음)\n";
+
+            return;
+        }
+
+        db_execute(
+            "CREATE TABLE deploy_history (
+                id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                kind         ENUM('deploy','migrate') NOT NULL DEFAULT 'deploy',
+                ok           TINYINT(1) NOT NULL DEFAULT 1,
+                from_hash    VARCHAR(40) NULL,
+                to_hash      VARCHAR(40) NULL,
+                commit_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                commits_json MEDIUMTEXT NULL COMMENT '배포에 포함된 커밋 목록(해시·제목·작성자·시각)',
+                note         VARCHAR(500) NULL,
+                actor_id     INT UNSIGNED NULL,
+                actor_login  VARCHAR(60) NULL,
+                created_at   DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_dh_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='배포 이력(릴리즈 노트)'"
+        );
+        echo "OK    deploy_history 생성\n";
     }
 }
