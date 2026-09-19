@@ -474,6 +474,29 @@ final class Withdrawal
      */
     public static function executeTransfers(array $ids): array
     {
+        // ponytail: 전역 잠금 — 이체 실행을 한 번에 하나씩만 돌린다. 대리점 가용액을 읽고
+        // 접수하기까지가 원자적이어야 잔액을 넘겨 내보내지 않는다. 이체는 하루 몇 차례라
+        // 전역으로 충분하다. 처리량이 문제가 되면 대리점 단위 잠금으로 쪼갠다.
+        $lock = 'wd_exec_' . DB_NAME;
+        if ((int) (db_row('SELECT GET_LOCK(?, 30) AS g', [$lock])['g'] ?? 0) !== 1) {
+            $out = ['completed' => 0, 'accepted' => 0, 'failed' => 0, 'skipped' => count($ids), 'results' => []];
+            foreach ($ids as $id) {
+                $out['results'][] = ['id' => (int) $id, 'ok' => false, 'message' => '다른 이체 처리가 진행 중입니다. 잠시 후 다시 시도하세요.'];
+            }
+
+            return $out;
+        }
+
+        try {
+            return self::executeTransfersLocked($ids);
+        } finally {
+            db_row('SELECT RELEASE_LOCK(?) AS r', [$lock]);
+        }
+    }
+
+    /** @param list<int> $ids @return array{completed:int, accepted:int, failed:int, skipped:int, results:list<array{id:int, ok:bool, message:string}>} */
+    private static function executeTransfersLocked(array $ids): array
+    {
         require_once INC_PATH . '/FirmBankingGateway.php';
         require_once INC_PATH . '/BaumFirmGateway.php';
         require_once INC_PATH . '/FirmTransfer.php';
@@ -527,6 +550,10 @@ final class Withdrawal
         // 이체부터 하고 나면 실제 돈은 나갔는데 지갑이 음수가 되어 되돌릴 수 없다.
         /** @var array<string, array<string,mixed>> $queue transactionId => 접수 정보 */
         $queue = [];
+        /** @var array<int,int> $avail 대리점별 남은 가용액(이번 배치에서 깎아 나간다) */
+        $avail = [];
+        /** @var array<int,int> $inflightOf 안내 문구용 — 이미 접수중인 금액 */
+        $inflightOf = [];
         foreach ($rows as $row) {
             $id       = (int) $row['id'];
             $amount   = (int) ($row['amount'] ?? 0);
@@ -538,16 +565,34 @@ final class Withdrawal
             }
 
             if ((string) ($row['kind'] ?? '') === 'rider_manual' && $agencyId > 0) {
-                $agencyBalance = AgencyWallet::get($agencyId)['balance'];
-                if ($agencyBalance < $amount) {
+                // ⚠️ 잔액만 보면 안 된다. 지갑 차감은 **이체가 확정될 때**(웹훅) 일어나므로,
+                //    한 번에 여러 건을 확정하면 전부 같은 잔액을 보고 통과해 **잔액보다 많이**
+                //    내보낸다(실제로 25만원 지갑에서 50만원이 나가 −25만원이 됐다).
+                //    이미 접수중인 금액과 이번 배치에서 앞서 잡은 금액을 함께 뺀다.
+                if (!isset($avail[$agencyId])) {
+                    $inflight = (int) (db_row(
+                        "SELECT COALESCE(SUM(wr.amount), 0) AS s
+                           FROM withdrawal_requests wr
+                           LEFT JOIN riders r ON r.id = wr.rider_id
+                          WHERE COALESCE(wr.agency_id, r.agency_id) = ?
+                            AND wr.kind = 'rider_manual'
+                            AND wr.status = 'transferring'",
+                        [$agencyId]
+                    )['s'] ?? 0);
+                    $avail[$agencyId] = (int) AgencyWallet::get($agencyId)['balance'] - $inflight;
+                    $inflightOf[$agencyId] = $inflight;
+                }
+                if ($avail[$agencyId] < $amount) {
                     $msg = sprintf(
-                        '대리점 잔액 부족(잔액 %s원 < 지급 %s원). PG 충전 후 재시도하세요.',
-                        number_format($agencyBalance),
-                        number_format($amount)
+                        '대리점 잔액 부족(가용 %s원 < 지급 %s원%s). PG 충전 후 재시도하세요.',
+                        number_format(max(0, $avail[$agencyId])),
+                        number_format($amount),
+                        ($inflightOf[$agencyId] ?? 0) > 0 ? ' · 접수중 ' . number_format($inflightOf[$agencyId]) . '원 제외' : ''
                     );
                     self::failTransfer($id, $msg, $out);
                     continue;
                 }
+                $avail[$agencyId] -= $amount;
             }
 
             // 거래 ID 를 **여기서** 만든다 — 게이트웨이에 넘기는 값과 우리 장부에 남기는 값이
