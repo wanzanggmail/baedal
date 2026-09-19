@@ -277,12 +277,14 @@
 }
 
 /* ──────────────────────────── 홈: 공지 목록 ──────────────────────────── */
-/* 홈에서는 공지가 광고·정산 사이의 «한 줄 요약» 이라 카드 기본 여백(2.25rem)은 과하다.
+/* 홈의 공지·최근 정산은 «한 줄 요약» 목록이라 카드 기본 여백(2.25rem)은 과하다.
    제목 줄과 목록을 붙여 카드 높이를 줄인다(2026-09-19 갑). */
-.rider-home-notices .card-header {
+.rider-home-notices .card-header,
+.rider-home-cycles .card-header {
 	padding: 0.75rem 1rem 0;
 }
-.rider-home-notices .card-body {
+.rider-home-notices .card-body,
+.rider-home-cycles .card-body {
 	padding: 0.5rem 1rem 0.75rem;
 }
 .rider-home-notice-list li + li {
