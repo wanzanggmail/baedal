@@ -364,6 +364,13 @@ PK=`agency_id`. **행의 역할이 조직 레벨에 따라 다르다**(갑 확�
 `content_banners.slot`: `rider_app`(라이더 홈 캐러셀) **하나뿐**. 예전 `home_top`/`home_middle` 은 어느 화면에도 그려지지 않아 2026-09-19 마이그레이션으로 전부 `rider_app` 으로 옮겼다.
 ⚠️ 본사만 작성이면 `org_id`가 항상 본사 id로 고정돼 사실상 무의미 — 컬럼 유지 여부는 미정(§8-B 참고).
 
+### `banner_clicks` — 광고 클릭 로그 (2026-09-19)
+라이더가 배너를 누르면 `rider/p/ad.php` 가 한 줄 남기고 랜딩 URL 로 302 보낸다. **광고 정산·분석 근거**라
+광고가 지워져도 남아야 해서 `content_banners` 로의 외래키를 걸지 않고 `banner_title`(클릭 당시 광고명)을 함께 저장한다.
+집계는 `click_date`(DATE) 기준 — `(banner_id, click_date)` 색인. `rider_id`·`agency_id` 는 비로그인 클릭 대비 NULL 허용.
+⚠️ `ip`·`user_agent` 는 개인정보다 — 보관 기간 정책이 정해지면 오래된 행을 지우는 작업이 필요하다.
+
+
 ---
 
 ## 9. 시스템 공통

@@ -108,6 +108,9 @@ $headerWithdrawTooltip = $headerWithdrawPending > 0
 											<div class="menu-item">
 												<a class="menu-link<?= nav_active('content/banners') ?>" href="<?= htmlspecialchars(admin_url('content/banners'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">광고 배너</span></a>
 											</div>
+											<div class="menu-item">
+												<a class="menu-link<?= nav_active('content/ad-clicks') ?>" href="<?= htmlspecialchars(admin_url('content/ad-clicks'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">광고 클릭 로그</span></a>
+											</div>
 											<div class="separator my-2"></div>
 											<div class="menu-item">
 												<a class="menu-link<?= nav_active('system/admins') ?>" href="<?= htmlspecialchars(admin_url('system/admins'), ENT_QUOTES, 'UTF-8') ?>"><span class="menu-title">관리자·권한</span></a>

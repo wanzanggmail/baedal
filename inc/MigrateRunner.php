@@ -105,6 +105,7 @@ final class MigrateRunner
         self::migrateDebtMigratedFlag();
         self::migrateDeployHistory();
         self::migrateBannerSlotSingle();
+        self::migrateBannerClicks();
 
         echo "\n완료.\n";
     }
@@ -4010,4 +4011,39 @@ final class MigrateRunner
         db_execute("UPDATE content_banners SET slot = 'rider_app' WHERE slot <> 'rider_app'");
         echo "OK    광고 {$n}건을 라이더 홈 배너로 이동\n";
     }
-}
+
+    /**
+     * 광고 배너 클릭 로그 (2026-09-19) — 광고 정산·분석의 근거 자료.
+     *
+     * 광고가 지워져도 청구 근거는 남아야 해서 외래키를 걸지 않고, 클릭 당시의 광고명을
+     * 함께 저장한다. 집계는 click_date 로 하므로 (banner_id, click_date) 에 색인을 둔다.
+     */
+    private static function migrateBannerClicks(): void
+    {
+        echo "== banner_clicks ==\n";
+
+        if (db_table_exists('banner_clicks')) {
+            echo "SKIP  banner_clicks (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "CREATE TABLE banner_clicks (
+                id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                banner_id    INT UNSIGNED NOT NULL,
+                banner_title VARCHAR(120) NOT NULL DEFAULT '' COMMENT '클릭 당시 광고명(광고 삭제 대비)',
+                rider_id     INT UNSIGNED NULL,
+                agency_id    INT UNSIGNED NULL COMMENT '클릭한 라이더의 대리점',
+                clicked_at   DATETIME NOT NULL,
+                click_date   DATE NOT NULL COMMENT '일자별 집계용',
+                ip           VARCHAR(45) NOT NULL DEFAULT '',
+                user_agent   VARCHAR(255) NOT NULL DEFAULT '',
+                PRIMARY KEY (id),
+                KEY idx_bc_banner_date (banner_id, click_date),
+                KEY idx_bc_date (click_date),
+                KEY idx_bc_rider (rider_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+              COMMENT='광고 배너 클릭 로그'"
+        );
+        echo "OK    banner_clicks 생성\n";
+    }}
