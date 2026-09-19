@@ -311,13 +311,13 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 	<!--begin::공지-->
 	<?php if ($homeNotices !== []) : ?>
 	<div class="card card-flush shadow-sm rider-home-notices mb-4">
-		<div class="card-header border-0 min-h-auto pt-4">
-			<h2 class="card-title fw-bold fs-6 mb-0">공지</h2>
+		<div class="card-header border-0 min-h-auto">
+			<h2 class="card-title fw-bold fs-7 mb-0">공지</h2>
 			<div class="card-toolbar">
-				<a href="<?= $esc(rider_url('notices')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
+				<a href="<?= $esc(rider_url('notices')) ?>" class="fs-8 fw-semibold text-muted text-hover-primary text-decoration-none">전체 ›</a>
 			</div>
 		</div>
-		<div class="card-body pt-2">
+		<div class="card-body">
 			<ul class="list-unstyled mb-0 rider-home-notice-list">
 				<?php foreach (array_slice($homeNotices, 0, 3) as $n) : ?>
 				<li>
