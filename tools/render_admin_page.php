@@ -58,13 +58,21 @@ $_SESSION['admin_name']     = $admin['name'];
 $_SESSION['admin_role']     = $admin['role'];
 $_SESSION['admin_org_id']   = (int) $admin['org_id'];
 
-echo "계정     : {$admin['login_id']} (org {$admin['org_id']})\n";
-echo "라우트   : {$route}\n";
-echo "접근권한 : " . (admin_can_access_route($route) ? '허용' : '차단') . "\n";
+// 요약은 렌더가 끝난 뒤 한 번에 찍는다 — 먼저 출력하면 index.php 의 http_response_code() 가
+// "headers already sent" 경고를 낸다.
+$summary = sprintf(
+    "계정     : %s (org %d)\n라우트   : %s\n접근권한 : %s\n",
+    $admin['login_id'],
+    (int) $admin['org_id'],
+    $route,
+    admin_can_access_route($route) ? '허용' : '차단'
+);
 
 ob_start();
 require dirname(__DIR__) . '/admin/index.php';
 $html = ob_get_clean();
+
+echo $summary;
 
 $out = __DIR__ . '/_render_out.html';
 file_put_contents($out, $html);

@@ -188,6 +188,31 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 			</div>
 		</div>
 
+		<div class="row g-5 mb-5">
+			<div class="col-md-3">
+				<label class="form-label fw-bold" for="firm_block_from">이체 제한 시작</label>
+				<input type="time" class="form-control form-control-solid" id="firm_block_from" value="<?= $esc((string) ($cfg['block_from'] ?? '')) ?>" />
+			</div>
+			<div class="col-md-3">
+				<label class="form-label fw-bold" for="firm_block_to">이체 제한 종료</label>
+				<input type="time" class="form-control form-control-solid" id="firm_block_to" value="<?= $esc((string) ($cfg['block_to'] ?? '')) ?>" />
+			</div>
+			<div class="col-md-6">
+				<label class="form-label fw-bold d-block">현재 상태</label>
+				<?php if (!empty($cfg['blocked_now'])) : ?>
+				<span class="badge badge-light-danger fs-7">지금은 이체 제한 시간</span>
+				<?php else : ?>
+				<span class="badge badge-light-success fs-7">지금은 이체 가능</span>
+				<?php endif; ?>
+				<div class="form-text">
+					은행 점검 시간대에 보내면 바움이 <code>TRANSFER_RESTRICTED_TIME</code> 으로 거절하고,
+					거절된 건은 <strong>실패로 남아 라이더가 재신청도 못 합니다.</strong>
+					이 시간대에는 아예 보내지 않고 <strong>신청 상태 그대로 대기</strong>시킵니다 — 시간이 지난 뒤 그대로 확정하면 됩니다.
+					자정을 넘는 구간(예: 23:30~00:30)도 됩니다. 비우면 제한하지 않습니다.
+				</div>
+			</div>
+		</div>
+
 		<div class="d-flex gap-2 flex-wrap">
 			<button type="button" class="btn btn-primary" id="firm_save">설정 저장</button>
 			<button type="button" class="btn btn-light-primary" id="firm_test">연결 테스트</button>
@@ -386,7 +411,9 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 			env: val('firm_env'),
 			client_id: val('firm_client_id'),
 			pocket_code: val('firm_pocket'),
-			noti_allow_ips: val('firm_ips')
+			noti_allow_ips: val('firm_ips'),
+			block_from: val('firm_block_from'),
+			block_to: val('firm_block_to')
 		};
 		// 비밀값은 입력했을 때만 보낸다 — 빈 값은 "안 건드림" 이다.
 		['secret_key', 'enc_key', 'enc_iv'].forEach(function (k) {

@@ -75,6 +75,7 @@ final class FirmConfig
             'enc_key' => '', 'enc_iv' => '',
             'pocket_code' => '', 'noti_allow_ips' => '',
             'access_token' => '', 'token_expires_at' => null,
+            'block_from' => '23:30', 'block_to' => '00:30',
         ];
         if (!self::tableExists()) {
             return $defaults;
@@ -124,6 +125,35 @@ final class FirmConfig
             && BaumCrypto::usable((string) $c['enc_key'], (string) $c['enc_iv']);
     }
 
+    /**
+     * 지금이 **이체 제한 시간**인가 — 제한 중이면 안내 문구, 아니면 null.
+     *
+     * 은행 공동망 점검 시간대에는 바움이 `TRANSFER_RESTRICTED_TIME` 으로 거절한다.
+     * 그때 자동출금이 돌면 무더기로 실패하고, 실패한 건은 라이더가 재신청도 못 한다
+     * (관리자가 재시도하거나 반려해야 풀린다). 아예 **보내지 않고 대기**시키는 편이 낫다.
+     *
+     * `block_from` 이 빈 값이면 제한하지 않는다. 자정을 넘는 구간(23:30~00:30)도 다룬다.
+     */
+    public static function blockedNow(?string $hhmm = null): ?string
+    {
+        $c    = self::get();
+        $from = trim((string) ($c['block_from'] ?? ''));
+        $to   = trim((string) ($c['block_to'] ?? ''));
+        if ($from === '' || $to === '' || $from === $to) {
+            return null;
+        }
+        $now = $hhmm ?? date('H:i');
+
+        // 자정을 넘는 구간이면 «시작 이후 또는 종료 이전», 아니면 «둘 사이».
+        $inside = $from > $to
+            ? ($now >= $from || $now <= $to)
+            : ($now >= $from && $now <= $to);
+
+        return $inside
+            ? sprintf('이체 제한 시간(%s~%s)입니다. 시간이 지난 뒤 다시 시도하세요.', $from, $to)
+            : null;
+    }
+
     /** 설정된 키/IV 로 만든 암복호화기 (없거나 형식이 틀리면 예외) */
     public static function crypto(): BaumCrypto
     {
@@ -159,6 +189,9 @@ final class FirmConfig
             'enc_iv_masked'     => $mask((string) $c['enc_iv']),
             'pocket_code'       => (string) $c['pocket_code'],
             'noti_allow_ips'    => (string) $c['noti_allow_ips'],
+            'block_from'        => (string) ($c['block_from'] ?? ''),
+            'block_to'          => (string) ($c['block_to'] ?? ''),
+            'blocked_now'       => self::blockedNow(),
             'has_secret_key'    => trim((string) $c['secret_key']) !== '',
             'has_enc'           => BaumCrypto::usable((string) $c['enc_key'], (string) $c['enc_iv']),
             'is_ready'          => self::isReady(),
@@ -228,6 +261,22 @@ final class FirmConfig
             return $v !== '' ? $v : (string) $prev[$key];
         };
 
+        // HH:MM 만 받는다 — 형식이 틀리면 제한이 엉뚱한 시간에 걸린다.
+        $hhmm = static function (string $key) use ($data, $prev): string {
+            if (!array_key_exists($key, $data)) {
+                return (string) ($prev[$key] ?? '');
+            }
+            $v = trim((string) $data[$key]);
+            if ($v === '') {
+                return '';
+            }
+            if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v)) {
+                throw new InvalidArgumentException('이체 제한 시간은 HH:MM 형식이어야 합니다: ' . $v);
+            }
+
+            return $v;
+        };
+
         $clientId = trim((string) ($data['client_id'] ?? $prev['client_id']));
         $secret   = $keep('secret_key');
         $encKey   = $keep('enc_key');
@@ -254,7 +303,7 @@ final class FirmConfig
                 SET driver = ?, env = ?,
                     `{$env}_client_id` = ?, `{$env}_secret_key` = ?,
                     `{$env}_enc_key` = ?, `{$env}_enc_iv` = ?, `{$env}_pocket_code` = ?,
-                    noti_allow_ips = ?, updated_by = ?, updated_at = NOW()
+                    noti_allow_ips = ?, block_from = ?, block_to = ?, updated_by = ?, updated_at = NOW()
               WHERE id = 1",
             [
                 $driver,
@@ -268,6 +317,9 @@ final class FirmConfig
                 array_key_exists('noti_allow_ips', $data)
                     ? trim((string) $data['noti_allow_ips'])
                     : (string) $prev['noti_allow_ips'],
+                // 제한 시간도 «빈 값 = 제한 없음» 이라 keep 하지 않는다.
+                $hhmm('block_from'),
+                $hhmm('block_to'),
                 ($adminId !== null && $adminId > 0) ? $adminId : null,
             ]
         );
