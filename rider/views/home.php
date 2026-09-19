@@ -339,14 +339,14 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 
 	<!--begin::최근 정산-->
 	<?php if ($recentCycles !== []) : ?>
-	<div class="card card-flush shadow-sm mb-4">
-		<div class="card-header border-0 min-h-auto pt-4">
-			<h2 class="card-title fw-bold fs-6 mb-0">최근 정산</h2>
+	<div class="card card-flush shadow-sm rider-home-cycles mb-4">
+		<div class="card-header border-0 min-h-auto">
+			<h2 class="card-title fw-bold fs-7 mb-0">최근 정산</h2>
 			<div class="card-toolbar">
-				<a href="<?= $esc(rider_url('settlement/fees')) ?>" class="btn btn-sm btn-light-primary py-1 px-3">전체</a>
+				<a href="<?= $esc(rider_url('settlement/fees')) ?>" class="fs-8 fw-semibold text-muted text-hover-primary text-decoration-none">전체 ›</a>
 			</div>
 		</div>
-		<div class="card-body pt-2">
+		<div class="card-body">
 			<?php foreach ($recentCycles as $c) : ?>
 			<?php // 눌린 항목의 **그 날짜** 정산 상세로 보낸다. 예전엔 전부 목록(settlement/fees)으로
 			      // 걸려 있어 어느 줄을 눌러도 같은 화면이 떴다. ?>
