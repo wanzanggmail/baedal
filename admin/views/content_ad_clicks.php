@@ -49,10 +49,14 @@ foreach ($daily as $d) {
 }
 
 $esc = static fn (?string $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-$qs  = static fn (array $over): string => '?' . http_build_query(array_merge(
-    ['from' => $from, 'to' => $to, 'banner_id' => $bannerId],
-    $over
-));
+
+// ⚠️ 이 화면의 주소는 `/admin/index.php?route=content/ad-clicks` 형태일 수 있다(ADMIN_USE_QUERY_URL).
+//    GET 폼은 action 의 쿼리스트링을 통째로 버리므로 route 를 hidden 으로 같이 보내야 하고,
+//    링크도 `?from=...` 처럼 상대 쿼리로 만들면 route 가 날아가 대시보드로 튕긴다.
+$selfUrl = admin_url('content/ad-clicks');
+$qs = static fn (array $over): string => $selfUrl
+    . (str_contains($selfUrl, '?') ? '&' : '?')
+    . http_build_query(array_merge(['from' => $from, 'to' => $to, 'banner_id' => $bannerId], $over));
 ?>
 <!--begin::Toolbar-->
 <div id="kt_app_toolbar" class="app-toolbar py-3 py-lg-6">
@@ -85,7 +89,10 @@ $qs  = static fn (array $over): string => '?' . http_build_query(array_merge(
 
 	<div class="card card-flush mb-6">
 		<div class="card-body py-4">
-			<form method="get" class="row g-3 align-items-end">
+			<form method="get" action="<?= $esc($selfUrl) ?>" class="row g-3 align-items-end">
+				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
+				<input type="hidden" name="route" value="content/ad-clicks" />
+				<?php endif; ?>
 				<div class="col-6 col-md-3">
 					<label class="form-label fs-8 text-muted mb-1">시작일</label>
 					<input type="date" name="from" value="<?= $esc($from) ?>" class="form-control form-control-sm form-control-solid" />
