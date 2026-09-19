@@ -122,6 +122,9 @@ try {
 
 $carouselBg = ['primary', 'success', 'warning', 'info'];
 
+// 홈 바로가기(아이콘 줄) 표시 여부 — 하단 탭바와 겹쳐 «일단 숨김»(2026-09-19 갑).
+$showQuickLinks = false;
+
 // 소속 대리점명 — 조회 실패해도 홈은 그대로 뜬다.
 $agencyName = '';
 try {
@@ -232,6 +235,8 @@ try {
 	<!--end::이번 달 요약-->
 
 	<!--begin::바로가기-->
+	<?php // 2026-09-19 갑: "아이콘이 나오는 줄을 일단 숨겨줘봐" — 다시 켜려면 false 를 true 로. ?>
+	<?php if ($showQuickLinks) : ?>
 	<div class="rider-home-quick mb-5">
 		<a href="<?= $esc(rider_url('settlement/calendar')) ?>" class="rider-home-quick-item">
 			<span class="rider-home-quick-icon bg-light-primary">
@@ -258,6 +263,7 @@ try {
 			<span class="rider-home-quick-label">출금 내역</span>
 		</a>
 	</div>
+	<?php endif; ?>
 	<!--end::바로가기-->
 
 	<!--begin::배너-->

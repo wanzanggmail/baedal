@@ -13,7 +13,8 @@ $riderRoute = $riderRoute ?? '';
 /** 탭: [라우트, 라벨, 아이콘, path 개수, 이 탭으로 볼 라우트 접두사들] */
 $riderTabs = [
     ['home',              '홈',    'ki-element-11', 4, ['home']],
-    ['settlement/fees',   '정산',  'ki-chart-simple', 4, ['settlement/', 'promotions']],
+    // 2026-09-19 갑: 「정산」 탭은 수수료 내역이 아니라 **정산 달력**으로 보낸다.
+    ['settlement/calendar', '정산',  'ki-chart-simple', 4, ['settlement/', 'promotions']],
     ['withdrawal/apply',  '출금',  'ki-wallet', 4, ['withdrawal/']],
     ['profile',           '내정보', 'ki-user', 2, ['profile', 'profile/', 'notices']],
 ];
