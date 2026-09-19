@@ -505,6 +505,21 @@ final class Withdrawal
             return $out;
         }
 
+        // ── 0단계: 이체 제한 시간 ──
+        // 은행 점검 시간대에 보내면 바움이 TRANSFER_RESTRICTED_TIME 으로 거절한다.
+        // 거절당한 건은 실패로 남아 **라이더가 재신청도 못 하므로**(관리자가 재시도/반려해야 풀림)
+        // 아예 보내지 않고 `pending` 그대로 둔다 — 시간이 지난 뒤 그대로 확정하면 된다.
+        require_once INC_PATH . '/FirmConfig.php';
+        $blocked = FirmConfig::blockedNow();
+        if ($blocked !== null) {
+            foreach ($rows as $row) {
+                $out['skipped']++;
+                $out['results'][] = ['id' => (int) $row['id'], 'ok' => false, 'message' => $blocked];
+            }
+
+            return $out;
+        }
+
         $gateway = FirmBankingGatewayFactory::make();
 
         // ── 1단계: 사전 검증 + 접수 대기열 만들기 ──

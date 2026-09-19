@@ -106,6 +106,7 @@ final class MigrateRunner
         self::migrateDeployHistory();
         self::migrateBannerSlotSingle();
         self::migrateBannerClicks();
+        self::migrateFirmBlockWindow();
 
         echo "\n완료.\n";
     }
@@ -4012,6 +4013,35 @@ final class MigrateRunner
         echo "OK    광고 {$n}건을 라이더 홈 배너로 이동\n";
     }
 
+    /**
+     * 펌뱅킹 이체 제한 시간 (2026-09-19) — 은행 점검 시간대에는 접수 자체를 막는다.
+     *
+     * 바움 오류코드에 `TRANSFER_RESTRICTED_TIME` 이 있다. 그 시간대에 자동출금이 돌면
+     * 무더기로 거절되고, 거절된 건은 실패로 남아 라이더가 재신청도 못 한다.
+     * 아예 보내지 않고 대기시키는 편이 낫다. 빈 값이면 제한 없음.
+     */
+    private static function migrateFirmBlockWindow(): void
+    {
+        echo "== firm_config 이체 제한 시간 ==\n";
+
+        if (!db_table_exists('firm_config')) {
+            echo "SKIP  firm_config 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM firm_config'), 'Field');
+        if (in_array('block_from', $cols, true)) {
+            echo "SKIP  block_from (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE firm_config
+                ADD COLUMN block_from VARCHAR(5) NOT NULL DEFAULT '23:30' COMMENT '이체 제한 시작(HH:MM, 빈 값이면 제한 없음)',
+                ADD COLUMN block_to   VARCHAR(5) NOT NULL DEFAULT '00:30' COMMENT '이체 제한 종료(HH:MM)'"
+        );
+        echo "OK    firm_config.block_from / block_to 추가 (기본 23:30~00:30)\n";
+    }
     /**
      * 광고 배너 클릭 로그 (2026-09-19) — 광고 정산·분석의 근거 자료.
      *

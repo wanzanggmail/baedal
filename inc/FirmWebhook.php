@@ -146,8 +146,15 @@ final class FirmWebhook
         $changed = FirmTransfer::updateStatus($txId, $status, $status === BaumFirmGateway::ST_SUCCESS ? '' : $reason);
 
         $note = $changed ? ('상태 ' . $status . ' 반영') : ('이미 확정된 건(멱등 처리) · ' . $status);
-        if ($changed) {
+        // ⚠️ **확정 상태일 때만** 원본 장부를 건드린다.
+        //    바움은 RECEPTION → PROGRESS → NEED_CHECK → SUCCESS 로 **중간 상태도 통보**한다.
+        //    예전에는 이 중간 통보가 「SUCCESS 가 아님 = 실패」로 처리돼 진행 중인 이체가
+        //    출금 실패로 찍혔다. 실패로 찍히면 관리자가 재시도할 수 있어 **같은 돈이 두 번**
+        //    나갈 수 있다(failed 는 재시도 대상). 중간 상태는 장부 상태만 갱신하고 기다린다.
+        if ($changed && FirmTransfer::isFinal($status)) {
             $note .= self::applyResult($tr, $status, $reason);
+        } elseif ($changed) {
+            $note .= ' · 진행 중 — 결과 통보를 기다립니다';
         }
         self::log($payload, $ip, true, $note);
 
@@ -168,6 +175,10 @@ final class FirmWebhook
         $refId = (int) $tr['ref_id'];
         if ($refId < 1) {
             return ' · 원본 id 없음';
+        }
+        // 이중 안전장치 — 호출부가 실수로 중간 상태를 넘겨도 장부를 건드리지 않는다.
+        if (!FirmTransfer::isFinal($status)) {
+            return ' · 확정 상태가 아니라 반영하지 않음(' . $status . ')';
         }
 
         if ($kind === FirmTransfer::KIND_WITHDRAWAL) {

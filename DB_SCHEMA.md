@@ -375,6 +375,12 @@ PK=`agency_id`. **행의 역할이 조직 레벨에 따라 다르다**(갑 확�
 
 ## 9. 시스템 공통
 
+### 펌뱅킹 `firm_config` / `firm_transfers` / `firm_webhook_events` / `firm_api_logs`
+전역 1행 설정 + 비동기 이체 장부. 자세한 규격은 **REF_FIRM_BAUM.md** 참고.
+- `firm_config`: 자격증명은 환경별(`dev_*`/`prod_*`)로 나눠 **암호화 저장**(`Crypto`). `noti_allow_ips` 는 통보 발신 IP 허용 목록.
+  🆕 **(2026-09-19) `block_from`/`block_to`** VARCHAR(5) 기본 `23:30`/`00:30` — **이체 제한 시간**. 은행 점검 시간대에 보내면 바움이 `TRANSFER_RESTRICTED_TIME` 으로 거절하고 그 건은 실패로 남아 라이더가 재신청도 못 한다. 이 시간대에는 접수하지 않고 신청을 `pending` 그대로 둔다(`FirmConfig::blockedNow()` → `Withdrawal::executeTransfers()` 0단계). 자정을 넘는 구간도 계산하며, 비우면 제한하지 않는다.
+- `firm_transfers`: 접수(RECEPTION)와 결과 확정을 잇는 장부. `transaction_id` UNIQUE, `finalized_at IS NULL` 이 미확정. 계좌는 뒤 4자리만.
+- `firm_webhook_events`: 처리결과 통보 수신 이력(계좌번호 마스킹).
 ### `system_codes` — 코드마스터
 `category`: `bank`/`vehicle`/`rider_status`/`settlement_status`/`withdrawal_status`/`platform`/`deduction_kind`. UNIQUE(`category`,`code`), 생성 후 불변(비활성화만 가능).
 ⚠️ `withdrawal_status`에 `failed`를 추가할 때 PHP `Withdrawal::STATUS_LABELS`(enum과 별개)도 함께 갱신해야 함 — 상태값 이중정의 패턴 주의.
