@@ -121,7 +121,14 @@ try {
 }
 
 $carouselBg = ['primary', 'success', 'warning', 'info'];
-$isDaily = !empty($riderUser['is_daily_settlement']);
+
+// 소속 대리점명 — 조회 실패해도 홈은 그대로 뜬다.
+$agencyName = '';
+try {
+    $agencyName = (string) (Org::find(rider_current_agency_id())['name'] ?? '');
+} catch (Throwable) {
+    $agencyName = '';
+}
 ?>
 <div class="rider-home">
 
@@ -135,13 +142,10 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 			<div class="rider-home-greeting-name text-truncate">
 				<?= $esc((string) ($riderUser['name'] ?? '라이더')) ?><span class="text-gray-500 fw-semibold"> 님</span>
 			</div>
-			<div class="rider-home-greeting-sub text-gray-500 text-truncate">
-				<?= $esc((string) ($riderUser['rider_code'] ?? '')) ?>
-			</div>
 		</div>
-		<span class="badge <?= $isDaily ? 'badge-light-success' : 'badge-light-primary' ?> flex-shrink-0">
-			<?= $isDaily ? '선정산' : '주정산' ?>
-		</span>
+		<?php if ($agencyName !== '') : ?>
+		<span class="badge badge-light-primary flex-shrink-0 text-truncate mw-150px"><?= $esc($agencyName) ?></span>
+		<?php endif; ?>
 	</div>
 	<!--end::인사말-->
 
@@ -171,9 +175,11 @@ $isDaily = !empty($riderUser['is_daily_settlement']);
 
 	<!--begin::출금 가능액 (핵심)-->
 	<div class="rider-home-hero mb-4">
-		<div class="rider-home-hero-label">출금 가능 금액</div>
+		<div class="rider-home-hero-label">
+			출금 가능 금액
+			<span class="rider-home-hero-label-note">보증금·정산수수료 차감 후 금액</span>
+		</div>
 		<div class="rider-home-hero-amount"><?= $esc($won($withdrawable)) ?></div>
-		<div class="rider-home-hero-note">보증금·정산수수료 차감 후 금액</div>
 
 		<?php if ($openWithdrawal !== null) : ?>
 		<a href="<?= $esc(rider_url('withdrawal/history')) ?>" class="rider-home-hero-cta rider-home-hero-cta-ghost">신청 내역 보기</a>
