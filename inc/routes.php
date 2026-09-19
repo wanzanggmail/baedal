@@ -32,6 +32,7 @@ return [
     'withdrawal/payment-setup' => ['title' => '결제 설정(카드·계좌)', 'view' => 'payment_setup'],
     'content/notices' => ['title' => '공지 관리', 'view' => 'content_notices'],
     'content/banners' => ['title' => '광고 배너', 'view' => 'content_banners'],
+    'content/ad-clicks' => ['title' => '광고 클릭 로그', 'view' => 'content_ad_clicks'],
     'riders/list' => ['title' => '라이더 관리', 'view' => 'riders_list'],
     'riders/detail' => ['title' => '라이더 상세', 'view' => 'riders_detail'],
     'system/orgs' => ['title' => '조직 관리(총판·대리점)', 'view' => 'system_orgs'],

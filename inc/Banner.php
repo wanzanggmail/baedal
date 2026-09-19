@@ -369,12 +369,20 @@ final class Banner
     {
         $img = (string) ($row['image_url'] ?? '');
 
+        $pid  = (string) ($row['public_id'] ?? '');
+        $link = (string) ($row['link_url'] ?? '');
+        // 랜딩으로 바로 보내지 않고 클릭 기록을 거친다(광고 정산·분석용, 2026-09-19 갑).
+        $click = $link !== '' && $pid !== ''
+            ? rtrim(RIDER_BASE, '/') . '/p/ad.php?b=' . rawurlencode($pid)
+            : $link;
+
         return [
             'id'        => (int) $row['id'],
-            'public_id' => (string) ($row['public_id'] ?? ''),
+            'public_id' => $pid,
             'title'     => (string) ($row['title'] ?? ''),
             'subtitle'  => (string) ($row['subtitle'] ?? ''),
-            'link_url'  => (string) ($row['link_url'] ?? ''),
+            'link_url'  => $click,
+            'landing_url' => $link,
             'image_url' => $img,
             'image_src' => self::imageSrc($img, true),
             'slot'      => (string) ($row['slot'] ?? ''),

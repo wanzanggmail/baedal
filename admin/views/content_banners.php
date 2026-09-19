@@ -34,6 +34,7 @@ $needsMigrate = $listError !== null
 			</ul>
 		</div>
 		<div class="d-flex gap-2 flex-wrap">
+			<a href="<?= htmlspecialchars(admin_url('content/ad-clicks'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">클릭 로그</a>
 			<a href="<?= htmlspecialchars(admin_url('content/notices'), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-light fw-bold">공지 관리</a>
 			<button type="button" class="btn btn-sm btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#kt_banner_modal" id="btn_banner_create"<?= $needsMigrate ? ' disabled' : '' ?>>
 				<i class="ki-duotone ki-plus fs-3"><span class="path1"></span><span class="path2"></span></i>

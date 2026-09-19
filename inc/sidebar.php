@@ -347,6 +347,12 @@ if (!function_exists('stmt_menu_visible')) {
 														<span class="menu-title">광고 배너</span>
 													</a>
 												</div>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('content/ad-clicks') ?>" href="<?= htmlspecialchars(admin_url('content/ad-clicks'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">광고 클릭 로그</span>
+													</a>
+												</div>
 											</div>
 										</div>
 										<?php endif; ?>
