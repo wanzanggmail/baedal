@@ -8,11 +8,6 @@
 	line-height: 1.25;
 	color: var(--bs-gray-900);
 }
-.rider-home-greeting-sub {
-	font-size: 12px;
-	line-height: 1.4;
-	margin-top: 2px;
-}
 
 /* ───────────────────────── 홈: 상태 알림(막힘) ───────────────────────── */
 .rider-home-alert {
@@ -65,10 +60,22 @@
 	box-shadow: 0 6px 18px rgba(0, 158, 247, 0.28);
 }
 .rider-home-hero-label {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 6px;
 	font-size: 13px;
 	font-weight: 600;
 	opacity: 0.9;
 	line-height: 1.2;
+}
+/* 「출금 가능 금액 | 보증금·정산수수료 차감 후 금액」 — 한 줄로 붙인다(2026-09-19 갑). */
+.rider-home-hero-label-note {
+	font-size: 10px;
+	font-weight: 500;
+	opacity: 0.85;
+	padding-left: 6px;
+	border-left: 1px solid rgba(255, 255, 255, 0.45);
 }
 .rider-home-hero-amount {
 	font-size: 34px;
@@ -77,12 +84,6 @@
 	letter-spacing: -0.5px;
 	margin-top: 4px;
 	word-break: keep-all;
-}
-.rider-home-hero-note {
-	font-size: 11px;
-	opacity: 0.82;
-	line-height: 1.4;
-	margin-top: 3px;
 }
 .rider-home-hero-cta {
 	display: flex;
