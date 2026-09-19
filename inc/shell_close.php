@@ -19,5 +19,6 @@
 		<script src="<?= htmlspecialchars(web_asset_v('js/account-verify.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<script src="<?= htmlspecialchars(web_asset_v('js/org-scope-picker.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<!--end::Javascript-->
+		<?php require INC_PATH . '/channel_talk.php'; ?>
 	</body>
 </html>

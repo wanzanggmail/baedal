@@ -119,5 +119,6 @@ if (empty($riderMinimalShell)
 	})();
 	</script>
 	<?php endif; ?>
+	<?php require INC_PATH . '/channel_talk.php'; ?>
 </body>
 </html>
