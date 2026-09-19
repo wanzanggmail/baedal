@@ -15,6 +15,7 @@
 | [`audit_consistency.php`](#audit_consistencyphp--정산-정합성-전수-대사) | 관리자·라이더 화면 숫자가 같은지 전수 대사 | 없음 (읽기 전용) | 안전 |
 | [`audit_money.php`](#audit_moneyphp--돈-흐름-불변식-감사) | 돈이 새거나 집계에서 빠지는 곳 감사 | 없음 (읽기 전용) | 안전 |
 | [`gen_enc_key.php`](#gen_enc_keyphp--암호화-키-생성) | `.env` 에 넣을 암호화 키 생성 | 없음 (화면 출력만) | 안전 |
+| [`render_admin_page.php`](#render_admin_pagephp--관리자-화면-렌더-점검) | 관리자 화면을 실제 라우터로 열어 본다 | 없음 (읽기 전용) | 안전 |
 | [`reconcile_ledger.php`](#reconcile_ledgerphp--지갑-원장-보정) | 대리점 지갑 원장의 누락 행을 사후 기록 | 원장 행 추가 (잔액은 그대로) | 낮음 |
 | [`delete_org.php`](#delete_orgphp--조직-삭제) | 실적 없는 총판·대리점 삭제 | 조직과 부속 설정 삭제 | 중간 |
 | [`reset_riders.php`](#reset_ridersphp--라이더-전체-삭제) | 라이더와 딸린 데이터 전부 삭제 | 대량 삭제 | **매우 높음** |
@@ -332,6 +333,44 @@ php tools/reset_settlements.php --apply --yes-reset-settlements   # 실제 초�
 
 ---
 
+## render_admin_page.php — 관리자 화면 렌더 점검
+
+관리자 화면을 **실제 라우터로** 열어 보고, 제목·길이와 «조회 폼이 route 를 잃지 않는지» 를 확인한다.
+도메인 함수 테스트만으로는 «화면이 열리는지» 를 알 수 없어서 만든 도구다 — 실제로 「광고 클릭 로그」의
+조회 버튼이 대시보드로 튕긴 적이 있다(이 관리자는 route 를 쿼리스트링으로 받는데 GET 폼이 그걸 버린다).
+
+### 사용법
+
+```bash
+php tools/render_admin_page.php content/ad-clicks
+php tools/render_admin_page.php content/ad-clicks from=2026-09-01 to=2026-09-19
+```
+
+- 첫 인자는 라우트(`inc/routes.php` 의 키), 그 뒤는 `key=value` 형태의 쿼리 파라미터.
+- 로그인은 **본사 최고관리자 세션을 직접 구성**한다 — 비밀번호를 쓰지 않는다.
+- 렌더 결과는 `tools/_render_out.html` 로 저장된다(git 에는 올라가지 않는다).
+
+### 읽는 법
+
+```
+계정     : admin (org 1)
+라우트   : content/ad-clicks
+접근권한 : 허용
+화면제목 : 광고 클릭 로그
+길이     : 44,657 bytes → tools/_render_out.html
+GET 폼#1 : route hidden 있음
+```
+
+- **접근권한 차단** — 라우트 권한 규칙에 막힌 것이다(`admin_can_access_route`).
+- **화면제목이 엉뚱** — 라우트가 안 잡혀 대시보드가 렌더된 것이다. `inc/routes.php` 등록을 확인한다.
+- **GET 폼 route hidden 없음** — 조회를 누르면 대시보드로 튕긴다. `<input type="hidden" name="route" ...>` 를 넣는다.
+
+### 언제 쓰나
+
+- 관리자 화면을 **새로 만들거나 고친 직후** — 커밋 전에 한 번.
+- 「화면이 안 열린다」·「조회하면 다른 데로 간다」 는 신고를 받았을 때.
+
+---
 ## 종료코드 정리
 
 | 코드 | 의미 |
