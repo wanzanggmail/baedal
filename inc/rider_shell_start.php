@@ -36,8 +36,8 @@ $manifestHref = htmlspecialchars(rtrim(RIDER_BASE, '/') . '/manifest.php', ENT_Q
 	<?php endif; ?>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,400,500,600,700" />
 	<link href="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
-	<link href="<?= htmlspecialchars(web_asset('css/style.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
-	<link href="<?= htmlspecialchars(web_asset('css/rider-mobile.css?v=' . time()), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
+	<link href="<?= htmlspecialchars(web_asset_v('css/style.bundle.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
+	<link href="<?= htmlspecialchars(web_asset_v('css/rider-mobile.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css" />
 	<script>
 		var defaultThemeMode = "light";
 		var themeMode;

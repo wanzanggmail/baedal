@@ -68,7 +68,7 @@ if (empty($riderMinimalShell)
 	<?php endif; ?>
 	<script>var hostUrl = "<?= htmlspecialchars(web_assets_base() . '/', ENT_QUOTES, 'UTF-8') ?>";</script>
 	<script src="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-	<script src="<?= htmlspecialchars(web_asset('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+	<script src="<?= htmlspecialchars(web_asset_v('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 	<?php if ($riderNoticePopups !== []) : ?>
 	<script>
 	// bootstrap 번들이 로드된 뒤 실행돼야 Modal을 쓸 수 있어 여기(스크립트 태그 아래)에 둔다.

@@ -14,10 +14,10 @@
 		     //    admin_url() 은 index.php?route=… 라우터 URL 이라 API 파일에 닿지 않는다. ?>
 		<script>window.ADMIN_BASE_URL = <?= json_encode(ADMIN_BASE, JSON_UNESCAPED_SLASHES) ?>;</script>
 		<script src="<?= htmlspecialchars(web_asset('plugins/global/plugins.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-		<script src="<?= htmlspecialchars(web_asset('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-		<script src="<?= htmlspecialchars(web_asset('js/admin-datepickers.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-		<script src="<?= htmlspecialchars(web_asset('js/account-verify.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-		<script src="<?= htmlspecialchars(web_asset('js/org-scope-picker.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script src="<?= htmlspecialchars(web_asset_v('js/scripts.bundle.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script src="<?= htmlspecialchars(web_asset_v('js/admin-datepickers.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script src="<?= htmlspecialchars(web_asset_v('js/account-verify.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+		<script src="<?= htmlspecialchars(web_asset_v('js/org-scope-picker.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 		<!--end::Javascript-->
 	</body>
 </html>

@@ -71,7 +71,7 @@ if (empty($_SESSION['rider_wd_csrf'])) {
 }
 $csrfToken = $_SESSION['rider_wd_csrf'];
 ?>
-<link rel="stylesheet" href="<?= htmlspecialchars(web_asset('css/rider-settlement-calendar.css'), ENT_QUOTES, 'UTF-8') ?>" />
+<link rel="stylesheet" href="<?= htmlspecialchars(web_asset_v('css/rider-settlement-calendar.css'), ENT_QUOTES, 'UTF-8') ?>" />
 
 <div class="card card-flush shadow-sm mb-4">
 	<div class="card-header border-0 min-h-auto align-items-center gap-2 pt-3 pb-0">
@@ -207,5 +207,5 @@ window.RIDER_WD_LAST_DATE = <?= json_encode($lastDate, JSON_UNESCAPED_UNICODE) ?
 window.RIDER_WD_PREVIEW_URL = <?= json_encode(rtrim(RIDER_BASE, '/') . '/p/withdrawal_preview.php', JSON_UNESCAPED_UNICODE) ?>;
 window.RIDER_WD_HAS_OPEN = <?= $hasOpen ? 'true' : 'false' ?>;
 </script>
-<script src="<?= htmlspecialchars(web_asset('js/rider-withdrawal-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script src="<?= htmlspecialchars(web_asset_v('js/rider-withdrawal-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
 <?php endif; ?>
