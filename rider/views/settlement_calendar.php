@@ -49,7 +49,7 @@ if ($riderId > 0 && SettlementLedger::tableExists()) {
 }
 
 ?>
-<link rel="stylesheet" href="<?= htmlspecialchars(web_asset('css/rider-settlement-calendar.css'), ENT_QUOTES, 'UTF-8') ?>" />
+<link rel="stylesheet" href="<?= htmlspecialchars(web_asset_v('css/rider-settlement-calendar.css'), ENT_QUOTES, 'UTF-8') ?>" />
 
 <div class="card card-flush shadow-sm mb-4 rider-cal-page-card">
 	<div class="card-body p-0">
@@ -119,4 +119,4 @@ if ($riderId > 0 && SettlementLedger::tableExists()) {
 <script>
 window.RIDER_SETTLEMENT_CALENDAR_DATA = <?= json_encode($calendarData, JSON_UNESCAPED_UNICODE) ?>;
 </script>
-<script src="<?= htmlspecialchars(web_asset('js/rider-settlement-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<script src="<?= htmlspecialchars(web_asset_v('js/rider-settlement-calendar.js'), ENT_QUOTES, 'UTF-8') ?>"></script>

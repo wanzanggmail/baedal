@@ -83,6 +83,20 @@ function web_asset(string $relativePath): string
     return web_assets_base() . '/' . $relativePath;
 }
 
+/**
+ * 캐시 무효화용 버전을 붙인 자산 URL — `?v=<파일 수정시각>`.
+ *
+ * 버전이 없으면 배포해도 브라우저가 옛 CSS/JS 를 계속 쓴다(강력 새로고침에서만 바뀜).
+ * time() 을 쓰면 매번 새로 받아 모바일에서 낭비라, **파일이 바뀔 때만** 값이 바뀌게 한다.
+ */
+function web_asset_v(string $relativePath): string
+{
+    $rel = ltrim($relativePath, '/');
+    $mt  = @filemtime(ROOT_PATH . '/assets/' . $rel);
+
+    return web_asset($rel) . '?v=' . ($mt !== false ? $mt : '0');
+}
+
 /** 업로드 파일 웹 경로 접두사 (/uploads 또는 /baedal/uploads) */
 function web_uploads_base(): string
 {
