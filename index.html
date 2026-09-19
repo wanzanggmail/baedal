@@ -761,5 +761,32 @@
 	});
 })();
 </script>
+<!--begin::채널톡 상담 — https://developers.channel.io/ko/articles/d27c51d1 -->
+<script>
+(function () {
+	var w = window;
+	if (w.ChannelIO) { return w.console.error('ChannelIO script included twice.'); }
+	var ch = function () { ch.c(arguments); };
+	ch.q = [];
+	ch.c = function (args) { ch.q.push(args); };
+	w.ChannelIO = ch;
+	function l() {
+		if (w.ChannelIOInitialized) { return; }
+		w.ChannelIOInitialized = true;
+		var s = document.createElement('script');
+		s.type = 'text/javascript';
+		s.async = true;
+		s.src = 'https://cdn.channel.io/plugin/ch-plugin-web.js';
+		var x = document.getElementsByTagName('script')[0];
+		if (x.parentNode) { x.parentNode.insertBefore(s, x); }
+	}
+	if (document.readyState === 'complete') { l(); }
+	else { w.addEventListener('DOMContentLoaded', l); w.addEventListener('load', l); }
+})();
+
+/* 홈페이지는 로그인이 없으므로 익명으로 띄운다(회원 프로필은 관리자·라이더 앱에서 채운다). */
+ChannelIO('boot', { "pluginKey": "013d5df0-d524-481d-b182-3d0de69cbfa5" });
+</script>
+<!--end::채널톡 상담-->
 </body>
 </html>
