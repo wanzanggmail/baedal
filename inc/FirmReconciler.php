@@ -25,17 +25,28 @@ final class FirmReconciler
      * 미확정 건을 조회해 결과를 반영한다.
      *
      * @param int $minAgeMinutes 접수 후 이 시간이 지난 건만 본다(웹훅이 올 시간을 준다)
-     * @return array{checked:int, finalized:int, still_pending:int, errors:int, details:list<string>}
+     * @return array{checked:int, finalized:int, still_pending:int, errors:int, orphans:int, details:list<string>}
      */
     public static function run(int $minAgeMinutes = 5, int $limit = 100): array
     {
-        $out = ['checked' => 0, 'finalized' => 0, 'still_pending' => 0, 'errors' => 0, 'details' => []];
+        $out = ['checked' => 0, 'finalized' => 0, 'still_pending' => 0, 'errors' => 0, 'orphans' => 0, 'details' => []];
 
         require_once __DIR__ . '/FirmConfig.php';
         if (!FirmConfig::isReady()) {
             $out['details'][] = '실 연동이 꺼져 있어 조회하지 않았습니다.';
 
             return $out;
+        }
+
+        // 장부에 아예 없는 「접수중」 — 자동 처리하지 않고 사람이 보게 남긴다.
+        $orphans = FirmTransfer::orphanTransferring(max(10, $minAgeMinutes));
+        if ($orphans !== []) {
+            $out['orphans'] = count($orphans);
+            $out['details'][] = sprintf(
+                '⚠️ 접수 기록이 없는 「접수중」 출금 %d건(#%s) — 바움 관리자에서 실제 이체 여부를 확인하세요.',
+                count($orphans),
+                implode(', #', array_map(static fn (array $r): string => (string) $r['id'], array_slice($orphans, 0, 10)))
+            );
         }
 
         $rows = FirmTransfer::pending($minAgeMinutes, $limit);
@@ -56,6 +67,16 @@ final class FirmReconciler
                 continue;
             }
 
+            // 바움이 «그런 거래 없다» 고 하면 **전송되지 않은 것**이다(접수 직전에 터진 경우).
+            // 영원히 접수중으로 두면 라이더가 재신청도 못 하므로 실패로 확정해 재시도를 열어 준다.
+            if (strtoupper((string) ($info['code'] ?? '')) === 'RESOURCE_NOT_EXISTS') {
+                if (FirmTransfer::updateStatus($txId, BaumFirmGateway::ST_FAILED, '바움에 접수 기록 없음(전송되지 않음)')) {
+                    $out['finalized']++;
+                    $out['details'][] = $txId . ' — 접수 기록 없음 → 실패 처리' . self::apply($tr, BaumFirmGateway::ST_FAILED, '바움에 접수 기록이 없습니다(전송되지 않음)');
+                }
+                continue;
+            }
+
             if (!$info['ok'] || $info['status'] === '') {
                 $out['errors']++;
                 $out['details'][] = $txId . ' — 조회 실패: ' . ($info['message'] !== '' ? $info['message'] : '상태 없음');
@@ -68,6 +89,20 @@ final class FirmReconciler
                 // 아직 진행 중 — 다음 회차에 다시 본다.
                 FirmTransfer::touchChecked($txId);
                 $out['still_pending']++;
+                continue;
+            }
+
+            // 금액이 장부와 다르면 확정하지 않는다 — 웹훅과 같은 기준이어야 한다.
+            $infoAmount = (int) ($info['amount'] ?? 0);
+            if ($infoAmount > 0 && $infoAmount !== (int) $tr['amount']) {
+                $out['errors']++;
+                $out['details'][] = sprintf(
+                    '%s — 금액 불일치(조회 %s원 / 장부 %s원) · 사람이 확인해야 합니다',
+                    $txId,
+                    number_format($infoAmount),
+                    number_format((int) $tr['amount'])
+                );
+                FirmTransfer::touchChecked($txId);
                 continue;
             }
 

@@ -141,6 +141,33 @@ final class FirmTransfer
         );
     }
 
+    /**
+     * 「접수중」인데 **이체 장부에 행이 없는** 출금 — 접수 직후 프로세스가 죽었거나
+     * 장부 기록이 실패한 흔적이다. 자동으로 실패 처리하지 않는다(정말 나갔을 수도 있다) —
+     * 사람이 바움 관리자에서 확인해야 하므로 **눈에 띄게 세어서 보여 주기만** 한다.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function orphanTransferring(int $minAgeMinutes = 10, int $limit = 50): array
+    {
+        if (!self::tableExists() || !db_table_exists('withdrawal_requests')) {
+            return [];
+        }
+
+        return db_rows(
+            "SELECT wr.id, wr.rider_id, wr.amount, wr.requested_at
+               FROM withdrawal_requests wr
+               LEFT JOIN firm_transfers ft
+                      ON ft.kind = 'withdrawal' AND ft.ref_id = wr.id
+              WHERE wr.status = 'transferring'
+                AND ft.id IS NULL
+                AND wr.requested_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
+              ORDER BY wr.id ASC
+              LIMIT " . max(1, min(200, $limit)),
+            [max(0, $minAgeMinutes)]
+        );
+    }
+
     /** 미확정 건수 — 화면 배지용. */
     public static function pendingCount(): int
     {

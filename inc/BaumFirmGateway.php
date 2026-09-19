@@ -394,7 +394,7 @@ final class BaumFirmGateway implements FirmBankingGateway
     /**
      * 이체 상태 조회 — 웹훅이 유실됐을 때 확인하는 보정 경로.
      *
-     * @return array{ok:bool, status:string, data:array<mixed>, message:string}
+     * @return array{ok:bool, status:string, amount:int, code:string, data:array<mixed>, message:string}
      */
     public function transferInfo(string $transactionId): array
     {
@@ -404,6 +404,9 @@ final class BaumFirmGateway implements FirmBankingGateway
         return [
             'ok'      => (bool) $res['ok'],
             'status'  => (string) ($d['transferStatus'] ?? ''),
+            'amount'  => (int) ($d['amount'] ?? 0),
+            // 오류코드까지 넘긴다 — 「그런 거래 없음」과 「일시적 통신 오류」는 다르게 다뤄야 한다.
+            'code'    => (string) $res['error_code'],
             'data'    => $d,
             'message' => (string) $res['error_message'],
         ];
