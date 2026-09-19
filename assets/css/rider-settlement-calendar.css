@@ -68,7 +68,7 @@
 }
 
 .rider-cal-grid {
-	padding: 0.35rem 0.25rem 0.5rem;
+	padding: 0.25rem 0.15rem 0.35rem;
 }
 
 .rider-cal-days-header {
@@ -80,10 +80,10 @@
 
 .rider-cal-day-header {
 	text-align: center;
-	font-size: 0.72rem;
+	font-size: 0.85rem;
 	font-weight: 700;
 	color: var(--bs-gray-600);
-	padding: 0.3rem 0;
+	padding: 0.2rem 0;
 }
 .rider-cal-day-header.rider-cal-weekend {
 	color: var(--rider-cal-sun);
@@ -109,7 +109,7 @@
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	padding: 0.2rem 0.08rem 0.15rem;
+	padding: 0.15rem 0.05rem 0.1rem;
 	cursor: default;
 	transition: background 0.15s, border-color 0.15s;
 	position: relative;
@@ -175,7 +175,7 @@ button.rider-cal-day.rider-cal-selected:hover {
 }
 
 .rider-cal-day-num {
-	font-size: 0.95rem;
+	font-size: 1.2rem;
 	font-weight: 700;
 	line-height: 1.1;
 	color: var(--bs-gray-800);
@@ -183,7 +183,7 @@ button.rider-cal-day.rider-cal-selected:hover {
 }
 
 .rider-cal-day-meta {
-	font-size: clamp(0.62rem, 2.8vw, 0.78rem);
+	font-size: clamp(0.82rem, 3.3vw, 1rem);
 	line-height: 1.15;
 	color: var(--bs-gray-700);
 	text-align: center;
