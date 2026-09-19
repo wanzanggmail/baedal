@@ -517,6 +517,11 @@ final class Withdrawal
             $amount   = (int) ($row['amount'] ?? 0);
             $agencyId = (int) ($row['agency_id'] ?: $row['rider_agency_id'] ?: 0);
 
+            if ($amount <= 0) {
+                self::failTransfer($id, '이체 금액이 0원입니다.', $out);
+                continue;
+            }
+
             if ((string) ($row['kind'] ?? '') === 'rider_manual' && $agencyId > 0) {
                 $agencyBalance = AgencyWallet::get($agencyId)['balance'];
                 if ($agencyBalance < $amount) {
@@ -547,6 +552,29 @@ final class Withdrawal
             ];
         }
 
+        // ── 1.5단계: 점유(claim) ──
+        // ⚠️ 여기가 **이중 이체를 막는 유일한 장치**다. 예전에는 상태를 접수 «후» 에 바꿨는데,
+        //    그 사이에 다른 호출(관리자 두 번 클릭, 자동출금과 수동 확정이 겹침)이 같은 건을
+        //    집어 **같은 돈을 두 번 보낼 수 있었다**(transactionId 가 서로 달라 바움도 못 막는다).
+        //    조건부 UPDATE 한 방으로 상태를 선점하고, 진 쪽은 아예 큐에서 뺀다.
+        foreach ($queue as $txId => $q) {
+            $claimed = db_execute(
+                "UPDATE withdrawal_requests
+                    SET status = 'transferring', fail_reason = ''
+                  WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+                [(int) $q['id']]
+            );
+            if ($claimed < 1) {
+                unset($queue[$txId]);
+                $out['skipped']++;
+                $out['results'][] = [
+                    'id'      => (int) $q['id'],
+                    'ok'      => false,
+                    'message' => '다른 처리에서 이미 이체를 시작한 건입니다.',
+                ];
+            }
+        }
+
         // ── 2단계: 접수 ──
         if ($queue !== []) {
             if ($gateway instanceof BaumFirmGateway) {
@@ -557,7 +585,7 @@ final class Withdrawal
             }
         }
 
-        $out['skipped'] = max(0, count($ids) - count($rows));
+        $out['skipped'] += max(0, count($ids) - count($rows));   // 점유 실패분(1.5단계)을 덮어쓰지 않는다
 
         return $out;
     }
@@ -588,11 +616,12 @@ final class Withdrawal
     private static function acceptTransfer(string $txId, array $q, string $receptionId, string $provider, array &$out, string $note = ''): void
     {
         $id = (int) $q['id'];
+        // 상태는 1.5단계에서 이미 transferring 으로 선점했다 — 여기서는 접수번호만 덧붙인다.
         db_execute(
             "UPDATE withdrawal_requests
                 SET status = 'transferring', fail_reason = '',
                     note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
-              WHERE id = ? AND status IN ('pending', 'downloaded', 'failed')",
+              WHERE id = ? AND status IN ('pending', 'downloaded', 'failed', 'transferring')",
             ['펌뱅킹 이체 접수 · ' . $provider . ' · 접수번호 ' . $receptionId . ($note !== '' ? ' · ' . $note : ''), $id]
         );
 
@@ -654,10 +683,16 @@ final class Withdrawal
             try {
                 $res = $gateway->submit($items);
             } catch (Throwable $e) {
-                foreach ($chunk as $txId => $q) {
-                    self::acceptTransfer($txId, $q, $txId, $gateway->providerLabel(), $out, '응답 불명 — 보정 조회 필요');
+                // ⚠️ `submit()` 이 예외를 던지는 지점은 **전부 HTTP 호출 이전**이다
+                //    (은행코드 미등록·배치 상한 초과·토큰 발급 실패·암호화 실패).
+                //    통신이 터진 경우는 예외가 아니라 `ok=false` 응답으로 돌아온다.
+                //    즉 여기 오면 **아무것도 전송되지 않았다** — 「접수중」으로 두면 나가지도 않은
+                //    이체를 기다리며 라이더가 영영 묶인다. 실패로 돌려 재시도할 수 있게 한다.
+                $msg = '이체 요청 전 오류(전송되지 않음): ' . $e->getMessage();
+                foreach ($chunk as $q) {
+                    self::failTransfer((int) $q['id'], $msg, $out);
                 }
-                error_log('[Withdrawal] 배치 접수 응답 불명 (' . count($chunk) . '건): ' . $e->getMessage());
+                error_log('[Withdrawal] 배치 접수 전 오류 (' . count($chunk) . '건): ' . $e->getMessage());
                 continue;
             }
 
