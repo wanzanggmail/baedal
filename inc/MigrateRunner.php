@@ -107,6 +107,7 @@ final class MigrateRunner
         self::migrateBannerSlotSingle();
         self::migrateBannerClicks();
         self::migrateFirmBlockWindow();
+        self::migrateFeeOrderCounts();
 
         echo "\n완료.\n";
     }
@@ -374,7 +375,10 @@ final class MigrateRunner
 
         // enum 확장 (MODIFY는 반복 실행에 안전)
         db_execute("ALTER TABLE withdrawal_requests MODIFY COLUMN kind ENUM('rider_manual','auto_daily','agency_payout') NOT NULL DEFAULT 'rider_manual'");
-        db_execute("ALTER TABLE withdrawal_requests MODIFY COLUMN status ENUM('pending','downloaded','completed','rejected','failed') NOT NULL DEFAULT 'pending'");
+        // ⚠️ `transferring` 을 빼면 안 된다 — 나중 단계에서 추가한 값이라, 접수중인 출금이
+        //    하나라도 있으면 이 MODIFY 가 «Data truncated» 로 **마이그레이션 전체를 중단**시킨다
+        //    (2026-09-20 실서버에서 실제로 막혔다). 나중 단계와 같은 목록을 쓴다.
+        db_execute("ALTER TABLE withdrawal_requests MODIFY COLUMN status ENUM('pending','downloaded','transferring','completed','rejected','failed') NOT NULL DEFAULT 'pending'");
         echo "OK    withdrawal_requests.kind/status enum\n";
     }
 
@@ -4042,7 +4046,36 @@ final class MigrateRunner
         );
         echo "OK    firm_config.block_from / block_to 추가 (기본 23:30~00:30)\n";
     }
+
     /**
+     * 정산수수료 구간 건수 보관 (2026-09-20) — 일일지급을 펌뱅킹(비동기)으로 옮기면서 필요해졌다.
+     *
+     * 수수료 배분은 «기준일 이내 건수 / 지난 건수» 로 계산하는데, 일일지급은 사이클 점유 기록을
+     * 만들지 않아 나중에 되살릴 방법이 없다. 접수 시점에 계산한 값을 요청 행에 남겨,
+     * **웹훅으로 확정될 때** 그대로 배분한다.
+     */
+    private static function migrateFeeOrderCounts(): void
+    {
+        echo "== withdrawal_requests 수수료 구간 건수 ==\n";
+
+        if (!db_table_exists('withdrawal_requests')) {
+            echo "SKIP  withdrawal_requests 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM withdrawal_requests'), 'Field');
+        if (in_array('fee_short_orders', $cols, true)) {
+            echo "SKIP  fee_short_orders (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE withdrawal_requests
+                ADD COLUMN fee_short_orders SMALLINT UNSIGNED NULL COMMENT '정산수수료 기준일 이내 건수(접수 시점 계산)',
+                ADD COLUMN fee_long_orders  SMALLINT UNSIGNED NULL COMMENT '정산수수료 기준일 초과 건수(접수 시점 계산)'"
+        );
+        echo "OK    fee_short_orders / fee_long_orders 추가\n";
+    }    /**
      * 광고 배너 클릭 로그 (2026-09-19) — 광고 정산·분석의 근거 자료.
      *
      * 광고가 지워져도 청구 근거는 남아야 해서 외래키를 걸지 않고, 클릭 당시의 광고명을
