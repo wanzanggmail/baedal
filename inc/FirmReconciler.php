@@ -131,8 +131,9 @@ final class FirmReconciler
      */
     private static function apply(array $tr, string $status, string $reason): string
     {
-        if ((string) $tr['kind'] !== FirmTransfer::KIND_WITHDRAWAL) {
-            return ' · ' . (string) $tr['kind'] . ' 후속 처리 미구현';
+        $kind = (string) $tr['kind'];
+        if ($kind !== FirmTransfer::KIND_WITHDRAWAL && $kind !== FirmTransfer::KIND_AGENCY_PAYOUT) {
+            return ' · ' . $kind . ' 후속 처리 미구현';
         }
 
         require_once __DIR__ . '/Withdrawal.php';

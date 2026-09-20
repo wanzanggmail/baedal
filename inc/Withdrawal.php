@@ -689,7 +689,10 @@ final class Withdrawal
             FirmTransfer::record([
                 'transaction_id' => $txId,
                 'reception_id'   => $receptionId,
-                'kind'           => FirmTransfer::KIND_WITHDRAWAL,
+                // 원본이 무엇인지 남겨야 웹훅·보정 조회가 알맞게 처리한다.
+                'kind'           => (string) ($q['row']['kind'] ?? '') === 'agency_payout'
+                    ? FirmTransfer::KIND_AGENCY_PAYOUT
+                    : FirmTransfer::KIND_WITHDRAWAL,
                 'ref_id'         => $id,
                 'agency_id'      => (int) $q['agency_id'],
                 'rider_id'       => (int) ($q['row']['rider_id'] ?? 0),
@@ -900,6 +903,18 @@ final class Withdrawal
                     $id,
                     (int) $row['rider_id'],
                     (int) ($row['withhold_transfer_fee'] ?? 0)
+                );
+            } elseif ((string) ($row['kind'] ?? '') === 'agency_payout' && $agencyId > 0) {
+                // 대리점 자체 인출 — **이체가 확정된 지금** 지갑에서 뺀다(2026-09-20).
+                // 예전에는 신청 즉시 차감하고 완료로 찍었는데, 모의 게이트웨이라 실제로는
+                // 돈이 나가지 않았다. 이제 라이더 출금과 같은 시점에 같은 방식으로 뺀다.
+                AgencyWallet::debit(
+                    $agencyId,
+                    (int) ($row['amount'] ?? 0),
+                    'agency_payout',
+                    $id,
+                    '자체 인출',
+                    null
                 );
             }
         });

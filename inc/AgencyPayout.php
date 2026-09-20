@@ -8,14 +8,23 @@ require_once __DIR__ . '/AgencyWallet.php';
  * 대리점 자체 정산금 인출 (withdrawal_requests.kind = agency_payout).
  *
  * LOGIC §5.5: 인출가능액(= balance − 라이더 정산금 − 원천세예수금)이 이미 "순수 대리점 몫"이므로
- * 본사 승인 없이 대리점이 신청하면 즉시 실행(잔액 차감). 실제 계좌이체는 오픈뱅킹(Phase F).
- * 신청 시점에 잔액을 차감하고 status=pending(지급 대기)으로 둔다.
+ * 본사 승인 없이 대리점이 신청하면 즉시 이체를 건다.
+ *
+ * ⚠️ **2026-09-20 수정 — 예전에는 모의(mock) 오픈뱅킹으로 보내고 「지급 완료」로 찍었다.**
+ *    `OpenBankingGatewayFactory` 가 지금도 항상 모의라, 실제로는 **돈이 나가지 않았는데
+ *    완료로 기록되고 지갑만 줄었다**(실서버에서 100원 인출이 펌뱅킹 이력에 없어 발견).
+ *    이제 라이더 출금과 **같은 펌뱅킹 경로**를 탄다:
+ *
+ *      신청 → executeTransfers(접수) → status=transferring → 웹훅 SUCCESS → completed + 지갑 차감
+ *
+ *    즉 **지갑은 이체가 확정될 때 줄어든다.** 접수만 된 상태에서는 아직 돈이 나간 게 아니다.
  */
 final class AgencyPayout
 {
     /** @var array<string,array{0:string,1:string}> status → [라벨, 뱃지색] */
     private const STATUS_LABELS = [
-        'pending'   => ['지급 대기', 'warning'],
+        'pending'      => ['지급 대기', 'warning'],
+        'transferring' => ['이체 접수중', 'info'],
         'completed' => ['지급 완료', 'success'],
         'failed'    => ['이체 실패', 'danger'],
         'rejected'  => ['취소', 'secondary'],
@@ -48,51 +57,56 @@ final class AgencyPayout
         }
 
         $wd = AgencyWallet::withdrawable($agencyId);
-        if ($amount > (int) $wd['withdrawable']) {
+        // 지갑 차감은 **이체가 확정될 때** 일어나므로, 이미 접수해 둔 인출액을 빼고 봐야 한다.
+        // 안 그러면 확정 전에 같은 돈을 여러 번 인출 신청할 수 있다.
+        $inflight = (int) (db_row(
+            "SELECT COALESCE(SUM(amount), 0) AS s FROM withdrawal_requests
+              WHERE agency_id = ? AND kind = 'agency_payout' AND status = 'transferring'",
+            [$agencyId]
+        )['s'] ?? 0);
+        $avail = (int) $wd['withdrawable'] - $inflight;
+        if ($amount > $avail) {
             throw new InvalidArgumentException(sprintf(
-                '인출가능액(%s원)을 초과했습니다. (잔액 %s − 라이더 정산금 %s − 원천세예수금 %s)',
-                number_format((int) $wd['withdrawable']),
+                '인출가능액(%s원)을 초과했습니다. (잔액 %s − 라이더 정산금 %s − 원천세예수금 %s%s)',
+                number_format(max(0, $avail)),
                 number_format((int) $wd['balance']),
                 number_format((int) $wd['rider_debt']),
-                number_format((int) $wd['withholding_reserve'])
+                number_format((int) $wd['withholding_reserve']),
+                $inflight > 0 ? ' − 이체 접수중 ' . number_format($inflight) : ''
             ));
         }
 
-        // 승인 절차 없이 즉시 오픈뱅킹 이체(현재 mock).
-        // 나가는 곳은 **본사 단일 출금 원천 계좌**(Disbursement 안에서 결정), 받는 곳은 대리점 정산금 수령 계좌.
-        require_once __DIR__ . '/Disbursement.php';
+        // 받는 곳은 대리점 정산금 수령 계좌. 나가는 곳은 본사 단일 출금 계좌(펌뱅킹 포켓).
         require_once __DIR__ . '/BankAccount.php';
+        require_once __DIR__ . '/Withdrawal.php';
         $acct   = BankAccount::get($agencyId);
         $toBank = (string) ($acct['bank_code'] ?? '');
         $toAcc  = (string) ($acct['account_no'] ?? '');
+        $holder = (string) ($acct['holder'] ?? $org['name']);
         if ($toBank === '' || $toAcc === '') {
             throw new RuntimeException('정산금 수령 계좌가 등록돼 있지 않습니다. 「결제 설정(카드·계좌)」에서 먼저 등록하세요.');
         }
-        $res    = Disbursement::transfer($agencyId, $toBank, $toAcc, $amount);
 
-        if (!$res->success) {
-            $failId = db_insert(
-                "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount, status, fail_reason, note, requested_at)
-                 VALUES (NULL, ?, 'agency_payout', ?, ?, 'failed', ?, ?, NOW())",
-                [$agencyId, $amount, $amount, mb_substr($res->failReason, 0, 300), '대리점 자체 인출 실패']
-            );
+        // 신청을 먼저 남기고(아직 돈은 그대로) 펌뱅킹으로 접수한다 — 라이더 출금과 같은 경로다.
+        // 계좌는 **요청 행에 암호화해 담는다**(executeTransfers 가 거기서 읽는다).
+        $newId = db_insert(
+            "INSERT INTO withdrawal_requests
+                (rider_id, agency_id, kind, amount, gross_amount, status, bank_code, bank_account, account_holder, note, requested_at)
+             VALUES (NULL, ?, 'agency_payout', ?, ?, 'pending', ?, ?, ?, ?, NOW())",
+            [$agencyId, $amount, $amount, $toBank, Crypto::encrypt($toAcc), $holder, (string) $org['name'] . ' 자체 인출']
+        );
 
-            throw new RuntimeException('이체 실패 — ' . $res->failReason);
+        $res = Withdrawal::executeTransfers([$newId]);
+        if ((int) $res['completed'] < 1 && (int) $res['accepted'] < 1) {
+            $msg = '';
+            foreach ($res['results'] as $r) {
+                if ((int) $r['id'] === $newId) {
+                    $msg = (string) $r['message'];
+                }
+            }
+
+            throw new RuntimeException($msg !== '' ? $msg : '이체 접수에 실패했습니다.');
         }
-
-        $newId = db_transaction(static function () use ($agencyId, $amount, $adminId, $org, $res): int {
-            $id = db_insert(
-                "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount, status, note, requested_at, completed_at)
-                 VALUES (NULL, ?, 'agency_payout', ?, ?, 'completed', ?, NOW(), NOW())",
-                [$agencyId, $amount, $amount, '대리점 자체 정산금 인출 · ' . $res->txId]
-            );
-
-            AgencyWallet::debit($agencyId, $amount, 'agency_payout', $id, (string) $org['name'] . ' 자체 인출', $adminId);
-
-            return $id;
-        });
 
         return self::find($newId);
     }
