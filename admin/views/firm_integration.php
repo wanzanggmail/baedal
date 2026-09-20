@@ -12,7 +12,9 @@ declare(strict_types=1);
 require_once INC_PATH . '/FirmConfig.php';
 require_once INC_PATH . '/FirmBankingGateway.php';
 
-$isSuper = admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN;
+// 최고관리자(본사·개발사)만 — 라우트 규칙(`admin_can_access_route`)과 같은 조건이다.
+$isSuper = admin_has_role('super')
+    && in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DEVELOPER], true);
 if (!$isSuper) {
     require_once INC_PATH . '/app_content_open.php';
     echo '<div class="alert alert-danger">펌뱅킹 연동 설정은 본사 최고관리자만 볼 수 있습니다.</div>';
