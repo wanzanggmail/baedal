@@ -237,6 +237,7 @@ if (!function_exists('stmt_menu_visible')) {
 										    && (admin_can_access_route('withdrawal/list') || admin_can_access_route('withdrawal/wallet-ledger') || admin_can_access_route('withdrawal/agency-payout'))) : ?>
 										<div data-kt-menu-trigger="click" class="menu-item menu-accordion<?= nav_accordion_show_any([
 										    'withdrawal/list', 'withdrawal/proxy', 'withdrawal/daily-payout', 'withdrawal/agency-payout',
+										    'withdrawal/firm-monitor',
 										    'withdrawal/wallet-ledger', 'withdrawal/download', 'withdrawal/complete',
 										    'promotion', 'promotion/detail', 'promotion/calculator',
 										]) ?>">
@@ -278,6 +279,15 @@ if (!function_exists('stmt_menu_visible')) {
 													<a class="menu-link<?= nav_active('withdrawal/agency-payout') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/agency-payout'), ENT_QUOTES, 'UTF-8') ?>">
 														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
 														<span class="menu-title">자체 인출</span>
+													</a>
+												</div>
+												<?php endif; ?>
+												<?php // 펌뱅킹 이체 내역은 실제 송금 기록이라 본사 최고관리자만 본다(화면도 같은 조건으로 막는다).
+												      if (admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN) : ?>
+												<div class="menu-item">
+													<a class="menu-link<?= nav_active('withdrawal/firm-monitor') ?>" href="<?= htmlspecialchars(admin_url('withdrawal/firm-monitor'), ENT_QUOTES, 'UTF-8') ?>">
+														<span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+														<span class="menu-title">펌뱅킹 이체 내역</span>
 													</a>
 												</div>
 												<?php endif; ?>

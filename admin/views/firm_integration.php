@@ -28,9 +28,7 @@ $isMock       = FirmBankingGatewayFactory::isMock();
 $esc = static fn (?string $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
 require_once INC_PATH . '/FirmTransfer.php';
-require_once INC_PATH . '/FirmWebhook.php';
-$transfers    = $needsMigrate ? [] : FirmTransfer::recent([], 30);
-$events       = $needsMigrate ? [] : FirmWebhook::recent(30);
+// 표(이체 현황·통보 수신)는 「펌뱅킹 이체 내역」 화면으로 옮겼다 — 여기서는 미확정 건수만 쓴다.
 $pendingCount = $needsMigrate ? 0 : FirmTransfer::pendingCount();
 
 // 바움 관리자에 등록할 통보 URL — 화면에서 복사해 쓴다.
@@ -226,66 +224,22 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 	</div>
 </div>
 
-<!--begin::이체 현황-->
+<!--begin::이체 내역 바로가기-->
 <div class="card card-flush shadow-sm mb-6">
-	<div class="card-header pt-5 flex-wrap gap-3">
-		<div class="card-title">
-			<h3 class="fw-bold m-0">이체 현황</h3>
-			<span class="text-gray-500 fs-8 d-block mt-1">
-				접수만 되고 결과가 안 온 건은 <strong>보정 조회</strong>로 직접 확인합니다 —
-				통보는 1분 간격 <strong>최대 10회</strong> 재전송 후 그칩니다.
-			</span>
+	<div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-5">
+		<div>
+			<div class="fw-bold text-gray-900 fs-6">이체 현황 · 처리결과 통보</div>
+			<div class="text-gray-500 fs-8 mt-1">
+				보낸 이체와 받은 통보는 <strong>「펌뱅킹 이체 내역」</strong> 화면에서 탭으로 봅니다.
+				<?php if ($pendingCount > 0) : ?>
+				<span class="badge badge-light-warning fs-8 ms-2">미확정 <?= number_format($pendingCount) ?>건</span>
+				<?php endif; ?>
+			</div>
 		</div>
-		<div class="card-toolbar gap-2 flex-nowrap align-items-center">
-			<?php if ($pendingCount > 0) : ?>
-			<span class="badge badge-light-warning fs-8 text-nowrap">미확정 <?= number_format($pendingCount) ?>건</span>
-			<?php endif; ?>
-			<button type="button" class="btn btn-sm btn-light-primary text-nowrap px-4" id="firm_reconcile">보정 조회</button>
-		</div>
-	</div>
-	<div class="card-body pt-0">
-		<?php if ($transfers === []) : ?>
-		<div class="text-center text-gray-500 py-8 fs-7">아직 접수된 이체가 없습니다.</div>
-		<?php else : ?>
-		<div class="table-responsive">
-			<table class="table table-row-bordered align-middle fs-8 gy-3">
-				<thead>
-					<tr class="fw-bold text-muted">
-						<th class="min-w-140px">접수일시</th>
-						<th class="min-w-90px">상태</th>
-						<th class="min-w-170px">거래 ID</th>
-						<th class="min-w-90px text-end">금액</th>
-						<th class="min-w-110px">수취</th>
-						<th class="min-w-160px">비고</th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php foreach ($transfers as $t) :
-					    $st = (string) $t['status'];
-					    [$stLabel, $stClass] = match ($st) {
-					        'SUCCESS'   => ['성공', 'success'],
-					        'FAILED'    => ['실패', 'danger'],
-					        'CANCELLED' => ['취소', 'danger'],
-					        'RECEPTION' => ['접수됨', 'info'],
-					        default     => [$st, 'warning'],
-					    };
-					    ?>
-					<tr>
-						<td class="text-muted text-nowrap"><?= $esc((string) $t['submitted_at']) ?></td>
-						<td><span class="badge badge-light-<?= $stClass ?>"><?= $esc($stLabel) ?></span></td>
-						<td class="font-monospace text-gray-700"><?= $esc((string) $t['transaction_id']) ?></td>
-						<td class="text-end fw-bold text-gray-800 text-nowrap"><?= number_format((int) $t['amount']) ?>원</td>
-						<td class="font-monospace text-gray-600 text-nowrap"><?= $esc((string) $t['account_masked']) ?></td>
-						<td class="text-gray-600"><?= $esc((string) $t['fail_reason']) ?: '—' ?></td>
-					</tr>
-					<?php endforeach; ?>
-				</tbody>
-			</table>
-		</div>
-		<?php endif; ?>
+		<a href="<?= $esc(admin_url('withdrawal/firm-monitor')) ?>" class="btn btn-sm btn-light-primary fw-bold text-nowrap">이체 내역 보기</a>
 	</div>
 </div>
-<!--end::이체 현황-->
+<!--end::이체 내역 바로가기-->
 
 <!--begin::통보 URL 등록-->
 <div class="card card-flush shadow-sm mb-6">
@@ -313,60 +267,6 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 	</div>
 </div>
 <!--end::통보 URL 등록-->
-<!--begin::통보 수신 이력-->
-<div class="card card-flush shadow-sm mb-6">
-	<div class="card-header pt-5">
-		<div class="card-title">
-			<h3 class="fw-bold m-0">처리결과 통보 수신</h3>
-			<span class="text-gray-500 fs-8 d-block mt-1">
-				등록할 Noti URL: <code><?= $esc($notiUrl) ?></code>
-			</span>
-		</div>
-	</div>
-	<div class="card-body pt-0">
-		<?php if ($events === []) : ?>
-		<div class="text-center text-gray-500 py-8 fs-7">아직 수신한 통보가 없습니다.</div>
-		<?php else : ?>
-		<div class="table-responsive">
-			<table class="table table-row-bordered align-middle fs-8 gy-3">
-				<thead>
-					<tr class="fw-bold text-muted">
-						<th class="min-w-140px">수신일시</th>
-						<th class="min-w-70px">구분</th>
-						<th class="min-w-80px">상태</th>
-						<th class="min-w-160px">거래 ID</th>
-						<th class="min-w-110px">발신 IP</th>
-						<th class="min-w-200px">처리</th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php foreach ($events as $e) : ?>
-					<tr>
-						<td class="text-muted text-nowrap"><?= $esc((string) $e['created_at']) ?></td>
-						<td>
-							<?php if ((string) $e['amount_sign'] === '+') : ?>
-							<span class="badge badge-light-primary">입금</span>
-							<?php else : ?>
-							<span class="badge badge-light-secondary">출금</span>
-							<?php endif; ?>
-						</td>
-						<td class="text-gray-800"><?= $esc((string) $e['transfer_status']) ?></td>
-						<td class="font-monospace text-gray-700"><?= $esc((string) $e['transaction_id']) ?: '—' ?></td>
-						<td class="font-monospace text-gray-600 text-nowrap"><?= $esc((string) $e['source_ip']) ?></td>
-						<td class="text-gray-600">
-							<?php if ((int) $e['matched'] !== 1) : ?><span class="badge badge-light-warning me-1">미매칭</span><?php endif; ?>
-							<?= $esc((string) $e['note']) ?: '—' ?>
-						</td>
-					</tr>
-					<?php endforeach; ?>
-				</tbody>
-			</table>
-		</div>
-		<?php endif; ?>
-	</div>
-</div>
-<!--end::통보 수신 이력-->
-
 <!--begin::예금주 조회-->
 <div class="card card-flush shadow-sm">
 	<div class="card-header pt-5">
