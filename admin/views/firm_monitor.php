@@ -43,7 +43,7 @@ $pendingCount = $needsMigrate ? 0 : FirmTransfer::pendingCount();
 $orphans      = $needsMigrate ? [] : FirmTransfer::orphanTransferring(10);
 
 $esc     = static fn (?string $s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-$selfUrl = admin_url('withdrawal/firm-monitor');
+$selfUrl = admin_url('system/firm-monitor');
 $qs      = static fn (array $over): string => $selfUrl
     . (str_contains($selfUrl, '?') ? '&' : '?')
     . http_build_query(array_merge(['tab' => $tab, 'only' => $only, 'q' => $q], $over));
@@ -58,7 +58,7 @@ $qs      = static fn (array $over): string => $selfUrl
 					<a href="<?= $esc(admin_url('dashboard')) ?>" class="text-muted text-hover-primary">홈</a>
 				</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
-				<li class="breadcrumb-item text-muted">지급·출금</li>
+				<li class="breadcrumb-item text-muted">시스템 관리</li>
 				<li class="breadcrumb-item"><span class="bullet bg-gray-500 w-5px h-2px"></span></li>
 				<li class="breadcrumb-item text-gray-900">펌뱅킹 이체 내역</li>
 			</ul>
@@ -128,7 +128,7 @@ $qs      = static fn (array $over): string => $selfUrl
 		<div class="card-body pt-0">
 			<form method="get" action="<?= $esc($selfUrl) ?>" class="row g-3 align-items-end mb-5">
 				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL) : ?>
-				<input type="hidden" name="route" value="withdrawal/firm-monitor" />
+				<input type="hidden" name="route" value="system/firm-monitor" />
 				<?php endif; ?>
 				<input type="hidden" name="tab" value="transfers" />
 				<div class="col-6 col-md-3">

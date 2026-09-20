@@ -236,7 +236,7 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 				<?php endif; ?>
 			</div>
 		</div>
-		<a href="<?= $esc(admin_url('withdrawal/firm-monitor')) ?>" class="btn btn-sm btn-light-primary fw-bold text-nowrap">이체 내역 보기</a>
+		<a href="<?= $esc(admin_url('system/firm-monitor')) ?>" class="btn btn-sm btn-light-primary fw-bold text-nowrap">이체 내역 보기</a>
 	</div>
 </div>
 <!--end::이체 내역 바로가기-->
