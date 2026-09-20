@@ -163,11 +163,14 @@ function admin_can_access_route(string $route): bool
             && in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DEVELOPER], true);
     }
 
-    // 펌뱅킹(`system/firm-*`) — **본사 최고관리자만**(2026-09-20 갑). 실제 송금 통로이고
-    // 이체 내역에는 수취 계좌·금액이 다 들어 있다. ⚠️ super 단축경로보다 **먼저** 판정한다 —
-    // 대리점·총판 대표계정도 역할이 super 일 수 있어 뒤에 두면 그대로 통과한다(콘텐츠와 같은 이유).
+    // 펌뱅킹(`system/firm-*`) — **최고관리자(본사·개발사)만**(2026-09-20 갑).
+    // 갑 정책: *"최고 관리자 권한은 본사 최고관리자랑 dev 계정만 준다"* — 그래서 super 는
+    // 이 둘뿐이고, 개발사는 장애 대응을 위해 같이 본다(콘텐츠 권한과 같은 범위).
+    // ⚠️ super 단축경로보다 **먼저** 판정한다 — 정책이 어겨져 대리점 계정에 super 가 붙더라도
+    //    (조직 레벨이 다르므로) 여기서 막힌다. 뒤에 두면 그대로 통과한다.
     if (str_starts_with($route, 'system/firm-')) {
-        return admin_has_role('super') && admin_org_level() === Org::LEVEL_ADMIN;
+        return admin_has_role('super')
+            && in_array(admin_org_level(), [Org::LEVEL_ADMIN, Org::LEVEL_DEVELOPER], true);
     }
 
     if ($user['role'] === 'super') {
