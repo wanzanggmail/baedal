@@ -182,7 +182,9 @@ final class FirmWebhook
         }
 
         // 라이더 출금과 대리점 자체 인출은 **같은 테이블·같은 확정 함수**를 쓴다.
-        if ($kind === FirmTransfer::KIND_WITHDRAWAL || $kind === FirmTransfer::KIND_AGENCY_PAYOUT) {
+        if ($kind === FirmTransfer::KIND_WITHDRAWAL
+            || $kind === FirmTransfer::KIND_AGENCY_PAYOUT
+            || $kind === FirmTransfer::KIND_DAILY_PAYOUT) {
             require_once __DIR__ . '/Withdrawal.php';
 
             if ($status === BaumFirmGateway::ST_SUCCESS) {

@@ -690,9 +690,11 @@ final class Withdrawal
                 'transaction_id' => $txId,
                 'reception_id'   => $receptionId,
                 // 원본이 무엇인지 남겨야 웹훅·보정 조회가 알맞게 처리한다.
-                'kind'           => (string) ($q['row']['kind'] ?? '') === 'agency_payout'
-                    ? FirmTransfer::KIND_AGENCY_PAYOUT
-                    : FirmTransfer::KIND_WITHDRAWAL,
+                'kind'           => match ((string) ($q['row']['kind'] ?? '')) {
+                    'agency_payout' => FirmTransfer::KIND_AGENCY_PAYOUT,
+                    'auto_daily'    => FirmTransfer::KIND_DAILY_PAYOUT,
+                    default         => FirmTransfer::KIND_WITHDRAWAL,
+                },
                 'ref_id'         => $id,
                 'agency_id'      => (int) $q['agency_id'],
                 'rider_id'       => (int) ($q['row']['rider_id'] ?? 0),
@@ -845,7 +847,8 @@ final class Withdrawal
     public static function finalizeSuccess(int $id, string $note): bool
     {
         $row = db_row(
-            'SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.withhold_other, wr.withhold_transfer_fee, wr.settle_fee_payer, wr.transfer_fee_payer, r.rider_code
+            'SELECT wr.id, wr.rider_id, wr.agency_id, wr.kind, wr.amount, wr.gross_amount, wr.withhold_other, wr.withhold_transfer_fee,
+                    wr.settle_fee_payer, wr.transfer_fee_payer, wr.fee_short_orders, wr.fee_long_orders, r.rider_code
                FROM withdrawal_requests wr
                LEFT JOIN riders r ON r.id = wr.rider_id
               WHERE wr.id = ? LIMIT 1',
@@ -904,6 +907,32 @@ final class Withdrawal
                     (int) $row['rider_id'],
                     (int) ($row['withhold_transfer_fee'] ?? 0)
                 );
+            } elseif ((string) ($row['kind'] ?? '') === 'auto_daily') {
+                // 일일지급(선정산)·탈퇴 정리 지급 — 예전에는 모의 오픈뱅킹으로 보내고 즉시 완료
+                // 처리했다(돈이 안 나가는데 완료로 찍혔다). 이제 여기서, **이체가 확정된 뒤에** 옮긴다.
+                // 라이더 지갑은 «접수 시점의 잔액»(gross_amount)만큼만 뺀다 — 그 사이 새로 쌓인
+                // 정산분까지 0 으로 밀어버리면 안 된다.
+                $gross = (int) ($row['gross_amount'] ?? 0) > 0
+                    ? (int) $row['gross_amount']
+                    : (int) ($row['amount'] ?? 0);
+                // 같은 일을 하는 함수가 이미 있다 — 잔액이 모자라도 음수가 되지 않게 막아 준다.
+                RiderWallet::deductAfterWithdrawal((int) $row['rider_id'], $gross);
+                if ($agencyId > 0) {
+                    AgencyWallet::debit(
+                        $agencyId,
+                        (int) ($row['amount'] ?? 0),
+                        'rider_payout',
+                        $id,
+                        trim((string) ($row['rider_code'] ?? '')) . ' 일일정산 지급',
+                        null
+                    );
+                }
+                // 수수료 배분 — 일일지급은 사이클 점유 기록을 만들지 않으므로 접수 때 계산해 둔
+                // 구간 건수를 그대로 쓴다(없으면 기존처럼 재구성 시도).
+                $short = $row['fee_short_orders'] !== null ? (int) $row['fee_short_orders'] : null;
+                $long  = $row['fee_long_orders'] !== null ? (int) $row['fee_long_orders'] : null;
+                WithdrawalFeeShare::distribute($id, (int) $row['rider_id'], (int) ($row['withhold_other'] ?? 0), null, $short, $long);
+                WithdrawalFeeShare::chargeTransferFee($id, (int) $row['rider_id'], (int) ($row['withhold_transfer_fee'] ?? 0));
             } elseif ((string) ($row['kind'] ?? '') === 'agency_payout' && $agencyId > 0) {
                 // 대리점 자체 인출 — **이체가 확정된 지금** 지갑에서 뺀다(2026-09-20).
                 // 예전에는 신청 즉시 차감하고 완료로 찍었는데, 모의 게이트웨이라 실제로는

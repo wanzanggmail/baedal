@@ -241,6 +241,16 @@ final class BaumFirmGateway implements FirmBankingGateway
 
         $errCode = (string) ($data['errorCode'] ?? '');
         $errMsgR = (string) ($data['errorMessage'] ?? '');
+        // 접수 거절은 최상위가 아니라 `errorData[]` 안에 사유가 담겨 온다. 그대로 두면
+        // 로그에 «응답 해석 실패» 라고만 남아 원인을 못 찾는다(2026-09-20 실제로 헤맸다).
+        if ($errMsgR === '' && is_array($data['errorData'] ?? null) && $data['errorData'] !== []) {
+            $first   = (array) reset($data['errorData']);
+            $errCode = $errCode !== '' ? $errCode : (string) ($first['errorCode'] ?? '');
+            $errMsgR = (string) ($first['errorMessage'] ?? '');
+            if (count($data['errorData']) > 1) {
+                $errMsgR .= ' 외 ' . (count($data['errorData']) - 1) . '건';
+            }
+        }
         $ok      = $errNo === 0 && $http >= 200 && $http < 300 && ($data['success'] ?? false) === true;
 
         FirmApiLog::record(

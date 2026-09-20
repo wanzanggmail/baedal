@@ -21,7 +21,15 @@ require_once __DIR__ . '/Org.php';                 // 수수료 부담 주체(20
  *   2) 대리점 잔액 ≥ 지급액 확인(PG 충전 선행 필요)
  *   3) withdrawal_requests(kind=auto_daily, completed) 기록 + 대리점 잔액 차감(원장) + 라이더 지갑 0
  *
- * 실제 오픈뱅킹 이체 연동은 Phase F. 현재는 원클릭=실행(completed)으로 기록한다.
+ * ⚠️ **2026-09-20 — 펌뱅킹으로 이관.** 예전에는 모의(mock) 오픈뱅킹으로 보내고 그 자리에서
+ *    `completed` 로 찍었다. 실제로는 **돈이 나가지 않는데 지급 완료로 기록**됐다.
+ *    지금은 라이더 출금·대리점 인출과 **같은 경로**를 탄다:
+ *
+ *      원클릭 → executeTransfers(접수) → status=transferring → 웹훅 SUCCESS
+ *             → completed + 라이더 지갑 차감 + 대리점 지갑 차감 + 수수료 배분
+ *
+ *    즉 **지갑은 이체가 확정될 때 움직인다.** 확정 전에는 지급 대상 목록에서 빠지고
+ *    (`listPayable`), 같은 라이더를 또 지급하려 하면 막는다.
  */
 final class DailyPayout
 {
@@ -36,7 +44,14 @@ final class DailyPayout
             return ['rows' => [], 'agency_wallets' => []];
         }
 
-        $where  = ['r.is_daily_settlement = 1', "r.status = 'active'", 'w.balance > 0'];
+        // 이미 이체를 접수해 둔 라이더는 목록에서 뺀다 — 확정 전에 또 누르면 두 번 나간다.
+        $where  = [
+            'r.is_daily_settlement = 1',
+            "r.status = 'active'",
+            'w.balance > 0',
+            "NOT EXISTS (SELECT 1 FROM withdrawal_requests wr
+                          WHERE wr.rider_id = r.id AND wr.kind = 'auto_daily' AND wr.status = 'transferring')",
+        ];
         $params = [];
 
         if ($agencyId !== null && $agencyId > 0) {
@@ -145,6 +160,18 @@ final class DailyPayout
             throw new InvalidArgumentException($rider['name'] . ': 출금 계좌가 없습니다.');
         }
 
+        // 확정을 기다리는 지급이 있으면 또 보내지 않는다(중복 지급 방지).
+        $inflight = db_row(
+            "SELECT id FROM withdrawal_requests
+              WHERE rider_id = ? AND kind = 'auto_daily' AND status = 'transferring' LIMIT 1",
+            [$riderId]
+        );
+        if ($inflight !== null) {
+            throw new InvalidArgumentException(
+                $rider['name'] . ': 이미 이체 접수된 지급(#' . (int) $inflight['id'] . ')이 결과를 기다리는 중입니다.'
+            );
+        }
+
         RiderWallet::ensure($riderId);
         $balance = (int) (db_row('SELECT balance FROM rider_wallets WHERE rider_id = ? LIMIT 1', [$riderId])['balance'] ?? 0);
         if ($balance <= 0) {
@@ -193,70 +220,53 @@ final class DailyPayout
             ));
         }
 
-        // 오픈뱅킹 이체(현재 mock). 성공 시에만 잔액 이동·완료 처리.
-        require_once __DIR__ . '/Disbursement.php';
-        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], Crypto::decrypt((string) $rider['bank_account']), $amount);
+        // 신청을 남기고 **펌뱅킹으로 접수**한다(2026-09-20). 지갑 이동은 이체가 확정될 때
+        // `Withdrawal::finalizeSuccess()` 가 한다 — 라이더 출금·대리점 인출과 같은 경로다.
+        // 접수 때 계산한 수수료 구간 건수는 행에 남긴다(확정 시점에 배분에 쓴다).
+        $reqId = db_insert(
+            "INSERT INTO withdrawal_requests
+                (rider_id, agency_id, kind, amount, gross_amount, withhold_other, withhold_transfer_fee,
+                 settle_fee_payer, transfer_fee_payer, fee_short_orders, fee_long_orders,
+                 bank_code, bank_account, account_holder,
+                 status, note, requested_at)
+             VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW())",
+            [
+                $riderId,
+                $agencyId,
+                $amount,
+                $balance,
+                $fee,
+                $transferFee,
+                $settlePayer,
+                $transPayer,
+                $shortOrders,
+                $longOrders,
+                (string) $rider['bank_code'],
+                (string) $rider['bank_account'],
+                (string) ($rider['account_holder'] ?: $rider['name']),
+                sprintf(
+                    '일일정산 지급(원클릭) · 정산수수료 %s원(배달 %d건)%s',
+                    number_format($fee),
+                    $orderCount,
+                    $transferFee > 0 ? ' · 이체수수료 ' . number_format($transferFee) . '원' : ''
+                ),
+            ]
+        );
 
-        if (!$res->success) {
-            // 실패 이력 기록(잔액 이동 없음) — 다른 라이더 지급은 계속 진행
-            db_insert(
-                "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount, withhold_other, withhold_transfer_fee,
-                     bank_code, bank_account, account_holder,
-                     status, fail_reason, note, requested_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, ?, 'failed', ?, ?, NOW())",
-                [
-                    $riderId, $agencyId, $amount, $balance, $fee, $transferFee,
-                    (string) $rider['bank_code'], (string) $rider['bank_account'],
-                    (string) ($rider['account_holder'] ?: $rider['name']),
-                    mb_substr($res->failReason, 0, 300), '일일정산 지급 실패',
-                ]
-            );
-            throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
+        require_once __DIR__ . '/Withdrawal.php';
+        $res = Withdrawal::executeTransfers([$reqId]);
+        if ((int) $res['completed'] < 1 && (int) $res['accepted'] < 1) {
+            $msg = '';
+            foreach ($res['results'] as $r) {
+                if ((int) $r['id'] === $reqId) {
+                    $msg = (string) $r['message'];
+                }
+            }
+
+            throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . ($msg !== '' ? $msg : '접수 거절'));
         }
 
-        db_transaction(static function () use ($riderId, $agencyId, $amount, $balance, $fee, $transferFee, $settlePayer, $transPayer, $orderCount, $shortOrders, $longOrders, $rider, $adminId, $res): void {
-            $reqId = db_insert(
-                "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount, withhold_other, withhold_transfer_fee,
-                     settle_fee_payer, transfer_fee_payer,
-                     bank_code, bank_account, account_holder,
-                     status, note, requested_at, completed_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
-                [
-                    $riderId,
-                    $agencyId,
-                    $amount,
-                    $balance,
-                    $fee,
-                    $transferFee,
-                    $settlePayer,
-                    $transPayer,
-                    (string) $rider['bank_code'],
-                    (string) $rider['bank_account'],
-                    (string) ($rider['account_holder'] ?: $rider['name']),
-                    sprintf(
-                        '일일정산 지급(원클릭) · 정산수수료 %s원(배달 %d건)%s · %s',
-                        number_format($fee),
-                        $orderCount,
-                        $transferFee > 0 ? ' · 이체수수료 ' . number_format($transferFee) . '원' : '',
-                        $res->txId
-                    ),
-                ]
-            );
-
-            AgencyWallet::debit($agencyId, $amount, 'rider_payout', $reqId, (string) $rider['name'] . ' 일일정산 지급', $adminId);
-
-            // 수수료를 본사·총판·대리점 몫으로 배분(대리점 몫은 이미 지갑에 있어 이동 없음).
-            // 사이클 점유 기록을 만들지 않는 경로라 구간별 배달 건수를 직접 넘긴다.
-            WithdrawalFeeShare::distribute($reqId, $riderId, $fee, $adminId, $shortOrders, $longOrders);
-            // 이체 수수료를 본사로 이동(2026-09-01 갑 지시).
-            WithdrawalFeeShare::chargeTransferFee($reqId, $riderId, $transferFee, $adminId);
-
-            db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
-        });
-
-        return ['rider_id' => $riderId, 'amount' => $amount, 'fee' => $fee, 'tx_id' => $res->txId];
+        return ['rider_id' => $riderId, 'amount' => $amount, 'fee' => $fee, 'tx_id' => (string) $reqId];
     }
 
     /**
@@ -319,53 +329,61 @@ final class DailyPayout
             }
         }
 
-        require_once __DIR__ . '/Disbursement.php';
-        $res = Disbursement::transfer($agencyId, (string) $rider['bank_code'], Crypto::decrypt((string) $rider['bank_account']), $balance);
-
-        if (!$res->success) {
-            db_insert(
-                "INSERT INTO withdrawal_requests
-                    (rider_id, agency_id, kind, amount, gross_amount,
-                     bank_code, bank_account, account_holder,
-                     status, fail_reason, note, requested_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'failed', ?, ?, NOW())",
-                [
-                    $riderId, $agencyId > 0 ? $agencyId : null, $balance, $balance,
-                    (string) $rider['bank_code'], (string) $rider['bank_account'],
-                    (string) ($rider['account_holder'] ?: $rider['name']),
-                    mb_substr($res->failReason, 0, 300), '탈퇴/정지 잔여 지급 실패',
-                ]
-            );
-            throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . $res->failReason);
-        }
-
-        db_transaction(static function () use ($riderId, $agencyId, $balance, $rider, $res, $adminId): void {
+        // 잔액이 0 이면 보낼 돈이 없다 — 이체 없이 종결 기록만 남긴다(구 동작과 동일).
+        if ($balance <= 0) {
             $reqId = db_insert(
                 "INSERT INTO withdrawal_requests
                     (rider_id, agency_id, kind, amount, gross_amount,
                      bank_code, bank_account, account_holder,
                      status, note, requested_at, completed_at)
-                 VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'completed', ?, NOW(), NOW())",
+                 VALUES (?, ?, 'auto_daily', 0, 0, ?, ?, ?, 'completed', ?, NOW(), NOW())",
                 [
                     $riderId,
                     $agencyId > 0 ? $agencyId : null,
-                    $balance,
-                    $balance,
                     (string) $rider['bank_code'],
                     (string) $rider['bank_account'],
                     (string) ($rider['account_holder'] ?: $rider['name']),
-                    ($balance > 0 ? '탈퇴/정지 잔여 지급 종결 · ' : '탈퇴/정지 종결(잔액 0) · ') . $res->txId,
+                    '탈퇴/정지 종결(잔액 0)',
                 ]
             );
+            db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
 
-            if ($balance > 0 && $agencyId > 0) {
-                AgencyWallet::debit($agencyId, $balance, 'rider_payout', $reqId, (string) $rider['name'] . ' 탈퇴 잔여 지급', $adminId);
+            return ['rider_id' => $riderId, 'paid' => 0, 'tx_id' => (string) $reqId];
+        }
+
+        // 지급할 잔액이 있으면 **펌뱅킹으로 접수**하고, 지갑 이동은 확정될 때 한다(2026-09-20).
+        $reqId = db_insert(
+            "INSERT INTO withdrawal_requests
+                (rider_id, agency_id, kind, amount, gross_amount,
+                 bank_code, bank_account, account_holder,
+                 status, note, requested_at)
+             VALUES (?, ?, 'auto_daily', ?, ?, ?, ?, ?, 'pending', ?, NOW())",
+            [
+                $riderId,
+                $agencyId > 0 ? $agencyId : null,
+                $balance,
+                $balance,
+                (string) $rider['bank_code'],
+                (string) $rider['bank_account'],
+                (string) ($rider['account_holder'] ?: $rider['name']),
+                '탈퇴/정지 잔여 지급 종결',
+            ]
+        );
+
+        require_once __DIR__ . '/Withdrawal.php';
+        $res = Withdrawal::executeTransfers([$reqId]);
+        if ((int) $res['completed'] < 1 && (int) $res['accepted'] < 1) {
+            $msg = '';
+            foreach ($res['results'] as $r) {
+                if ((int) $r['id'] === $reqId) {
+                    $msg = (string) $r['message'];
+                }
             }
 
-            db_execute('UPDATE rider_wallets SET balance = 0, accrued_days = 0, updated_at = NOW() WHERE rider_id = ?', [$riderId]);
-        });
+            throw new RuntimeException($rider['name'] . ': 이체 실패 — ' . ($msg !== '' ? $msg : '접수 거절'));
+        }
 
-        return ['rider_id' => $riderId, 'paid' => $balance, 'tx_id' => $res->txId];
+        return ['rider_id' => $riderId, 'paid' => $balance, 'tx_id' => (string) $reqId];
     }
 
     /** @deprecated 2026-07-24 — closeOut()으로 대체(상각 → 실지급). 호출 호환용 별칭. */

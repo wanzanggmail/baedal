@@ -132,7 +132,7 @@ final class FirmReconciler
     private static function apply(array $tr, string $status, string $reason): string
     {
         $kind = (string) $tr['kind'];
-        if ($kind !== FirmTransfer::KIND_WITHDRAWAL && $kind !== FirmTransfer::KIND_AGENCY_PAYOUT) {
+        if (!in_array($kind, [FirmTransfer::KIND_WITHDRAWAL, FirmTransfer::KIND_AGENCY_PAYOUT, FirmTransfer::KIND_DAILY_PAYOUT], true)) {
             return ' · ' . $kind . ' 후속 처리 미구현';
         }
 
