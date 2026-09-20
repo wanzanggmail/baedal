@@ -199,10 +199,15 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 			</div>
 			<div class="col-md-6">
 				<label class="form-label fw-bold d-block">현재 상태</label>
+				<?php if (empty($cfg['has_block_window'])) : ?>
+				<span class="badge badge-light-warning fs-7">DB 마이그레이션 필요</span>
+				<div class="form-text">배포 화면에서 <strong>DB 마이그레이션</strong>을 실행해야 이 값이 저장됩니다. 그때까지는 기본값(23:30~00:30)으로 동작합니다.</div>
+				<?php else : ?>
 				<?php if (!empty($cfg['blocked_now'])) : ?>
 				<span class="badge badge-light-danger fs-7">지금은 이체 제한 시간</span>
 				<?php else : ?>
 				<span class="badge badge-light-success fs-7">지금은 이체 가능</span>
+				<?php endif; ?>
 				<?php endif; ?>
 				<div class="form-text">
 					은행 점검 시간대에 보내면 바움이 <code>TRANSFER_RESTRICTED_TIME</code> 으로 거절하고,

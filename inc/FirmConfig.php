@@ -66,6 +66,31 @@ final class FirmConfig
         return db_table_exists('firm_config');
     }
 
+    /**
+     * 이체 제한 시간 컬럼이 이미 있는가 (2026-09-19 추가분).
+     *
+     * 코드는 배포됐는데 **마이그레이션을 아직 안 돌린** 서버가 있다. 그 상태에서 저장하면
+     * `Unknown column 'block_from'` 로 설정 화면 전체가 막힌다 — 다른 값(자격증명·허용 IP)도
+     * 못 고치게 되므로, 컬럼이 없으면 그 두 개만 빼고 저장한다.
+     */
+    public static function hasBlockWindow(): bool
+    {
+        static $has = null;
+        if ($has !== null) {
+            return $has;
+        }
+        $has = false;
+        try {
+            if (self::tableExists()) {
+                $has = in_array('block_from', array_column(db_rows('SHOW COLUMNS FROM firm_config'), 'Field'), true);
+            }
+        } catch (Throwable) {
+            $has = false;
+        }
+
+        return $has;
+    }
+
     /** @return array<string,mixed> */
     public static function get(): array
     {
@@ -192,6 +217,7 @@ final class FirmConfig
             'block_from'        => (string) ($c['block_from'] ?? ''),
             'block_to'          => (string) ($c['block_to'] ?? ''),
             'blocked_now'       => self::blockedNow(),
+            'has_block_window'  => self::hasBlockWindow(),
             'has_secret_key'    => trim((string) $c['secret_key']) !== '',
             'has_enc'           => BaumCrypto::usable((string) $c['enc_key'], (string) $c['enc_iv']),
             'is_ready'          => self::isReady(),
@@ -297,31 +323,38 @@ final class FirmConfig
             }
         }
 
+        $params = [
+            $driver,
+            $env,
+            $clientId,
+            Crypto::encrypt($secret),
+            Crypto::encrypt($encKey),
+            Crypto::encrypt($encIv),
+            trim((string) ($data['pocket_code'] ?? $prev['pocket_code'])),
+            // 허용 IP는 비밀값이 아니라 **빈 값도 의미가 있다**(검사 끄기) → keep 하지 않는다.
+            array_key_exists('noti_allow_ips', $data)
+                ? trim((string) $data['noti_allow_ips'])
+                : (string) $prev['noti_allow_ips'],
+        ];
+
+        // 마이그레이션 전 서버에는 제한 시간 컬럼이 없다 — 그 두 개만 빼고 저장한다.
+        $blockSql = '';
+        if (self::hasBlockWindow()) {
+            $blockSql = 'block_from = ?, block_to = ?, ';
+            $params[] = $hhmm('block_from');
+            $params[] = $hhmm('block_to');
+        }
+        $params[] = ($adminId !== null && $adminId > 0) ? $adminId : null;
+
         // 자격증명은 **그 환경의 칸에만** 쓴다 — 다른 환경 값은 건드리지 않는다.
         db_execute(
             "UPDATE firm_config
                 SET driver = ?, env = ?,
                     `{$env}_client_id` = ?, `{$env}_secret_key` = ?,
                     `{$env}_enc_key` = ?, `{$env}_enc_iv` = ?, `{$env}_pocket_code` = ?,
-                    noti_allow_ips = ?, block_from = ?, block_to = ?, updated_by = ?, updated_at = NOW()
+                    noti_allow_ips = ?, {$blockSql}updated_by = ?, updated_at = NOW()
               WHERE id = 1",
-            [
-                $driver,
-                $env,
-                $clientId,
-                Crypto::encrypt($secret),
-                Crypto::encrypt($encKey),
-                Crypto::encrypt($encIv),
-                trim((string) ($data['pocket_code'] ?? $prev['pocket_code'])),
-                // 허용 IP는 비밀값이 아니라 **빈 값도 의미가 있다**(검사 끄기) → keep 하지 않는다.
-                array_key_exists('noti_allow_ips', $data)
-                    ? trim((string) $data['noti_allow_ips'])
-                    : (string) $prev['noti_allow_ips'],
-                // 제한 시간도 «빈 값 = 제한 없음» 이라 keep 하지 않는다.
-                $hhmm('block_from'),
-                $hhmm('block_to'),
-                ($adminId !== null && $adminId > 0) ? $adminId : null,
-            ]
+            $params
         );
     }
 
