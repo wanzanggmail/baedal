@@ -452,6 +452,112 @@ final class BaumFirmGateway implements FirmBankingGateway
         ];
     }
 
+    // ────────────────────────── 통보(웹훅) URL 관리 ──────────────────────────
+    //
+    // 매뉴얼 「통보 URL 등록/조회/수정/삭제」 — 모두 `/api/firm/webhook` 한 경로에
+    // Method 만 다르다. **통보는 여기에 등록해야만 온다** — 등록을 안 하면 접수는 되는데
+    // 결과가 영영 안 와서 출금이 「접수중」에 갇힌다(2026-09-20 실서버에서 실제로 겪었다).
+
+    /**
+     * 등록된 통보 URL 목록.
+     *
+     * @return array{ok:bool, urls:list<array<string,mixed>>, message:string}
+     */
+    public function webhookList(): array
+    {
+        $res  = $this->call('GET', FirmConfig::EP_WEBHOOK, null, '통보 URL 조회');
+        $urls = [];
+        foreach ((array) ($res['data']['data'] ?? []) as $u) {
+            if (is_array($u)) {
+                $urls[] = $u;
+            }
+        }
+
+        return ['ok' => (bool) $res['ok'], 'urls' => $urls, 'message' => (string) $res['error_message']];
+    }
+
+    /**
+     * 통보 URL 등록.
+     *
+     * `pocketCode` 를 넣으면 **그 포켓의 입·출금만** 통보한다. 비우면 소유한 모든 포켓이
+     * 대상이라 놓치는 게 없다 — 기본은 비움이다(우리는 포켓이 하나뿐이고, 빠뜨리는 쪽이 더 나쁘다).
+     *
+     * @return array{ok:bool, data:array<string,mixed>, message:string, code:string}
+     */
+    public function webhookRegister(
+        string $url,
+        string $pocketCode = '',
+        int $sendDelay = 1,
+        int $sendMax = 10,
+        int $readTimeout = 60,
+        bool $useUrl = true
+    ): array {
+        $body = [
+            'url'         => trim($url),
+            'sendDelay'   => max(1, $sendDelay),
+            'sendMax'     => max(1, $sendMax),
+            'readTimeout' => max(1, $readTimeout),
+            'useUrl'      => $useUrl,
+        ];
+        if (trim($pocketCode) !== '') {
+            $body['pocketCode'] = trim($pocketCode);
+        }
+        $res = $this->call('POST', FirmConfig::EP_WEBHOOK, $body, '통보 URL 등록');
+
+        return [
+            'ok'      => (bool) $res['ok'],
+            'data'    => (array) ($res['data']['data'] ?? []),
+            'message' => (string) $res['error_message'],
+            'code'    => (string) $res['error_code'],
+        ];
+    }
+
+    /**
+     * 통보 URL 수정 — 주소를 바꾸거나 사용 여부를 끄고 켠다.
+     *
+     * @return array{ok:bool, data:array<string,mixed>, message:string, code:string}
+     */
+    public function webhookUpdate(string $asisUrl, string $tobeUrl, int $sendDelay = 1, int $sendMax = 10, int $readTimeout = 60, bool $useUrl = true): array
+    {
+        $res = $this->call('PUT', FirmConfig::EP_WEBHOOK, [
+            'asisUrl'     => trim($asisUrl),
+            'tobeWebhook' => [
+                'url'         => trim($tobeUrl),
+                'sendDelay'   => max(1, $sendDelay),
+                'sendMax'     => max(1, $sendMax),
+                'readTimeout' => max(1, $readTimeout),
+                'useUrl'      => $useUrl,
+            ],
+        ], '통보 URL 수정');
+
+        return [
+            'ok'      => (bool) $res['ok'],
+            'data'    => (array) ($res['data']['data'] ?? []),
+            'message' => (string) $res['error_message'],
+            'code'    => (string) $res['error_code'],
+        ];
+    }
+
+    /**
+     * 통보 URL 삭제.
+     *
+     * @return array{ok:bool, message:string, code:string}
+     */
+    public function webhookDelete(string $url, string $pocketCode = ''): array
+    {
+        $body = ['url' => trim($url)];
+        if (trim($pocketCode) !== '') {
+            $body['pocketCode'] = trim($pocketCode);
+        }
+        $res = $this->call('DELETE', FirmConfig::EP_WEBHOOK, $body, '통보 URL 삭제');
+
+        return [
+            'ok'      => (bool) $res['ok'],
+            'message' => (string) $res['error_message'],
+            'code'    => (string) $res['error_code'],
+        ];
+    }
+
     // ─────────────────────────── 인터페이스 구현 ───────────────────────────
 
     /**
