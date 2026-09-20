@@ -127,6 +127,57 @@ try {
         exit;
     }
 
+    // ── 통보(웹훅) URL 관리 ──
+    // 통보는 **바움에 URL 을 등록해야만 온다**. 등록을 안 하면 접수는 되는데 결과가
+    // 영영 안 와서 출금이 「접수중」에 갇힌다(2026-09-20 실서버). 매뉴얼 v1.1.8 §통보 URL.
+    if (in_array($action, ['webhook_list', 'webhook_register', 'webhook_delete'], true)) {
+        if (!FirmConfig::isReady()) {
+            $err('실 연동(바움)을 켜야 통보 URL 을 관리할 수 있습니다. 위에서 자격증명을 저장하고 「실 연동」으로 바꾸세요.', 422);
+        }
+        require_once INC_PATH . '/BaumFirmGateway.php';
+        $gw = new BaumFirmGateway();
+
+        if ($action === 'webhook_list') {
+            $r = $gw->webhookList();
+            echo json_encode([
+                'ok'      => $r['ok'],
+                'urls'    => $r['urls'],
+                'message' => $r['ok'] ? ('등록 ' . count($r['urls']) . '건') : ($r['message'] !== '' ? $r['message'] : '조회 실패'),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $url = trim((string) ($body['url'] ?? ''));
+        if (!preg_match('#^https://#i', $url)) {
+            $err('통보 URL 은 https:// 로 시작해야 합니다.', 422);
+        }
+
+        if ($action === 'webhook_register') {
+            // 포켓코드를 비워 등록한다 — 소유한 모든 포켓의 통보를 받는다(놓치는 쪽이 더 나쁘다).
+            $r = $gw->webhookRegister(
+                $url,
+                '',
+                max(1, min(60, (int) ($body['send_delay'] ?? 1))),
+                max(1, min(20, (int) ($body['send_max'] ?? 10))),
+                max(5, min(120, (int) ($body['read_timeout'] ?? 60)))
+            );
+            AuditLog::record('firm.webhook_register', $url, $r['ok'] ? '통보 URL 등록' : ('등록 실패 · ' . $r['message']));
+            if (!$r['ok']) {
+                $err(($r['message'] !== '' ? $r['message'] : '등록에 실패했습니다.') . ($r['code'] !== '' ? ' (' . $r['code'] . ')' : ''), 422);
+            }
+            echo json_encode(['ok' => true, 'message' => '통보 URL 을 등록했습니다.', 'data' => $r['data']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $r = $gw->webhookDelete($url);
+        AuditLog::record('firm.webhook_delete', $url, $r['ok'] ? '통보 URL 삭제' : ('삭제 실패 · ' . $r['message']));
+        if (!$r['ok']) {
+            $err($r['message'] !== '' ? $r['message'] : '삭제에 실패했습니다.', 422);
+        }
+        echo json_encode(['ok' => true, 'message' => '통보 URL 을 삭제했습니다.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $err('알 수 없는 action 입니다.');
 } catch (InvalidArgumentException $e) {
     $err($e->getMessage(), 422);

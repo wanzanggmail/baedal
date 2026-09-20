@@ -287,6 +287,32 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 </div>
 <!--end::이체 현황-->
 
+<!--begin::통보 URL 등록-->
+<div class="card card-flush shadow-sm mb-6">
+	<div class="card-header pt-5">
+		<div class="card-title">
+			<h3 class="fw-bold m-0">통보 URL 등록</h3>
+			<span class="text-gray-500 fs-8 d-block mt-1">
+				바움에 <strong>이 주소를 등록해야 처리결과 통보가 옵니다.</strong> 등록 전에는 이체가 「접수중」에서 멈춥니다.
+			</span>
+		</div>
+		<div class="card-toolbar">
+			<button type="button" class="btn btn-sm btn-light" id="firm_wh_list">목록 조회</button>
+		</div>
+	</div>
+	<div class="card-body pt-0">
+		<div class="d-flex flex-wrap gap-2 align-items-center mb-4">
+			<input type="text" class="form-control form-control-solid flex-grow-1 min-w-250px" id="firm_wh_url" value="<?= $esc($notiUrl) ?>" />
+			<button type="button" class="btn btn-sm btn-primary text-nowrap" id="firm_wh_register">이 주소 등록</button>
+		</div>
+		<div class="form-text mb-4">
+			재전송 간격 1분 · 최대 10회 · 응답 대기 60초로 등록합니다. 포켓코드는 비워서 <strong>모든 포켓의 통보</strong>를 받습니다.
+			주소가 바뀌면 옛 주소는 삭제하세요 — 등록된 모든 주소로 통보가 갑니다.
+		</div>
+		<div id="firm_wh_result" class="text-gray-800 fs-7"><span class="text-muted">「목록 조회」를 눌러 현재 등록 상태를 확인하세요.</span></div>
+	</div>
+</div>
+<!--end::통보 URL 등록-->
 <!--begin::통보 수신 이력-->
 <div class="card card-flush shadow-sm mb-6">
 	<div class="card-header pt-5">
@@ -439,6 +465,62 @@ $notiUrl = $scheme . '://' . (string) ($_SERVER['HTTP_HOST'] ?? 'localhost') . '
 		});
 	});
 
+	// ── 통보 URL 관리 ──
+	var whBox = document.getElementById('firm_wh_result');
+	function whRender(urls) {
+		if (!urls || !urls.length) {
+			whBox.innerHTML = '<span class="text-danger fw-bold">등록된 통보 URL 이 없습니다 — 통보가 오지 않습니다.</span>';
+			return;
+		}
+		var mine = document.getElementById('firm_wh_url').value.trim();
+		var html = '<div class="fw-bold mb-2">등록된 주소 ' + urls.length + '건</div>';
+		urls.forEach(function (u) {
+			var same = (u.url || '') === mine;
+			html += '<div class="d-flex flex-wrap align-items-center gap-2 mb-2">'
+				+ '<span class="badge badge-light-' + (u.useUrl === false ? 'secondary' : 'success') + '">'
+				+ (u.useUrl === false ? '미사용' : '사용중') + '</span>'
+				+ (same ? '<span class="badge badge-light-primary">이 서버</span>' : '')
+				+ '<code class="text-gray-800">' + esc(u.url || '') + '</code>'
+				+ '<span class="text-muted fs-8">' + (u.sendDelay || '?') + '분 간격 · 최대 ' + (u.sendMax || '?') + '회 · ' + (u.readTimeout || '?') + '초</span>'
+				+ '<button type="button" class="btn btn-sm btn-light-danger py-1 px-2 fs-8 firm-wh-del" data-url="' + esc(u.url || '') + '">삭제</button>'
+				+ '</div>';
+		});
+		whBox.innerHTML = html;
+		whBox.querySelectorAll('.firm-wh-del').forEach(function (b) {
+			b.addEventListener('click', function () {
+				if (!confirm('이 통보 URL 을 삭제할까요?\n삭제하면 그 주소로는 처리결과 통보가 가지 않습니다.\n\n' + b.dataset.url)) { return; }
+				post({ action: 'webhook_delete', url: b.dataset.url }, b, function (j) {
+					showToast(j.message || (j.ok ? '삭제했습니다.' : '삭제 실패'), !!j.ok);
+					post({ action: 'webhook_list' }, b, function (r) { if (r.ok) { whRender(r.urls); } });
+				});
+			});
+		});
+	}
+	function esc(v) {
+		return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+		});
+	}
+	var whListBtn = document.getElementById('firm_wh_list');
+	if (whListBtn) {
+		whListBtn.addEventListener('click', function () {
+			post({ action: 'webhook_list' }, this, function (j) {
+				if (!j.ok) { showToast(j.message || '조회 실패', false); return; }
+				whRender(j.urls);
+			});
+		});
+	}
+	var whRegBtn = document.getElementById('firm_wh_register');
+	if (whRegBtn) {
+		whRegBtn.addEventListener('click', function () {
+			var u = document.getElementById('firm_wh_url').value.trim();
+			if (!confirm('이 주소로 처리결과 통보를 받도록 바움에 등록합니다.\n\n' + u)) { return; }
+			post({ action: 'webhook_register', url: u }, this, function (j) {
+				showToast(j.message || (j.ok ? '등록했습니다.' : '등록 실패'), !!j.ok);
+				post({ action: 'webhook_list' }, whRegBtn, function (r) { if (r.ok) { whRender(r.urls); } });
+			});
+		});
+	}
 	var reconcileBtn = document.getElementById('firm_reconcile');
 	if (reconcileBtn) {
 		reconcileBtn.addEventListener('click', function () {

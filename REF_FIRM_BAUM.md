@@ -225,6 +225,27 @@ Content-Type: text/html
 **⚠️ 남은 공백 — 이체 취소 화면이 없다.** `BaumFirmGateway::cancel()` 은 있지만 부르는 화면·API 가
 없다. 잘못 보낸 걸 알아차려도 접수(RECEPTION) 상태에서 막을 방법이 없다(진행되면 어차피 불가).
 라이브 초기엔 소액으로 시작하고, 필요하면 「접수중」 목록에 취소 버튼을 붙인다.
+### 통보 URL 관리 (2026-09-20 구현) — `/api/firm/webhook`
+
+**통보는 이 API 로 URL 을 등록해야만 온다.** 매뉴얼 v1.1.8 「통보 URL 등록/조회/수정/삭제」.
+등록을 안 하면 접수는 되는데 결과가 영영 안 와서 출금이 「접수중」에 갇힌다(실서버에서 겪었다).
+
+| 기능 | Method | Body |
+|---|---|---|
+| 등록 | POST | `{url, pocketCode?, sendDelay=10, sendMax=10, readTimeout=60, useUrl=true}` |
+| 목록 | GET | (없음) |
+| 수정 | PUT | `{asisUrl, asisPocketCode?, tobeWebhook:{url, sendDelay, sendMax, readTimeout, useUrl}}` |
+| 삭제 | DELETE | `{url, pocketCode?}` |
+
+- `pocketCode` 를 넣으면 **그 포켓의 입·출금만** 통보한다. 우리는 **비워서 등록**한다 —
+  포켓이 하나뿐이고, 통보를 빠뜨리는 쪽이 훨씬 나쁘다.
+- URL 은 **여러 건 등록**할 수 있고 등록된 전부로 통보가 간다. 주소를 바꾸면 **옛 주소는 삭제**한다.
+- 관리자 → 펌뱅킹 연동 화면의 **「통보 URL 등록」 카드**에서 조회·등록·삭제한다
+  (`firm_config.php` 의 `webhook_list` / `webhook_register` / `webhook_delete`). 등록·삭제는 감사 로그에 남는다.
+- 등록값: 재전송 간격 1분 · 최대 10회 · Read Timeout 60초.
+
+⚠️ **개발/운영은 별개다.** 개발 서버에 등록해 둔 URL 은 운영에 적용되지 않는다.
+환경을 바꾸면 그 환경에서 다시 등록해야 한다.
 ### 크론 등록 (필수)
 
 보정 조회가 **관리자가 버튼을 눌러야만** 돌았다. 통보가 유실되면 아무도 안 누르는 동안
