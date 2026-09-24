@@ -42,12 +42,13 @@ echo "이체수수료 부담 주체 진단 — DB: " . DB_NAME . " · " . date('
 foreach ($rows as $w) {
     $wid = (int) $w['id'];
     printf(
-        "\n#%d %s [%s] %s · %s\n  잔액 %s → 지급 %s · 보증금 %s · 정산수수료 %s · 이체수수료 %s\n",
+        "\n#%d %s [%s] %s · %s · 신청 %s\n  잔액 %s → 지급 %s · 보증금 %s · 정산수수료 %s · 이체수수료 %s\n",
         $wid,
         (string) $w['kind'],
         (string) $w['status'],
         (string) ($w['rider_name'] ?? '?'),
         (string) ($w['agency_name'] ?? '?'),
+        substr((string) ($w['requested_at'] ?? ''), 0, 16),
         $n($w['gross_amount']), $n($w['amount']), $n($w['withhold_min_retain']),
         $n($w['withhold_other']), $n($w['withhold_transfer_fee'])
     );
