@@ -287,9 +287,24 @@ $cntReady = $cntAll - $cntBelow;
 			h += '<div><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
 			   + won(p.payout_amount) + '</span>'
 			   + ' <span class="text-muted">· 보증금 ' + won(p.reserve_amount) + ' 잔류</span></div>';
-			h += '<div class="mt-1"><span class="text-gray-600">수수료</span> <span class="text-danger fw-semibold">− '
-			   + won(p.fee) + '</span>'
+			// 라이더 부담분만 «−» 로 찍는다. 대리점이 대신 내는 설정이면 라이더 지급액이
+			// 줄지 않으므로 금액 대신 「대리점 부담」으로 표시한다(라이더 앱과 같은 규칙).
+			var agencyPaysFee = p.settle_fee_payer === 'agency';
+			var agencyPaysTrans = p.transfer_fee_payer === 'agency';
+			var riderFee = (p.rider_fee === undefined) ? p.fee : p.rider_fee;
+			var riderTrans = p.rider_transfer_fee || 0;
+			h += '<div class="mt-1"><span class="text-gray-600">정산수수료</span> '
+			   + (agencyPaysFee
+			       ? '<span class="text-muted">' + won(p.fee) + ' · 대리점 부담</span>'
+			       : '<span class="text-danger fw-semibold">− ' + won(riderFee) + '</span>')
 			   + (feeParts.length ? ' <span class="text-muted">(' + esc(feeParts.join(' + ')) + ')</span>' : '') + '</div>';
+			if (p.transfer_fee > 0) {
+				h += '<div class="mt-1"><span class="text-gray-600">이체수수료</span> '
+				   + (agencyPaysTrans
+				       ? '<span class="text-muted">' + won(p.transfer_fee) + ' · 대리점 부담</span>'
+				       : '<span class="text-danger fw-semibold">− ' + won(riderTrans) + '</span>')
+				   + '</div>';
+			}
 			h += '<div class="mt-1 d-flex align-items-center gap-2 flex-wrap">'
 			   + '<span class="text-gray-600">출금 가능 일자</span>'
 			   + '<span class="fw-semibold text-gray-800">'

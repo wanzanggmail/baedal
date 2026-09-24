@@ -110,6 +110,14 @@ $buildPreview = static function (int $riderId, array $rider, ?string $toDate): a
             'reserve_amount'   => (int) $preview['reserve_amount'],
             'payout_amount'    => (int) $preview['payout_amount'],
             'fee'              => (int) $preview['fee_per_tx'],
+            // 화면이 실지급액을 역산할 수 있게 **라이더가 실제로 부담한 몫**까지 내려준다.
+            // 이걸 안 내려줘서 이체수수료가 화면 어디에도 안 보였다(대리점 원장에만 −330 이
+            // 찍혀 "대리점이 부담했다"로 읽혔다). 라이더 앱 출금 신청 화면과 같은 구성이다.
+            'rider_fee'          => (int) ($preview['rider_fee'] ?? $preview['fee_per_tx']),
+            'transfer_fee'       => (int) ($preview['transfer_fee'] ?? 0),
+            'rider_transfer_fee' => (int) ($preview['rider_transfer_fee'] ?? 0),
+            'settle_fee_payer'   => (string) ($preview['settle_fee_payer'] ?? 'rider'),
+            'transfer_fee_payer' => (string) ($preview['transfer_fee_payer'] ?? 'rider'),
             'consume_amount'   => (int) $preview['consume_amount'],
             'can_apply'        => (bool) $preview['can_apply'],
             'fee_short_orders' => (int) $preview['fee_short_orders'],
