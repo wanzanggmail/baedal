@@ -113,9 +113,11 @@ if (trim((string) ($body['action'] ?? 'save')) !== 'save') {
 
 try {
     $adminId = (int) ($_SESSION['admin_id'] ?? 0);
+    // 저장 전 값 — 감사로그에 «무엇이 얼마에서 얼마로» 를 남긴다.
+    $beforeCfg = WithdrawalConfig::get($cfgOrgId);
     $cfg = WithdrawalConfig::save($body, $cfgOrgId, $adminId > 0 ? $adminId : null);
     $scopeLabel = $targetAgency !== null ? ('대리점 ' . (string) $targetAgency['name'] . '(' . (string) $targetAgency['code'] . ')') : ($isAgency ? '자기 대리점' : '전역 기본');
-    AuditLog::record(
+    AuditLog::recordDiff(
         'withdrawal.config.save',
         'withdrawal_config',
         sprintf(
@@ -135,7 +137,25 @@ try {
             $cfg['dist_fee_long'],
             $cfg['transfer_fee'],
             empty($cfg['auto_transfer_on_request']) ? '끔' : '켬'
-        )
+        ),
+        $beforeCfg,
+        $cfg,
+        [
+            'reserve_amount'           => '보증금',
+            'fee_day_threshold'        => '기준일수',
+            'fee_per_tx_short'         => '기준미만 건당',
+            'fee_per_tx_long'          => '기준이상 건당',
+            'hq_fee_short'             => '본사몫(미만)',
+            'hq_fee_long'              => '본사몫(이상)',
+            'dist_fee_short'           => '총판몫(미만)',
+            'dist_fee_long'            => '총판몫(이상)',
+            'tax_fee_short'            => '세무몫(미만)',
+            'tax_fee_long'             => '세무몫(이상)',
+            'dev_fee_short'            => '개발사몫(미만)',
+            'dev_fee_long'             => '개발사몫(이상)',
+            'transfer_fee'             => '이체수수료',
+            'auto_transfer_on_request' => '신청즉시이체',
+        ]
     );
     echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'config' => $cfg, 'scope' => $scope], JSON_UNESCAPED_UNICODE);
 } catch (InvalidArgumentException $e) {

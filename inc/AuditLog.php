@@ -11,6 +11,7 @@ final class AuditLog
      * @param string $action   내부 코드 (auth.login, content.notice.save …) → DB action 으로 정규화
      * @param string $target   public_id·파일명·코드 등 (표시·after_value 보조)
      * @param string $detail   사람이 읽을 설명
+     * @return int|null 기록한 행 id (기록하지 않았으면 null) — recordDiff() 가 이어서 채운다
      */
     public static function record(
         string $action,
@@ -18,10 +19,10 @@ final class AuditLog
         string $detail = '',
         ?int $adminId = null,
         ?string $actorLoginId = null
-    ): void {
+    ): ?int {
         try {
             if (!self::tableExists()) {
-                return;
+                return null;
             }
 
             $actorType = 'admin';
@@ -46,7 +47,7 @@ final class AuditLog
                     ? $actorLoginId : null,
             ], static fn ($v) => $v !== null && $v !== '');
 
-            self::insert([
+            return self::insert([
                 'actor_type'   => $actorType,
                 'actor_id'     => ($adminId !== null && $adminId > 0) ? $adminId : null,
                 'action'       => self::normalizeAction($action),
@@ -56,7 +57,93 @@ final class AuditLog
                 'after_value'  => $after !== [] ? $after : null,
             ]);
         } catch (Throwable) {
+            return null;
         }
+    }
+
+    /**
+     * **무엇이 어떻게 바뀌었는지**까지 남기는 기록 — 설정 화면처럼 «값이 바뀌는» 동작용.
+     *
+     * 기존 `record()` 는 "조직 수정", "권한 N건 저장" 같은 문장만 남겨서, 나중에 «누가 언제
+     * 이 스위치를 켰나»를 되짚을 수 없었다(이체수수료 부담 주체를 추적 못 한 일, 2026-09-24).
+     * `audit_logs` 에는 before_value/after_value 칸이 원래 있는데 아무도 안 쓰고 있었다.
+     *
+     * 바뀐 필드만 골라 양쪽 값을 JSON 으로 넣고, 사람이 읽을 요약도 상세에 덧붙인다.
+     *
+     * @param array<string,mixed> $before 저장 전 값
+     * @param array<string,mixed> $after  저장 후 값
+     * @param array<string,string> $labels 기록할 필드 => 한글 라벨 (여기 없는 필드는 무시)
+     */
+    public static function recordDiff(
+        string $action,
+        string $target,
+        string $detail,
+        array $before,
+        array $after,
+        array $labels
+    ): void {
+        $diff = self::diff($before, $after, $labels);
+        if ($diff['text'] !== '') {
+            $detail = $detail !== '' ? $detail . ' · ' . $diff['text'] : $diff['text'];
+        }
+
+        // record() 와 같은 모양으로 남기되(상세·대상), 바뀐 값은 before/after 칸에 따로 넣는다.
+        $id = self::record($action, $target, $detail);
+
+        if ($id === null || $diff['fields'] === []) {
+            return;
+        }
+        try {
+            db_execute(
+                'UPDATE audit_logs SET before_value = ?, after_value = ? WHERE id = ?',
+                [
+                    (string) json_encode($diff['before'], JSON_UNESCAPED_UNICODE),
+                    (string) json_encode(['detail' => $detail, 'changes' => $diff['after']], JSON_UNESCAPED_UNICODE),
+                    $id,
+                ]
+            );
+        } catch (Throwable) {
+            // 실패해도 상세 문장은 이미 남아 있다.
+        }
+    }
+
+    /**
+     * 두 값 묶음에서 **바뀐 필드만** 추린다. 값은 문자열로 비교한다(0/"0"/false 가 뒤섞여 있다).
+     *
+     * @param array<string,mixed> $before
+     * @param array<string,mixed> $after
+     * @param array<string,string> $labels
+     * @return array{fields:list<string>, before:array<string,string>, after:array<string,string>, text:string}
+     */
+    public static function diff(array $before, array $after, array $labels): array
+    {
+        $norm = static function (mixed $v): string {
+            if (is_bool($v)) {
+                return $v ? '1' : '0';
+            }
+
+            return is_scalar($v) || $v === null ? (string) $v : (string) json_encode($v, JSON_UNESCAPED_UNICODE);
+        };
+
+        $out = ['fields' => [], 'before' => [], 'after' => [], 'text' => ''];
+        $parts = [];
+        foreach ($labels as $key => $label) {
+            if (!array_key_exists($key, $before) && !array_key_exists($key, $after)) {
+                continue;
+            }
+            $b = $norm($before[$key] ?? null);
+            $a = $norm($after[$key] ?? null);
+            if ($b === $a) {
+                continue;
+            }
+            $out['fields'][]       = $key;
+            $out['before'][$label] = $b;
+            $out['after'][$label]  = $a;
+            $parts[]               = $label . ' ' . ($b === '' ? '(없음)' : $b) . '→' . ($a === '' ? '(없음)' : $a);
+        }
+        $out['text'] = implode(', ', $parts);
+
+        return $out;
     }
 
     /**
@@ -174,12 +261,12 @@ final class AuditLog
     /**
      * @param array<string, mixed> $data
      */
-    private static function insert(array $data): void
+    private static function insert(array $data): int
     {
         $beforeJson = self::jsonOrNull($data['before_value'] ?? null);
         $afterJson  = self::jsonOrNull($data['after_value'] ?? null);
 
-        db_insert(
+        return (int) db_insert(
             'INSERT INTO audit_logs
                 (actor_type, actor_id, action, target_table, target_id, before_value, after_value, ip, user_agent)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

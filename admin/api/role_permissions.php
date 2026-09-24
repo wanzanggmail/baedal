@@ -79,8 +79,36 @@ foreach ($rows as $r) {
     ];
 }
 
+// 권한은 보안 설정이라 「N건 저장」만으로는 나중에 아무것도 못 되짚는다 — 바뀐 칸만 남긴다.
+$flatten = static function (array $grid): array {
+    $out = [];
+    foreach ($grid as $role => $areas) {
+        foreach ($areas as $area => $p) {
+            $out[$role . '.' . $area . '.view']  = !empty($p['view']) ? '허용' : '차단';
+            $out[$role . '.' . $area . '.write'] = !empty($p['write']) ? '허용' : '차단';
+        }
+    }
+
+    return $out;
+};
+$labels = [];
+foreach (RolePermission::ROLES as $role) {
+    foreach (RolePermission::AREAS as $area => $areaLabel) {
+        $labels[$role . '.' . $area . '.view']  = $role . '/' . $areaLabel . ' 조회';
+        $labels[$role . '.' . $area . '.write'] = $role . '/' . $areaLabel . ' 쓰기';
+    }
+}
+
+$beforeGrid = $flatten(RolePermission::all());
 RolePermission::save($parsed);
 
-AuditLog::record('role_permission.save', '', '역할별 권한 ' . count($parsed) . '건 저장');
+AuditLog::recordDiff(
+    'role_permission.save',
+    '',
+    '역할별 권한 ' . count($parsed) . '건 저장',
+    $beforeGrid,
+    $flatten(RolePermission::all()),
+    $labels
+);
 
 echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'grid' => RolePermission::all()], JSON_UNESCAPED_UNICODE);

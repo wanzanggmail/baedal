@@ -92,8 +92,9 @@ if ($action === 'save_rates') {
         $err('공제 요율은 본사만 설정할 수 있습니다.', 403);
     }
     try {
+        $beforeRates = AgencyFeeConfig::rates();
         $r = AgencyFeeConfig::saveRates($body);
-        AuditLog::record(
+        AuditLog::recordDiff(
             'deduction.rates',
             'deduction_global_config',
             sprintf(
@@ -101,7 +102,14 @@ if ($action === 'save_rates') {
                 $r['rates']['withholding_tax_pct'],
                 $r['rates']['employment_ins_pct'],
                 $r['rates']['industrial_accident_ins_pct']
-            )
+            ),
+            $beforeRates,
+            $r['rates'],
+            [
+                'withholding_tax_pct'          => '원천세율',
+                'employment_ins_pct'           => '고용보험율',
+                'industrial_accident_ins_pct'  => '산재보험율',
+            ]
         );
         $msg = '공제 요율이 저장되었습니다.';
         if ($r['synced_orgs'] > 0) {

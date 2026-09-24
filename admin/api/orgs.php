@@ -138,30 +138,26 @@ try {
         // 돈의 흐름을 바꾸는 스위치는 **무엇이 바뀌었는지**까지 남긴다 — 수수료 부담 주체가
         // 언제 누구에 의해 켜졌는지 추적할 수 없어 실제로 원인 파악에 애를 먹었다(2026-09-24).
         // Org::find() 는 몇 개 컬럼만 캐시해 두므로 여기서는 행 전체를 직접 읽는다.
-        $orgRow  = static fn (int $id): array => db_row('SELECT * FROM organizations WHERE id = ? LIMIT 1', [$id]) ?? [];
-        $before  = $orgRow($editId);
-        $row     = Organization::update($editId, $body);
-        $after   = $orgRow($editId);
-        $changed = [];
-        foreach ([
-            'agency_fee_payer'    => '정산수수료 부담',
-            'transfer_fee_payer'  => '이체수수료 부담',
-            'stmt_weekly_enabled' => '주급 명세서',
-            'stmt_daily_alimtalk' => '일정산 알림톡',
-        ] as $k => $label) {
-            if (!array_key_exists($k, $before) || !array_key_exists($k, $after)) {
-                continue;   // 컬럼이 아직 없는 서버
-            }
-            $b = (string) $before[$k];
-            $a = (string) $after[$k];
-            if ($b !== $a) {
-                $changed[] = $label . ' ' . $b . '→' . $a;
-            }
-        }
-        AuditLog::record(
+        $orgRow = static fn (int $id): array => db_row('SELECT * FROM organizations WHERE id = ? LIMIT 1', [$id]) ?? [];
+        $before = $orgRow($editId);
+        $row    = Organization::update($editId, $body);
+        AuditLog::recordDiff(
             'org.update',
             (string) $editId,
-            '조직 수정 · ' . (string) $row['name'] . ($changed !== [] ? ' · ' . implode(', ', $changed) : '')
+            '조직 수정 · ' . (string) $row['name'],
+            $before,
+            $orgRow($editId),
+            [
+                'name'                => '이름',
+                'agency_fee_payer'    => '정산수수료 부담',
+                'transfer_fee_payer'  => '이체수수료 부담',
+                'stmt_weekly_enabled' => '주급 명세서',
+                'stmt_daily_alimtalk' => '일정산 알림톡',
+                'contact_name'        => '담당자',
+                'contact_phone'       => '연락처',
+                'ceo_name'            => '대표자',
+                'biz_reg_no'          => '사업자번호',
+            ]
         );
         echo json_encode(['ok' => true, 'message' => '저장되었습니다.', 'row' => $row], JSON_UNESCAPED_UNICODE);
         exit;
