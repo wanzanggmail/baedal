@@ -323,9 +323,11 @@ $net = $sum['credit'] - $sum['debit'];
 							<?php if (!$isAgencyLevel) : ?><th>조직</th><?php endif; ?>
 							<th>구분</th>
 							<th>유형</th>
+							<?php // 원장은 조직 하나의 증감만 남아 「어디서 어디로」가 안 보였다(2026-09-24 갑). ?>
+							<th class="min-w-200px">출처 → 대상</th>
 							<th class="text-end">금액</th>
 							<th class="text-end">거래 후 잔액</th>
-							<th>메모</th>
+							<th class="min-w-250px">내용</th>
 							<th>처리자</th>
 						</tr>
 					</thead>
@@ -345,18 +347,24 @@ $net = $sum['credit'] - $sum['debit'];
 								<span class="badge <?= $isCredit ? 'badge-light-success' : 'badge-light-danger' ?>"><?= $esc((string) $r['direction_label']) ?></span>
 							</td>
 							<td><?= $esc((string) $r['reason_label']) ?></td>
+							<td class="fs-8">
+								<span class="text-gray-700"><?= $esc((string) $r['from_label']) ?></span>
+								<span class="text-muted mx-1">→</span>
+								<span class="fw-semibold text-gray-800"><?= $esc((string) $r['to_label']) ?></span>
+							</td>
 							<td class="text-end fw-bold <?= $isCredit ? 'text-success' : 'text-danger' ?>">
 								<?= $isCredit ? '+' : '−' ?><?= $won((int) $r['amount']) ?>
 							</td>
 							<td class="text-end"><?= $won((int) $r['balance_after']) ?></td>
-							<td class="text-muted"><?= $esc((string) $r['note'] !== '' ? (string) $r['note'] : '—') ?></td>
+							<td class="text-gray-700 fs-8"><?= $esc((string) $r['detail'] !== '' ? (string) $r['detail'] : '—') ?></td>
 							<td class="text-muted"><?= $esc((string) $r['actor_name'] !== '' ? (string) $r['actor_name'] : '시스템') ?></td>
 						</tr>
 						<?php endforeach; ?>
 					</tbody>
 					<tfoot>
 						<tr class="fw-bold bg-light">
-							<td colspan="<?= $isAgencyLevel ? 3 : 4 ?>">기간 합계 <span class="text-muted fs-8 fw-normal">(<?= number_format($sum['count']) ?>건 전체)</span></td>
+							<?php // 앞쪽 열 수: 일시·[조직]·구분·유형·출처→대상 ?>
+							<td colspan="<?= $isAgencyLevel ? 4 : 5 ?>">기간 합계 <span class="text-muted fs-8 fw-normal">(<?= number_format($sum['count']) ?>건 전체)</span></td>
 							<td class="text-end">
 								<span class="text-success">+<?= $won($sum['credit']) ?></span>
 								<span class="text-muted mx-1">/</span>

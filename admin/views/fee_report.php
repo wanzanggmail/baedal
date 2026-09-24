@@ -60,7 +60,13 @@ if (!$needsMigrate) {
             $wParams  = array_merge($wParams, [$like, $like]);
         }
         foreach (db_rows(
-            'SELECT wr.rider_id, COUNT(*) AS cnt, COALESCE(SUM(wr.withhold_other), 0) AS fee
+            // 이체수수료도 출금 때 라이더 지급액에서 빠진 돈이라 함께 더한다(2026-09-24).
+            // 대리점 부담 설정이면 라이더가 낸 게 아니므로 뺀다.
+            'SELECT wr.rider_id, COUNT(*) AS cnt,
+                    COALESCE(SUM(
+                        CASE WHEN wr.settle_fee_payer   = \'agency\' THEN 0 ELSE wr.withhold_other END
+                      + CASE WHEN wr.transfer_fee_payer = \'agency\' THEN 0 ELSE wr.withhold_transfer_fee END
+                    ), 0) AS fee
                FROM withdrawal_requests wr
                INNER JOIN riders r ON r.id = wr.rider_id
               WHERE ' . implode(' AND ', $wWhere) . '

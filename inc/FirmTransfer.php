@@ -181,6 +181,10 @@ final class FirmTransfer
     /**
      * 최근 목록(화면용).
      *
+     * 은행에 **실제로 보낸 수취 정보**(예금주·계좌번호)는 `withdrawal_requests` 에 박혀 있다.
+     * 라이더 프로필이 아니라 그 행을 읽어야 이체 당시 값과 어긋나지 않는다(계좌를 바꿨을 수 있다).
+     * 세 종류(라이더 출금·일일지급·자체 인출) 모두 `ref_id` 가 그 표의 id 라 조인 하나로 끝난다.
+     *
      * @param array<string,mixed> $filters
      * @return list<array<string,mixed>>
      */
@@ -194,24 +198,49 @@ final class FirmTransfer
 
         $only = trim((string) ($filters['only'] ?? ''));
         if ($only === 'pending') {
-            $where[] = 'finalized_at IS NULL';
+            $where[] = 'ft.finalized_at IS NULL';
         } elseif ($only === 'failed') {
-            $where[] = "status IN ('FAILED','CANCELLED')";
+            $where[] = "ft.status IN ('FAILED','CANCELLED')";
         } elseif ($only === 'success') {
-            $where[] = "status = 'SUCCESS'";
+            $where[] = "ft.status = 'SUCCESS'";
         }
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {
-            $where[]  = '(transaction_id LIKE ? OR reception_id LIKE ?)';
-            $params[] = '%' . $q . '%';
-            $params[] = '%' . $q . '%';
+            // 이름·예금주로도 찾을 수 있어야 은행 거래내역과 대조가 된다.
+            $where[]  = '(ft.transaction_id LIKE ? OR ft.reception_id LIKE ?'
+                      . ' OR r.name LIKE ? OR o.name LIKE ? OR wr.account_holder LIKE ?)';
+            $params   = array_merge($params, array_fill(0, 5, '%' . $q . '%'));
         }
 
-        return db_rows(
-            'SELECT * FROM firm_transfers'
+        $rows = db_rows(
+            "SELECT ft.*,
+                    r.name AS rider_name,
+                    o.name AS agency_name,
+                    wr.account_holder, wr.bank_account AS bank_account_enc,
+                    sc.label AS bank_label
+               FROM firm_transfers ft
+               LEFT JOIN riders r ON r.id = ft.rider_id
+               LEFT JOIN organizations o ON o.id = ft.agency_id
+               LEFT JOIN withdrawal_requests wr ON wr.id = ft.ref_id
+               LEFT JOIN system_codes sc ON sc.category = 'bank' AND sc.code = ft.bank_code"
             . ($where !== [] ? ' WHERE ' . implode(' AND ', $where) : '')
-            . ' ORDER BY id DESC LIMIT ' . max(1, min(500, $limit)),
+            . ' ORDER BY ft.id DESC LIMIT ' . max(1, min(500, $limit)),
             $params
         );
+
+        require_once __DIR__ . '/Crypto.php';
+
+        return array_map(static function (array $r): array {
+            // 이체 대상자 — 라이더 건은 라이더, 자체 인출은 대리점.
+            $r['target_name'] = (string) ($r['rider_name'] ?? '') !== ''
+                ? (string) $r['rider_name']
+                : (string) ($r['agency_name'] ?? '');
+            // 계좌번호는 암호화돼 있다. 복호화가 안 되면(키 교체 등) 마스킹 값으로 떨어진다.
+            $acct = Crypto::decryptSafe((string) ($r['bank_account_enc'] ?? ''));
+            $r['account_no'] = $acct !== '' ? $acct : (string) ($r['account_masked'] ?? '');
+            unset($r['bank_account_enc']);
+
+            return $r;
+        }, $rows);
     }
 }

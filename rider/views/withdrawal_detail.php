@@ -91,7 +91,10 @@ foreach ($feeAgg as $code => $f) {
 $feeItemsTotal = array_sum(array_column($feeAgg, 'amount'));
 
 $reserve = (int) ($wr['withhold_min_retain'] ?? 0);
-$fee     = (int) ($wr['withhold_other'] ?? 0);
+// 대리점이 대신 내는 설정이면 라이더 지급액에서 빠지지 않았으므로 0 으로 본다.
+$fee     = (string) ($wr['settle_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($wr['withhold_other'] ?? 0);
+// 이체수수료도 출금 때 함께 빠진다 — 안 찍으면 위의 「공제」 합계와 항목이 안 맞는다(2026-09-24).
+$transFee = (string) ($wr['transfer_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($wr['withhold_transfer_fee'] ?? 0);
 $payout  = (int) $wr['amount'];
 $settlementTotal = $cycleNetSum + $feeItemsTotal;
 
@@ -135,6 +138,12 @@ $fmtWon = static fn ($v): string => number_format((int) $v) . '원';
 				<span>정산수수료</span>
 				<span class="text-danger">−<?= $fmtWon($fee) ?></span>
 			</div>
+			<?php if ($transFee > 0) : ?>
+			<div class="d-flex justify-content-between py-2 border-bottom border-gray-200">
+				<span>이체수수료</span>
+				<span class="text-danger">−<?= $fmtWon($transFee) ?></span>
+			</div>
+			<?php endif; ?>
 			<?php // 보증금은 이번 출금에서 빠진 돈이 아니라 지갑에 남겨둔 최소 잔액 — 차감으로 표기하지 않는다. ?>
 			<div class="d-flex justify-content-between py-2 text-gray-600 fs-8">
 				<span>보증금(지갑에 유지)</span>

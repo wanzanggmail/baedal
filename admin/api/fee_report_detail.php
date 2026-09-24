@@ -52,26 +52,43 @@ $items      = [];
 $feeTotal   = 0;
 $debtTotal  = 0;
 
-// ── 출금 시점 정산수수료 ──
+// ── 출금 시점 수수료 — 정산수수료 + 이체수수료 ──
+// ⚠️ 이체수수료(`withhold_transfer_fee`)를 빼먹으면 라이더 실수령액과 합계가 안 맞는다.
+//    실제로 330원이 지급액에서 빠졌는데 이 목록에는 어디에도 안 나왔다(2026-09-24).
+// 대리점이 대신 내는 설정(`*_fee_payer = 'agency'`)이면 라이더가 낸 돈이 아니므로 제외한다.
 foreach (db_rows(
-    "SELECT id, requested_at, withhold_other, amount, note, status
+    "SELECT id, requested_at, amount, note, status,
+            CASE WHEN settle_fee_payer   = 'agency' THEN 0 ELSE withhold_other END        AS rider_fee,
+            CASE WHEN transfer_fee_payer = 'agency' THEN 0 ELSE withhold_transfer_fee END AS rider_transfer_fee
        FROM withdrawal_requests
       WHERE rider_id = ? AND status <> 'rejected'
         AND DATE(requested_at) >= ? AND DATE(requested_at) <= ?
-        AND withhold_other > 0
+        AND ((settle_fee_payer   <> 'agency' AND withhold_other > 0)
+          OR (transfer_fee_payer <> 'agency' AND withhold_transfer_fee > 0))
       ORDER BY requested_at ASC",
     [$riderId, $from, $to]
 ) as $w) {
-    $amt        = (int) $w['withhold_other'];
-    $feeTotal  += $amt;
-    $items[]    = [
-        'date'    => substr((string) $w['requested_at'], 0, 10),
-        'stage'   => 'withdraw',
-        'label'   => '정산수수료 (출금 ' . number_format((int) $w['amount']) . '원)',
-        'note'    => (string) ($w['note'] ?? ''),
-        'amount'  => $amt,
-        'is_debt' => false,
-    ];
+    $date  = substr((string) $w['requested_at'], 0, 10);
+    $payout = number_format((int) $w['amount']);
+    $noteLeft = (string) ($w['note'] ?? '');   // 긴 메모는 같은 출금의 첫 줄에만 붙인다
+    foreach ([
+        ['정산수수료 (출금 ' . $payout . '원)', (int) $w['rider_fee']],
+        ['이체수수료 (출금 ' . $payout . '원)', (int) $w['rider_transfer_fee']],
+    ] as [$label, $amt]) {
+        if ($amt <= 0) {
+            continue;
+        }
+        $feeTotal += $amt;
+        $items[]   = [
+            'date'    => $date,
+            'stage'   => 'withdraw',
+            'label'   => $label,
+            'note'    => $noteLeft,
+            'amount'  => $amt,
+            'is_debt' => false,
+        ];
+        $noteLeft = '';
+    }
 }
 
 // ── 정산 반영 시점 차감 항목 ──

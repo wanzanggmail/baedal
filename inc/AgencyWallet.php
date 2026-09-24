@@ -44,6 +44,42 @@ final class AgencyWallet
         'ledger_fix'        => '원장 보정(과거 누락분)',
     ];
 
+    /**
+     * 돈의 **상대편** — 이 조직 지갑의 반대쪽에 누가 있는지.
+     *
+     * 원장은 조직 하나의 증감만 남기므로 «어디서 와서 어디로 갔는지» 가 안 보였다.
+     * 계정과목(reason)마다 상대는 정해져 있으니 표로 둔다. 라이더처럼 행마다 다른 상대는
+     * `listLedgerScoped()` 가 이름을 채워 이 값을 덮어쓴다.
+     *
+     * @var array<string, string>
+     */
+    private const REASON_COUNTERPARTY = [
+        'pg_fund'          => 'PG 카드결제',
+        'pg_fund_rev'      => 'PG 카드결제(취소분 회수)',
+        'pg_fee_in'        => 'PG 결제 플랫폼 수수료',
+        'rider_payout'     => '라이더 계좌',
+        'agency_payout'    => '대리점 대표 계좌',
+        'manual_adjust'    => '본사 수동 조정',
+        'lease_fee_up'     => '상위 조직(본사·총판·세무대리·개발사)',
+        'lease_fee_up_rev' => '상위 조직(취소분 환원)',
+        'lease_fee_in'     => '하위 대리점',
+        'lease_fee_in_rev' => '하위 대리점(취소분 반환)',
+        'wd_fee_up'        => '상위 조직(본사·총판·세무대리·개발사)',
+        'wd_fee_in'        => '하위 대리점',
+        'transfer_fee_up'  => '본사',
+        'transfer_fee_in'  => '하위 대리점',
+        'agency_fee_up'    => '본사',
+        'agency_fee_in'    => '하위 대리점',
+        'ins_collect_out'  => '세무대리',
+        'ins_collect_in'   => '대리점',
+        'ins_collect_rev'  => '대리점(환원)',
+        'wh_collect_out'   => '세무대리',
+        'wh_collect_in'    => '대리점',
+        'msg_fee_up'       => '본사',
+        'msg_fee_in'       => '하위 대리점',
+        'ledger_fix'       => '없음(기록 보정 — 돈이 실제로 움직이지 않았다)',
+    ];
+
     public static function tableExists(): bool
     {
         return db_table_exists('agency_wallets');
@@ -298,10 +334,16 @@ final class AgencyWallet
             "SELECT l.id, l.agency_id, l.direction, l.reason, l.amount, l.balance_after,
                     l.ref_id, l.note, l.created_at, l.created_by,
                     o.name AS org_name, o.level AS org_level,
-                    a.name AS actor_name
+                    a.name AS actor_name,
+                    rr.name AS rider_name, rr.rider_code
                FROM agency_wallet_ledger l
                INNER JOIN organizations o ON o.id = l.agency_id
                LEFT JOIN admins a ON a.id = l.created_by
+               -- 상대가 라이더인 계정과목은 이름까지 보여준다(출금 행 → 라이더).
+               LEFT JOIN withdrawal_requests wr
+                      ON wr.id = l.ref_id
+                     AND l.reason IN ('rider_payout', 'wd_fee_up', 'transfer_fee_up')
+               LEFT JOIN riders rr ON rr.id = wr.rider_id
               WHERE {$where}
               ORDER BY l.id DESC
               LIMIT {$limit}",
@@ -392,10 +434,42 @@ final class AgencyWallet
     /** @param array<string, mixed> $row */
     private static function mapLedgerRow(array $row): array
     {
-        $dir = (string) $row['direction'];
-        $lvl = (string) ($row['org_level'] ?? '');
+        $dir     = (string) $row['direction'];
+        $lvl     = (string) ($row['org_level'] ?? '');
+        $reason  = (string) $row['reason'];
+        $orgName = (string) ($row['org_name'] ?? '');
+        $rider   = trim((string) ($row['rider_name'] ?? ''));
+        $refId   = isset($row['ref_id']) ? (int) $row['ref_id'] : 0;
+
+        // 상대편 — 라이더에게 직접 나간 돈은 이름까지 박아 준다.
+        $other = self::REASON_COUNTERPARTY[$reason] ?? '—';
+        if ($reason === 'rider_payout' && $rider !== '') {
+            $other = $rider . (($row['rider_code'] ?? '') !== '' ? '(' . (string) $row['rider_code'] . ')' : '') . ' 계좌';
+        }
+        // 「어디서 → 어디로」. 입금이면 상대가 출발지, 출금이면 이 조직이 출발지다.
+        $from = $dir === 'credit' ? $other : $orgName;
+        $to   = $dir === 'credit' ? $orgName : $other;
+
+        // 자세한 내용 — 무엇 때문에 움직였는지 한 줄로. 메모가 있으면 메모가 본문이다.
+        $detail = trim((string) ($row['note'] ?? ''));
+        $ctx    = [];
+        if ($rider !== '' && $reason !== 'rider_payout') {
+            $ctx[] = '라이더 ' . $rider;
+        }
+        if ($refId > 0) {
+            $ctx[] = '출금 #' . $refId;
+        }
+        if ($ctx !== []) {
+            $ctx = implode(' · ', $ctx);
+            // 메모에 이미 같은 출금 번호가 있으면 두 번 쓰지 않는다.
+            $detail = $detail === '' ? $ctx
+                : ($refId > 0 && str_contains($detail, '#' . $refId) ? $detail : $detail . ' · ' . $ctx);
+        }
 
         return [
+            'from_label'     => $from,
+            'to_label'       => $to,
+            'detail'         => $detail,
             'id'             => (int) $row['id'],
             'org_id'         => (int) $row['agency_id'],
             'org_name'       => (string) ($row['org_name'] ?? ''),

@@ -143,8 +143,8 @@ $qs      = static fn (array $over): string => $selfUrl
 					</select>
 				</div>
 				<div class="col-12 col-md-5">
-					<label class="form-label fs-8 text-muted mb-1">거래 ID · 접수번호</label>
-					<input type="text" name="q" value="<?= $esc($q) ?>" class="form-control form-control-sm form-control-solid" placeholder="WD366-… 또는 접수번호" />
+					<label class="form-label fs-8 text-muted mb-1">거래 ID · 접수번호 · 이름</label>
+					<input type="text" name="q" value="<?= $esc($q) ?>" class="form-control form-control-sm form-control-solid" placeholder="WD366-… · 접수번호 · 라이더/대리점/예금주 이름" />
 				</div>
 				<div class="col-6 col-md-2">
 					<button type="submit" class="btn btn-sm btn-primary w-100 fw-bold">조회</button>
@@ -164,10 +164,14 @@ $qs      = static fn (array $over): string => $selfUrl
 							<th class="min-w-140px">접수일시</th>
 							<th class="min-w-90px">상태</th>
 							<th class="min-w-100px">종류</th>
+							<?php // 은행 거래내역과 눈으로 맞출 수 있게 수취 정보를 펼쳐 보여준다(2026-09-24 갑). ?>
+							<th class="min-w-90px">대상자</th>
+							<th class="min-w-80px">은행</th>
+							<th class="min-w-130px">계좌번호</th>
+							<th class="min-w-80px">예금주</th>
+							<th class="min-w-90px text-end">금액</th>
 							<th class="min-w-170px">거래 ID</th>
 							<th class="min-w-150px">접수번호</th>
-							<th class="min-w-90px text-end">금액</th>
-							<th class="min-w-110px">수취</th>
 							<th class="min-w-140px">확정일시</th>
 							<th class="min-w-160px">비고</th>
 						</tr>
@@ -193,10 +197,13 @@ $qs      = static fn (array $over): string => $selfUrl
 							<td class="text-muted text-nowrap"><?= $esc((string) $t['submitted_at']) ?></td>
 							<td><span class="badge badge-light-<?= $stClass ?>"><?= $esc($stLabel) ?></span></td>
 							<td class="text-gray-700 text-nowrap"><?= $esc($kindLabel) ?> #<?= (int) $t['ref_id'] ?></td>
+							<td class="text-gray-800 fw-semibold text-nowrap"><?= $esc((string) ($t['target_name'] ?? '')) ?: '—' ?></td>
+							<td class="text-gray-700 text-nowrap"><?= $esc((string) ($t['bank_label'] ?? '')) ?: $esc((string) $t['bank_code']) ?: '—' ?></td>
+							<td class="font-monospace text-gray-700 text-nowrap"><?= $esc((string) ($t['account_no'] ?? '')) ?: '—' ?></td>
+							<td class="text-gray-700 text-nowrap"><?= $esc((string) ($t['account_holder'] ?? '')) ?: '—' ?></td>
+							<td class="text-end fw-bold text-gray-800 text-nowrap"><?= number_format((int) $t['amount']) ?>원</td>
 							<td class="font-monospace text-gray-700"><?= $esc((string) $t['transaction_id']) ?></td>
 							<td class="font-monospace text-gray-600"><?= $esc((string) $t['reception_id']) ?: '—' ?></td>
-							<td class="text-end fw-bold text-gray-800 text-nowrap"><?= number_format((int) $t['amount']) ?>원</td>
-							<td class="font-monospace text-gray-600 text-nowrap"><?= $esc((string) $t['account_masked']) ?></td>
 							<td class="text-muted text-nowrap"><?= $esc((string) ($t['finalized_at'] ?? '')) ?: '<span class="badge badge-light-warning">대기</span>' ?></td>
 							<td class="text-gray-600"><?= $esc((string) $t['fail_reason']) ?: '—' ?></td>
 						</tr>
