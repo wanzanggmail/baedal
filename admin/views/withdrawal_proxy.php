@@ -13,6 +13,7 @@ declare(strict_types=1);
 require_once INC_PATH . '/Org.php';
 require_once INC_PATH . '/WithdrawalConfig.php';
 require_once INC_PATH . '/WithdrawalCycles.php';
+require_once INC_PATH . '/Crypto.php';   // 출금 계좌 표기(2026-09-24 갑)
 
 $isAgency = admin_org_level() === Org::LEVEL_AGENCY;
 $agencyId = $isAgency ? admin_org_id() : 0;
@@ -25,7 +26,7 @@ if ($isAgency) {
     // (선정산은 「일일정산 지급」으로 나가므로 여기 대상이 아니다.)
     $rows = db_rows(
         "SELECT r.id, r.name, r.rider_code, r.phone, r.status, r.withdrawal_hold,
-                r.bank_code, r.bank_account,
+                r.bank_code, r.bank_account, r.account_holder,
                 COALESCE(w.balance, 0) AS balance,
                 sc.label AS bank_label,
                 (SELECT COUNT(*) FROM withdrawal_requests wr
@@ -171,12 +172,14 @@ $cntReady = $cntAll - $cntBelow;
 							<th class="min-w-100px text-end">지갑 잔액</th>
 							<th class="min-w-130px">출금 기준일</th>
 							<th class="min-w-220px">출금 가능 내역</th>
+							<?php // 이체 직전에 어디로 나가는지 눈으로 확인할 수 있어야 한다(2026-09-24 갑). ?>
+							<th class="min-w-170px">출금 계좌</th>
 							<th class="min-w-100px text-end">처리</th>
 						</tr>
 					</thead>
 					<tbody id="wp_tbody">
 						<?php if ($prepared === []) : ?>
-						<tr><td colspan="6" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
+						<tr><td colspan="7" class="text-center text-muted py-8">출금 대상 라이더가 없습니다. (주정산·활동중 라이더만 표시)</td></tr>
 						<?php else : foreach ($prepared as $p) :
 						    $r       = $p['r'];
 						    $hasBank = $p['has_bank'];
@@ -205,6 +208,16 @@ $cntReady = $cntAll - $cntBelow;
 									<span class="<?= $p['below'] ? 'text-muted' : 'text-danger' ?>"><?= htmlspecialchars($p['reason'], ENT_QUOTES, 'UTF-8') ?></span>
 								<?php else : ?>
 									<span class="text-muted">조회 중…</span>
+								<?php endif; ?>
+							</td>
+							<td class="fs-8">
+								<?php $acct = Crypto::decryptSafe((string) ($r['bank_account'] ?? '')); ?>
+								<?php if ($hasBank) : ?>
+								<div class="text-gray-800 fw-semibold"><?= htmlspecialchars((string) ($r['bank_label'] ?: $r['bank_code']), ENT_QUOTES, 'UTF-8') ?></div>
+								<div class="font-monospace text-gray-700"><?= htmlspecialchars($acct !== '' ? $acct : '(복호화 불가)', ENT_QUOTES, 'UTF-8') ?></div>
+								<div class="text-muted">예금주 <?= htmlspecialchars((string) ($r['account_holder'] ?: $r['name']), ENT_QUOTES, 'UTF-8') ?></div>
+								<?php else : ?>
+								<span class="text-danger">계좌 미등록</span>
 								<?php endif; ?>
 							</td>
 							<td class="text-end">
