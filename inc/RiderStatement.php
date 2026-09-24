@@ -84,7 +84,11 @@ final class RiderStatement
         $employment  = $get('employment_ins');
         $accident    = $get('accident_ins');
         $hourly      = $get('hourly_ins');
+        // 구 대행수수료 — 폐지됐지만 과거 데이터에는 남아 있고 total_fee_amount 에 포함돼 있다.
+        // 아래 「차감액」(잔여 흡수) 계산에는 이 값만 쓴다.
         $agencyFee   = $get('agency_fee');
+        // 출금 시점 수수료(정산수수료·이체수수료) — total_fee_amount 밖이라 따로 뺀다.
+        $wd          = self::withdrawFees($riderId, $from, $to);
 
         // 「차감액」은 **잔여 흡수(catch-all)** — 총공제(total_fee_amount)에서 개별 표기 항목을 뺀
         // 나머지(엑셀 차감내역·수동차감, 그리고 아직 개별 표기하지 않는 새 코드까지)를 담는다.
@@ -95,6 +99,9 @@ final class RiderStatement
         // 정산금액 = 실수령 + 총공제 − 지원금 (PDF 로직: 정산금액 + 지원 − 공제 = 실수령).
         // net_amount 이 gross−fee 와 안 맞는 구 데이터가 있어 도출값으로 항상 균형을 맞춘다.
         $settleAmount = (int) $cyc['n'] + $totalFee - (int) $cyc['s'];
+
+        // 실수령액 = 지갑 적립액 − 출금 때 라이더가 부담한 수수료. 이 값이 **실제 입금액**이다.
+        $net = (int) $cyc['n'] - $wd['settle'] - $wd['transfer'];
 
         return [
             'orders'        => (int) $cyc['o'],
@@ -107,11 +114,13 @@ final class RiderStatement
             'employment'    => $employment,
             'accident'      => $accident,
             'hourly_ins'    => $hourly,
-            'agency_fee'    => $agencyFee,
+            // 표기용 — 구 대행수수료 + 출금 시점 정산수수료. 둘 다 라이더가 낸 「정산수수료」다.
+            'agency_fee'    => $agencyFee + $wd['settle'],
+            'transfer_fee'  => $wd['transfer'],
             'advance'       => $advance,
             'fixed'         => $fixed,
-            'total_fee'     => $totalFee,
-            'net'           => (int) $cyc['n'],
+            'total_fee'     => $totalFee + $wd['settle'] + $wd['transfer'],
+            'net'           => $net,
         ];
     }
 
@@ -145,6 +154,7 @@ final class RiderStatement
             '산재보험'  => (int) $s['accident'],
             '시간제보험' => (int) $s['hourly_ins'],
             '정산수수료' => (int) $s['agency_fee'],
+            '이체수수료' => (int) ($s['transfer_fee'] ?? 0),
             '선지급차감' => (int) $s['advance'],
             '고정차감'  => (int) $s['fixed'],
         ];
@@ -255,6 +265,115 @@ final class RiderStatement
         return $out;
     }
 
+    /**
+     * 출금 시점 수수료 — 이 기간의 정산분을 가져간 출금에서 **라이더가 실제로 부담한** 몫.
+     *
+     * 명세서의 「정산수수료」는 원래 `fee_code='agency_fee'`(폐지된 대행수수료)를 읽고 있어서
+     * 늘 0 이었다(2026-09-07 폐지). 지금 라이더가 실제로 내는 정산수수료·이체수수료는
+     * **출금 시점**에 `withdrawal_requests` 에 박히므로 그쪽을 읽어야 명세서와 입금액이 맞는다.
+     *
+     * 귀속 규칙 — 출금 1건의 수수료를 **그 출금이 소진한 정산일들에 배달 건수로 안분**한다.
+     * 정산수수료가 배달 건당 단가라 건수 안분이 가장 실제에 가깝다. 기간을 걸쳐 있는 출금은
+     * 기간 안의 건수만큼만 이 명세서에 잡힌다. 나머지(최대 몇 원)는 큰 날짜부터 채운다.
+     *
+     * @return array{settle:int, transfer:int, by_date:array<string,array{settle:int,transfer:int}>}
+     */
+    private static function withdrawFees(int $riderId, string $from, string $to): array
+    {
+        // summary() 와 daily() 가 같은 값을 쓴다 — 한 번만 계산한다.
+        static $memo = [];
+        $key = $riderId . '|' . $from . '|' . $to;
+        if (isset($memo[$key])) {
+            return $memo[$key];
+        }
+
+        $out = ['settle' => 0, 'transfer' => 0, 'by_date' => []];
+        if (!db_table_exists('withdrawal_request_cycles') || !db_table_exists('withdrawal_requests')) {
+            return $memo[$key] = $out;
+        }
+
+        // ① 기간 안에서 각 출금이 가져간 정산일·건수
+        $inPeriod = [];   // request_id => [date => orders]
+        foreach (db_rows(
+            "SELECT wrc.request_id rid, src.settlement_date d, COALESCE(SUM(wrc.order_count),0) o
+               FROM withdrawal_request_cycles wrc
+               JOIN settlement_rider_cycles src ON src.id = wrc.cycle_id
+               JOIN withdrawal_requests wr ON wr.id = wrc.request_id
+              WHERE src.rider_id = ? AND wr.status <> 'rejected'
+                AND src.settlement_date BETWEEN ? AND ?
+              GROUP BY wrc.request_id, src.settlement_date
+              ORDER BY src.settlement_date ASC",
+            [$riderId, $from, $to]
+        ) as $r) {
+            $inPeriod[(int) $r['rid']][(string) $r['d']] = (int) $r['o'];
+        }
+        if ($inPeriod === []) {
+            return $memo[$key] = $out;
+        }
+
+        // ② 그 출금들의 라이더 부담 수수료와 **전체** 소진 건수(기간 밖 포함)
+        $ids = array_keys($inPeriod);
+        $ph  = implode(',', array_fill(0, count($ids), '?'));
+        foreach (db_rows(
+            "SELECT wr.id,
+                    CASE WHEN wr.settle_fee_payer   = 'agency' THEN 0 ELSE wr.withhold_other END        fee,
+                    CASE WHEN wr.transfer_fee_payer = 'agency' THEN 0 ELSE wr.withhold_transfer_fee END trans,
+                    COALESCE(SUM(wrc.order_count), 0) total_orders
+               FROM withdrawal_requests wr
+               JOIN withdrawal_request_cycles wrc ON wrc.request_id = wr.id
+              WHERE wr.id IN ({$ph})
+              GROUP BY wr.id, fee, trans",
+            $ids
+        ) as $w) {
+            $rid    = (int) $w['id'];
+            $dates  = $inPeriod[$rid] ?? [];
+            $total  = (int) $w['total_orders'];
+            $inSum  = array_sum($dates);
+            if ($dates === [] || $inSum < 1) {
+                continue;
+            }
+            foreach (['settle' => (int) $w['fee'], 'transfer' => (int) $w['trans']] as $bucket => $amount) {
+                if ($amount <= 0) {
+                    continue;
+                }
+                // 기간 밖 건수가 있으면 그만큼은 이 명세서 몫이 아니다.
+                $share = $total > 0 ? (int) round($amount * $inSum / $total) : $amount;
+                foreach (self::apportion($share, $dates) as $d => $part) {
+                    $out['by_date'][$d][$bucket] = ($out['by_date'][$d][$bucket] ?? 0) + $part;
+                }
+                $out[$bucket] += $share;
+            }
+        }
+
+        return $memo[$key] = $out;
+    }
+
+    /**
+     * 금액을 가중치(날짜별 배달 건수)대로 나눈다. **합이 원금과 정확히 같다** — 잔돈은 마지막 몫에.
+     *
+     * @param array<string,int> $weights 날짜 => 건수
+     * @return array<string,int> 날짜 => 금액
+     */
+    private static function apportion(int $amount, array $weights): array
+    {
+        $sum = array_sum($weights);
+        if ($weights === [] || $sum < 1) {
+            return [];
+        }
+        $out  = [];
+        $left = $amount;
+        $i    = 0;
+        $n    = count($weights);
+        foreach ($weights as $k => $w) {
+            $i++;
+            $part  = $i === $n ? $left : (int) floor($amount * $w / $sum);
+            $left -= $part;
+            $out[$k] = $part;
+        }
+
+        return $out;
+    }
+
     /** 기간 공제 항목 합(fee_code => amount). */
     private static function feesByCode(int $riderId, string $from, string $to): array
     {
@@ -294,6 +413,9 @@ final class RiderStatement
             $feeByDate[(string) $r['d']][(string) $r['code']] = (int) $r['amt'];
         }
 
+        // 출금 시점 수수료를 정산일에 안분한 값(요약과 같은 규칙).
+        $wdByDate = self::withdrawFees($riderId, $from, $to)['by_date'];
+
         $rows = [];
         foreach (db_rows(
             "SELECT settlement_date d, SUM(order_count) o, SUM(support_amount) s,
@@ -302,8 +424,10 @@ final class RiderStatement
               GROUP BY settlement_date ORDER BY settlement_date ASC",
             [$riderId, $from, $to]
         ) as $r) {
-            $d       = (string) $r['d'];
-            $agency  = (int) ($feeByDate[$d]['agency_fee'] ?? 0);
+            $d        = (string) $r['d'];
+            $wdSettle = (int) ($wdByDate[$d]['settle'] ?? 0);
+            $wdTrans  = (int) ($wdByDate[$d]['transfer'] ?? 0);
+            $agency   = (int) ($feeByDate[$d]['agency_fee'] ?? 0) + $wdSettle;
             $advance = (int) ($feeByDate[$d]['advance'] ?? 0);
             $preded  = (int) ($feeByDate[$d]['agency_prededuct'] ?? 0); // 라이더에게 안 보인다
             $net     = (int) $r['n'];
@@ -313,9 +437,11 @@ final class RiderStatement
                 // 선차감을 공제에서 빼 정산금액을 낮춘다 — 요약과 같은 규칙(위 summary 주석).
                 'gross'   => $net + ((int) $r['f'] - $preded) - (int) $r['s'], // 정산금액(도출) = 순액+공제−지원
                 'agency'  => $agency,
+                'transfer' => $wdTrans,
                 'planned' => $net + $advance, // 선지급 차감 전 예정금액
                 'advance' => $advance,
-                'after'   => $net,            // 차감 후(실제 반영)
+                // 차감 후 = 지갑 적립액 − 출금 때 라이더가 부담한 수수료(요약 실수령액과 합이 맞는다).
+                'after'   => $net - $wdSettle - $wdTrans,
             ];
         }
 

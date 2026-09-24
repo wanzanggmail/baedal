@@ -141,6 +141,7 @@ ob_start();
 			'산재보험'    => (int) $sm['accident'],
 			'시간제보험'  => (int) $sm['hourly_ins'],
 			'정산수수료'  => (int) $sm['agency_fee'],
+			'이체수수료'  => (int) ($sm['transfer_fee'] ?? 0),
 			'선지급차감'  => (int) $sm['advance'],
 			'고정차감'    => (int) $sm['fixed'],
 		];
@@ -158,16 +159,17 @@ ob_start();
 	<div class="card">
 		<h2>일자별 상세</h2>
 		<div class="scroll"><table>
-			<thead><tr><th>근무일자</th><th>오더</th><th>정산금액</th><th>수수료</th><th>예정금액</th><th>선지급</th><th>차감후</th></tr></thead>
+			<thead><tr><th>근무일자</th><th>오더</th><th>정산금액</th><th>수수료</th><th>이체료</th><th>예정금액</th><th>선지급</th><th>차감후</th></tr></thead>
 			<tbody>
 			<?php if ($st['daily'] === []) : ?>
-				<tr><td colspan="7" class="empty">해당 기간 정산 내역이 없습니다.</td></tr>
+				<tr><td colspan="8" class="empty">해당 기간 정산 내역이 없습니다.</td></tr>
 			<?php else : foreach ($st['daily'] as $d) : ?>
 				<tr>
 					<td><?= $esc((string) $d['date']) ?></td>
 					<td class="num"><?= number_format((int) $d['orders']) ?></td>
 					<td class="num"><?= $won($d['gross']) ?></td>
 					<td class="num"><?= $won($d['agency']) ?></td>
+					<td class="num"><?= $won($d['transfer'] ?? 0) ?></td>
 					<td class="num"><?= $won($d['planned']) ?></td>
 					<td class="num"><?= $won($d['advance']) ?></td>
 					<td class="num" style="font-weight:700"><?= $won($d['after']) ?></td>

@@ -169,7 +169,7 @@ if ($riderId > 0) {
 			</tr></tbody>
 		</table>
 		<table class="table table-bordered align-middle text-center fs-8 mb-5">
-			<thead class="bg-light fw-bold"><tr><th>차감액</th><th>원천세</th><th>고용보험</th><th>산재보험</th><th>시간제보험</th><th>정산수수료</th><th>선지급차감</th><th>고정차감</th><th>실수령액</th></tr></thead>
+			<thead class="bg-light fw-bold"><tr><th>차감액</th><th>원천세</th><th>고용보험</th><th>산재보험</th><th>시간제보험</th><th>정산수수료</th><th>이체수수료</th><th>선지급차감</th><th>고정차감</th><th>실수령액</th></tr></thead>
 			<tbody><tr>
 				<td><?= $won($sm['deduction']) ?></td>
 				<td><?= $won($sm['withholding']) ?></td>
@@ -177,6 +177,7 @@ if ($riderId > 0) {
 				<td><?= $won($sm['accident']) ?></td>
 				<td><?= $won($sm['hourly_ins']) ?></td>
 				<td><?= $won($sm['agency_fee']) ?></td>
+				<td><?= $won($sm['transfer_fee'] ?? 0) ?></td>
 				<td><?= $won($sm['advance']) ?></td>
 				<td><?= $won($sm['fixed']) ?></td>
 				<td class="fw-bold bg-light-warning"><?= $won($sm['net']) ?></td>
@@ -186,15 +187,16 @@ if ($riderId > 0) {
 		<!--일자별 상세 내역-->
 		<h4 class="fs-6 fw-bold text-center mb-2">일자별 상세 내역</h4>
 		<table class="table table-bordered align-middle text-center fs-8 mb-5">
-			<thead class="bg-light fw-bold"><tr><th>근무일자</th><th>오더수</th><th>정산금액</th><th>정산수수료</th><th>정산 예정금액</th><th>선지급금</th><th>차감 후 금액</th></tr></thead>
+			<thead class="bg-light fw-bold"><tr><th>근무일자</th><th>오더수</th><th>정산금액</th><th>정산수수료</th><th>이체수수료</th><th>정산 예정금액</th><th>선지급금</th><th>차감 후 금액</th></tr></thead>
 			<tbody>
-				<?php if ($st['daily'] === []) : ?><tr><td colspan="7" class="text-muted py-4">해당 기간 정산 내역이 없습니다.</td></tr>
+				<?php if ($st['daily'] === []) : ?><tr><td colspan="8" class="text-muted py-4">해당 기간 정산 내역이 없습니다.</td></tr>
 				<?php else : foreach ($st['daily'] as $d) : ?>
 				<tr>
 					<td><?= $esc((string) $d['date']) ?></td>
 					<td><?= number_format((int) $d['orders']) ?> 건</td>
 					<td><?= $won($d['gross']) ?></td>
 					<td><?= $won($d['agency']) ?></td>
+					<td><?= $won($d['transfer'] ?? 0) ?></td>
 					<td><?= $won($d['planned']) ?></td>
 					<td><?= $won($d['advance']) ?></td>
 					<td class="fw-bold"><?= $won($d['after']) ?></td>
