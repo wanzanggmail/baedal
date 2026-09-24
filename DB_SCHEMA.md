@@ -264,6 +264,8 @@ PK=`org_id`(모든 조직 각자 1행, 본사·총판·대리점). `pg_service_f
 `kind` varchar(자유값): `advance`(선지급, 🆕 2026-07-22 입력화면 완성) · `loan`/`lease`(🆕 2026-07-24 부채원장이 생성) · `withholding`/`employment_ins`/`accident_ins`/`agency_fee`(수동 보정용) · `hourly_ins`/`ins_refund`/`rental`/`manual`.
 정산 반영 시 해당 `applied_date`의 항목이 자동으로 `settlement_fee_items`에 합산됨.
 
+🆕 **(2026-09-24) `consumed_cycle_id`** — 이 차감을 **가져간 정산 사이클**(`settlement_rider_cycles.id`). 같은 라이더가 같은 날 **팀지역이 다른 두 정산서**에 올라오면 사이클이 두 개 생기는데(설계상 정상), 예전에는 반영이 이 표를 «라이더+귀속일»로만 집어가 **두 사이클이 같은 행을 각각 차감 — 대여금이 두 번 빠졌다**. 이제 사이클이 먹은 행에 id를 박고 `buildFeeItems`는 `consumed_cycle_id IS NULL`인 행만 본다. 이월(carry forward)로 미뤄진 몫도 «먹은 것»으로 본다 — 못 걷은 금액은 이월 원장이 들고 있다가 다음 정산에서 걷으므로 안 잠그면 두 번 계산된다. 과거 이중차감분은 `tools/audit_double_deduction.php`로 찾는다(되돌리지는 않는다).
+
 ### `rider_debts` — 🆕(2026-07-24) 라이더 부채 원장(대여금/리스/선지급)
 PDF 정산명세서의 대여금·리스·선지급 차감 명세 대응. `kind` enum(`loan`=대여금, `lease`=리스/렌탈, `advance`=선지급). `principal_amount`(원금) → `balance_amount`(남은 잔액, 주 단위 이월) · `daily_amount`(일납) · `creditor`(채권자) · `status`(active/paused/closed) · `opened_on`/`closed_on`/`due_updated_on`(미납갱신일) · `planned_end_on`(2026-07-30 컬럼 추가, 2026-08-08 등록/수정 화면·API에 실제로 연결 — 그 전엔 컬럼만 있고 입력할 곳이 없어 리스 자동계산이 항상 스킵되는 상태였음. 계약 종료 예정일 — 리스 전용. `opened_on`과 함께 계약기간을 이뤄 자동 일수계산의 기준이 됨). 대여금·선지급은 **상각형**(잔액이 줄어 0이면 자동 완납), 리스는 **반복 부과**(잔액 불변). 관리: `admin/api/debt_action.php`, `inc/RiderDebt.php`, 라이더 상세 "부채" 카드.
 

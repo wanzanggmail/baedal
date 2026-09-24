@@ -811,6 +811,15 @@ final class SettlementLedger
             }
         }
 
+        // 잠글 차감 행 — **이월로 미뤄진 몫까지 포함해** 여기서 모은다(settleFeesAgainstBase 가
+        // 이월로 떠넘긴 항목은 결과에서 빠지지만, 그 행은 이미 이 사이클이 먹은 것이다).
+        $entryIds = [];
+        foreach ($fees as $f) {
+            if ((int) ($f['entry_id'] ?? 0) > 0) {
+                $entryIds[] = (int) $f['entry_id'];
+            }
+        }
+
         $settled = self::settleFeesAgainstBase($base, $fees, $riderId);
 
         return [
@@ -818,6 +827,7 @@ final class SettlementLedger
             'fees'             => $settled['fees'],
             'deferred'         => $settled['deferred'],
             'carry_applied'    => $settled['carry_applied'],
+            'entry_ids'        => $entryIds,
             // 폐지된 대행수수료 자리 — 호출부 호환을 위해 0 으로 남긴다(2026-09-07).
             'agency_fee'       => 0,
             'agency_fee_payer' => 'rider',
@@ -924,6 +934,10 @@ final class SettlementLedger
             );
         }
 
+        // 이 사이클이 집어간 차감 행을 잠근다 — 같은 날 팀지역이 다른 정산서가 또 올라와도
+        // 대여금이 두 번 빠지지 않는다.
+        self::claimDeductionEntries((array) ($composed['entry_ids'] ?? []), (int) $cycleId);
+
         if ($net > 0) {
             RiderWallet::credit($riderId, $net, true);
         }
@@ -1013,9 +1027,15 @@ final class SettlementLedger
                          WHERE swd.registered_entry_id = deduction_entries.id
                     )'
                 : '';
+            // ⚠️ **한 차감은 한 사이클만 먹는다.** 같은 라이더가 같은 날 팀지역이 다른 두
+            //    정산서에 동시에 올라오면 사이클이 두 개 생기는데, 둘 다 같은
+            //    deduction_entries 행을 집어 **대여금이 두 번 빠졌다**(2026-09-24 실사용 발견).
+            //    사이클이 먹은 행은 consumed_cycle_id 로 표시하고 여기서는 안 먹은 것만 본다.
+            $unconsumed = self::deductionEntriesClaimable() ? ' AND consumed_cycle_id IS NULL' : '';
             $manual = db_rows(
-                'SELECT kind, amount, note FROM deduction_entries
-                  WHERE rider_id = ? AND applied_date = ? AND amount <> 0' . $excludeExcel . '
+                'SELECT id, kind, amount, note FROM deduction_entries
+                  WHERE rider_id = ? AND applied_date = ? AND amount <> 0'
+                  . $excludeExcel . $unconsumed . '
                   ORDER BY id ASC',
                 [$riderId, $settlementDate]
             );
@@ -1029,11 +1049,47 @@ final class SettlementLedger
                     'fee_code' => $kind,
                     'label'    => self::deductionKindLabel($kind, (string) ($m['note'] ?? '')),
                     'amount'   => $amt,
+                    // 이 사이클이 확정되면 아래 claimDeductionEntries() 가 이 행을 잠근다.
+                    'entry_id' => (int) $m['id'],
                 ];
             }
         }
 
         return $items;
+    }
+
+    /** `deduction_entries.consumed_cycle_id` 컬럼이 있는가(마이그레이션 전 서버 대비). */
+    private static function deductionEntriesClaimable(): bool
+    {
+        static $has = null;
+        if ($has === null) {
+            $has = db_table_exists('deduction_entries')
+                && in_array('consumed_cycle_id', array_column(db_rows('SHOW COLUMNS FROM deduction_entries'), 'Field'), true);
+        }
+
+        return $has;
+    }
+
+    /**
+     * 이 사이클이 먹은 차감 행을 잠근다 — 다른 사이클이 같은 행을 또 먹지 않게.
+     *
+     * 이월(carry forward)로 미뤄진 금액도 «먹은 것»으로 본다. 못 걷은 몫은 이월 원장이
+     * 들고 있다가 다음 정산에서 걷으므로, 여기서 안 잠그면 그 행이 두 번 계산된다.
+     *
+     * @param list<int> $entryIds
+     */
+    private static function claimDeductionEntries(array $entryIds, int $cycleId): void
+    {
+        $ids = array_values(array_unique(array_filter($entryIds, static fn (int $v): bool => $v > 0)));
+        if ($ids === [] || $cycleId < 1 || !self::deductionEntriesClaimable()) {
+            return;
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        db_execute(
+            "UPDATE deduction_entries SET consumed_cycle_id = ?
+              WHERE id IN ({$ph}) AND consumed_cycle_id IS NULL",
+            array_merge([$cycleId], $ids)
+        );
     }
 
     /** @return array<string, float> */

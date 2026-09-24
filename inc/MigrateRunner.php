@@ -108,6 +108,7 @@ final class MigrateRunner
         self::migrateBannerClicks();
         self::migrateFirmBlockWindow();
         self::migrateFeeOrderCounts();
+        self::migrateDeductionEntryClaim();
 
         echo "\n완료.\n";
     }
@@ -3739,6 +3740,41 @@ final class MigrateRunner
      * 부담 주체는 **출금 시점에 `withdrawal_requests` 에 박아둔다** — 나중에 설정을 바꿔도
      * 과거 출금의 정산이 흔들리면 안 되기 때문이다(PG 요율을 결제 시점에 저장하는 것과 같은 이유).
      */
+    /**
+     * 차감 행의 **소비 사이클** 표시 — 같은 차감이 두 정산에 먹히는 것을 막는다(2026-09-24).
+     *
+     * 같은 라이더가 같은 날 **팀지역이 다른 두 정산서**에 동시에 올라오면 사이클이 두 개
+     * 생긴다(설계상 정상). 그런데 정산 반영은 `deduction_entries` 를 «라이더+귀속일» 로만
+     * 집어갔기 때문에 **두 사이클이 같은 행을 각각 차감** — 대여금이 두 번 빠졌다.
+     * 먹은 사이클 id 를 행에 남겨 두 번째 사이클은 그 행을 보지 못하게 한다.
+     *
+     * 기존 행은 NULL(=아직 안 먹음)로 둔다. 과거 이중차감분은 자동으로 되돌리지 않는다 —
+     * 얼마를 어느 라이더에게 돌려줄지는 사람이 확인할 일이다(`tools/audit_double_deduction.php`).
+     */
+    private static function migrateDeductionEntryClaim(): void
+    {
+        echo "== 차감 행 소비 표시(이중차감 방지) ==\n";
+
+        if (!db_table_exists('deduction_entries')) {
+            echo "SKIP  deduction_entries 없음\n";
+
+            return;
+        }
+        $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_entries'), 'Field');
+        if (in_array('consumed_cycle_id', $cols, true)) {
+            echo "SKIP  deduction_entries.consumed_cycle_id (이미 있음)\n";
+
+            return;
+        }
+        db_execute(
+            "ALTER TABLE deduction_entries
+                ADD COLUMN consumed_cycle_id BIGINT UNSIGNED NULL
+                    COMMENT '이 차감을 가져간 정산 사이클(settlement_rider_cycles.id) — 중복 차감 방지',
+                ADD KEY idx_de_consumed (consumed_cycle_id)"
+        );
+        echo "OK    deduction_entries.consumed_cycle_id 추가\n";
+    }
+
     private static function migrateFeePayerFlags(): void
     {
         echo "== 수수료 부담 주체(정산수수료·이체수수료) ==\n";
