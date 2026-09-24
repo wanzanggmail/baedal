@@ -129,6 +129,9 @@ $linkFor = static function (string $only) use ($apiOrd): string {
 						<th class="min-w-70px">결과</th>
 						<th class="min-w-160px">엔드포인트</th>
 						<th class="min-w-130px">주문번호</th>
+						<?php // 호출 기록만으로는 «누가 얼마를» 알 수 없어 결제 건을 붙여 함께 보여준다(2026-09-24 갑). ?>
+						<th class="min-w-110px text-end">금액</th>
+						<th class="min-w-140px">요청자 · 대상</th>
 						<th class="min-w-60px text-end">소요</th>
 						<th class="min-w-220px">응답</th>
 					</tr>
@@ -146,6 +149,29 @@ $linkFor = static function (string $only) use ($apiOrd): string {
 						</td>
 						<td class="font-monospace text-gray-800"><?= $esc((string) $l['method']) ?> <?= $esc((string) $l['endpoint']) ?></td>
 						<td class="font-monospace text-gray-700"><?= $esc((string) ($l['ord_num'] ?: '—')) ?></td>
+						<td class="text-end">
+							<?php if (($l['total_charged'] ?? null) !== null) : ?>
+							<span class="fw-bold text-gray-800"><?= number_format((int) $l['total_charged']) ?>원</span>
+							<?php // 카드 청구 총액 = 지갑 충전분 + 영업대행수수료. 어느 쪽이 얼마인지도 보여야 대조가 된다. ?>
+							<div class="text-muted fs-9">충전 <?= number_format((int) $l['net_amount']) ?> + 수수료 <?= number_format((int) $l['service_fee']) ?></div>
+							<?php else : ?>
+							<span class="text-muted">—</span>
+							<?php endif; ?>
+						</td>
+						<td>
+							<?php if (($l['actor_name'] ?? '') !== '') : ?>
+							<span class="fw-semibold text-gray-800"><?= $esc((string) $l['actor_name']) ?></span>
+							<?php elseif (($l['total_charged'] ?? null) !== null) : ?>
+							<span class="text-muted">시스템</span>
+							<?php else : ?>
+							<span class="text-muted">—</span>
+							<?php endif; ?>
+							<?php if (($l['agency_name'] ?? '') !== '' || ($l['rider_name'] ?? '') !== '') : ?>
+							<div class="text-muted fs-9">
+								<?= $esc((string) ($l['agency_name'] ?? '')) ?><?= ($l['rider_name'] ?? '') !== '' ? ' · ' . $esc((string) $l['rider_name']) : '' ?>
+							</div>
+							<?php endif; ?>
+						</td>
 						<td class="text-end text-muted"><?= number_format((int) $l['duration_ms']) ?>ms</td>
 						<td class="text-gray-700">
 							<?php if ((string) $l['result_cd'] !== '') : ?><span class="badge badge-light-secondary me-1"><?= $esc((string) $l['result_cd']) ?></span><?php endif; ?>

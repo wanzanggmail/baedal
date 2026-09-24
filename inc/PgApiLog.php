@@ -146,20 +146,37 @@ final class PgApiLog
 
         $only = trim((string) ($filters['only'] ?? ''));
         if ($only === 'fail') {
-            $where[] = 'ok = 0';
+            $where[] = 'l.ok = 0';
         } elseif ($only === 'ok') {
-            $where[] = 'ok = 1';
+            $where[] = 'l.ok = 1';
         }
         $ord = trim((string) ($filters['ord_num'] ?? ''));
         if ($ord !== '') {
-            $where[]  = 'ord_num LIKE ?';
+            $where[]  = 'l.ord_num LIKE ?';
             $params[] = '%' . $ord . '%';
         }
 
+        // 「누가 얼마를 결제했나」는 이 표에 없다(호출 기록만 남긴다) — 주문번호로 결제 건을
+        // 붙여서 금액과 요청자를 같이 보여준다(2026-09-24 갑). ord_num 컬럼이 없는 구버전
+        // DB 에서는 조인을 걸지 않는다.
+        $join = '';
+        $cols = '';
+        if (db_table_exists('pg_payments')
+            && in_array('ord_num', array_column(db_rows('SHOW COLUMNS FROM pg_payments'), 'Field'), true)
+        ) {
+            $cols = ', p.total_charged, p.net_amount, p.service_fee, p.status AS pay_status,
+                       o.name AS agency_name, r.name AS rider_name,
+                       COALESCE(NULLIF(a.name, \'\'), a.login_id) AS actor_name';
+            $join = ' LEFT JOIN pg_payments p ON p.ord_num = l.ord_num AND l.ord_num <> \'\'
+                      LEFT JOIN organizations o ON o.id = p.agency_id
+                      LEFT JOIN riders r ON r.id = p.rider_id
+                      LEFT JOIN admins a ON a.id = p.created_by';
+        }
+
         return db_rows(
-            'SELECT * FROM pg_api_logs'
+            "SELECT l.*{$cols} FROM pg_api_logs l{$join}"
             . ($where !== [] ? ' WHERE ' . implode(' AND ', $where) : '')
-            . ' ORDER BY id DESC LIMIT ' . max(1, min(500, $limit)),
+            . ' ORDER BY l.id DESC LIMIT ' . max(1, min(500, $limit)),
             $params
         );
     }
