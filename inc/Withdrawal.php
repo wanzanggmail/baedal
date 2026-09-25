@@ -860,95 +860,133 @@ final class Withdrawal
         $agencyId = (int) ($row['agency_id'] ?? 0);
         $done     = false;
 
-        db_transaction(static function () use ($id, $row, $note, $agencyId, &$done): void {
-            $n = db_execute(
-                // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
-                "UPDATE withdrawal_requests
-                    SET status = 'completed', completed_at = NOW(), fail_reason = '',
-                        note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
-                  WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
-                [$note, $id]
-            );
-            if ($n < 1) {
-                return; // 이미 확정됐거나 반려된 건 — 지갑을 건드리지 않는다.
-            }
-            $done = true;
+        // ⚠️ **일시적 충돌이면 다시 시도한다.** 웹훅은 한 번에 몰려 들어오고(실측: 4초에 6건)
+        //    전부 같은 대리점 지갑 행을 건드린다. 한 건이 «1020 Record has changed / 교착 /
+        //    잠금 대기 초과» 로 죽으면 그 출금만 「접수중」에 갇혔다 — 장부(firm_transfers)는
+        //    이미 SUCCESS 로 커밋돼 보정 조회 대상에서도 빠지기 때문이다(2026-09-25 출금#9).
+        //    아래 UPDATE 의 `status IN (…)` 조건이 멱등을 보장하므로 재시도는 안전하다.
+        //    (트랜잭션 **밖에서** 감싼다 — 롤백된 트랜잭션을 통째로 다시 열어야 한다.)
+        self::retryOnConflict(static function () use ($id, $row, $note, $agencyId, &$done): void {
+            db_transaction(static function () use ($id, $row, $note, $agencyId, &$done): void {
+                $n = db_execute(
+                    // fail_reason 은 NOT NULL 이라 재시도 성공 시 빈 문자열로 지운다(NULL 대입 불가).
+                    "UPDATE withdrawal_requests
+                        SET status = 'completed', completed_at = NOW(), fail_reason = '',
+                            note = TRIM(CONCAT(COALESCE(note, ''), ' | ', ?))
+                      WHERE id = ? AND status IN ('pending', 'downloaded', 'transferring', 'failed')",
+                    [$note, $id]
+                );
+                if ($n < 1) {
+                    return; // 이미 확정됐거나 반려된 건 — 지갑을 건드리지 않는다.
+                }
+                $done = true;
 
-            if ((string) ($row['kind'] ?? '') === 'rider_manual') {
-                // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료 + 이체수수료. 보증금은 남는 몫이라 제외.
-                RiderWallet::deductAfterWithdrawal(
-                    (int) $row['rider_id'],
-                    // 대리점이 대신 낸 수수료는 라이더 지갑에서 빼지 않는다(2026-09-08).
-                    (int) ($row['amount'] ?? 0)
-                        + ((string) ($row['settle_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($row['withhold_other'] ?? 0))
-                        + ((string) ($row['transfer_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($row['withhold_transfer_fee'] ?? 0))
-                );
-                // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
-                // (정산수수료·이체수수료는 대리점에 남았다가 아래에서 각각 상위로 빠져나간다.)
-                if ($agencyId > 0) {
+                if ((string) ($row['kind'] ?? '') === 'rider_manual') {
+                    // 지갑에서 빠지는 총액 = 실지급액 + 정산수수료 + 이체수수료. 보증금은 남는 몫이라 제외.
+                    RiderWallet::deductAfterWithdrawal(
+                        (int) $row['rider_id'],
+                        // 대리점이 대신 낸 수수료는 라이더 지갑에서 빼지 않는다(2026-09-08).
+                        (int) ($row['amount'] ?? 0)
+                            + ((string) ($row['settle_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($row['withhold_other'] ?? 0))
+                            + ((string) ($row['transfer_fee_payer'] ?? 'rider') === 'agency' ? 0 : (int) ($row['withhold_transfer_fee'] ?? 0))
+                    );
+                    // 실지급액은 대리점 지갑에서 나간 돈이다 — 지갑도 같이 줄여야 잔액이 실제와 맞는다.
+                    // (정산수수료·이체수수료는 대리점에 남았다가 아래에서 각각 상위로 빠져나간다.)
+                    if ($agencyId > 0) {
+                        AgencyWallet::debit(
+                            $agencyId,
+                            (int) ($row['amount'] ?? 0),
+                            'rider_payout',
+                            $id,
+                            trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급',
+                            null
+                        );
+                    }
+                    // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
+                    WithdrawalFeeShare::distribute(
+                        $id,
+                        (int) $row['rider_id'],
+                        (int) ($row['withhold_other'] ?? 0)
+                    );
+                    // 이체 수수료를 본사로 이동(2026-09-01 갑 지시).
+                    WithdrawalFeeShare::chargeTransferFee(
+                        $id,
+                        (int) $row['rider_id'],
+                        (int) ($row['withhold_transfer_fee'] ?? 0)
+                    );
+                } elseif ((string) ($row['kind'] ?? '') === 'auto_daily') {
+                    // 일일지급(선정산)·탈퇴 정리 지급 — 예전에는 모의 오픈뱅킹으로 보내고 즉시 완료
+                    // 처리했다(돈이 안 나가는데 완료로 찍혔다). 이제 여기서, **이체가 확정된 뒤에** 옮긴다.
+                    // 라이더 지갑은 «접수 시점의 잔액»(gross_amount)만큼만 뺀다 — 그 사이 새로 쌓인
+                    // 정산분까지 0 으로 밀어버리면 안 된다.
+                    $gross = (int) ($row['gross_amount'] ?? 0) > 0
+                        ? (int) $row['gross_amount']
+                        : (int) ($row['amount'] ?? 0);
+                    // 같은 일을 하는 함수가 이미 있다 — 잔액이 모자라도 음수가 되지 않게 막아 준다.
+                    RiderWallet::deductAfterWithdrawal((int) $row['rider_id'], $gross);
+                    if ($agencyId > 0) {
+                        AgencyWallet::debit(
+                            $agencyId,
+                            (int) ($row['amount'] ?? 0),
+                            'rider_payout',
+                            $id,
+                            trim((string) ($row['rider_code'] ?? '')) . ' 일일정산 지급',
+                            null
+                        );
+                    }
+                    // 수수료 배분 — 일일지급은 사이클 점유 기록을 만들지 않으므로 접수 때 계산해 둔
+                    // 구간 건수를 그대로 쓴다(없으면 기존처럼 재구성 시도).
+                    $short = $row['fee_short_orders'] !== null ? (int) $row['fee_short_orders'] : null;
+                    $long  = $row['fee_long_orders'] !== null ? (int) $row['fee_long_orders'] : null;
+                    WithdrawalFeeShare::distribute($id, (int) $row['rider_id'], (int) ($row['withhold_other'] ?? 0), null, $short, $long);
+                    WithdrawalFeeShare::chargeTransferFee($id, (int) $row['rider_id'], (int) ($row['withhold_transfer_fee'] ?? 0));
+                } elseif ((string) ($row['kind'] ?? '') === 'agency_payout' && $agencyId > 0) {
+                    // 대리점 자체 인출 — **이체가 확정된 지금** 지갑에서 뺀다(2026-09-20).
+                    // 예전에는 신청 즉시 차감하고 완료로 찍었는데, 모의 게이트웨이라 실제로는
+                    // 돈이 나가지 않았다. 이제 라이더 출금과 같은 시점에 같은 방식으로 뺀다.
                     AgencyWallet::debit(
                         $agencyId,
                         (int) ($row['amount'] ?? 0),
-                        'rider_payout',
+                        'agency_payout',
                         $id,
-                        trim((string) ($row['rider_code'] ?? '')) . ' 주정산 출금 지급',
+                        '자체 인출',
                         null
                     );
                 }
-                // 정산수수료를 본사·총판·대리점 몫으로 배분(2026-08-12 갑 확정).
-                WithdrawalFeeShare::distribute(
-                    $id,
-                    (int) $row['rider_id'],
-                    (int) ($row['withhold_other'] ?? 0)
-                );
-                // 이체 수수료를 본사로 이동(2026-09-01 갑 지시).
-                WithdrawalFeeShare::chargeTransferFee(
-                    $id,
-                    (int) $row['rider_id'],
-                    (int) ($row['withhold_transfer_fee'] ?? 0)
-                );
-            } elseif ((string) ($row['kind'] ?? '') === 'auto_daily') {
-                // 일일지급(선정산)·탈퇴 정리 지급 — 예전에는 모의 오픈뱅킹으로 보내고 즉시 완료
-                // 처리했다(돈이 안 나가는데 완료로 찍혔다). 이제 여기서, **이체가 확정된 뒤에** 옮긴다.
-                // 라이더 지갑은 «접수 시점의 잔액»(gross_amount)만큼만 뺀다 — 그 사이 새로 쌓인
-                // 정산분까지 0 으로 밀어버리면 안 된다.
-                $gross = (int) ($row['gross_amount'] ?? 0) > 0
-                    ? (int) $row['gross_amount']
-                    : (int) ($row['amount'] ?? 0);
-                // 같은 일을 하는 함수가 이미 있다 — 잔액이 모자라도 음수가 되지 않게 막아 준다.
-                RiderWallet::deductAfterWithdrawal((int) $row['rider_id'], $gross);
-                if ($agencyId > 0) {
-                    AgencyWallet::debit(
-                        $agencyId,
-                        (int) ($row['amount'] ?? 0),
-                        'rider_payout',
-                        $id,
-                        trim((string) ($row['rider_code'] ?? '')) . ' 일일정산 지급',
-                        null
-                    );
-                }
-                // 수수료 배분 — 일일지급은 사이클 점유 기록을 만들지 않으므로 접수 때 계산해 둔
-                // 구간 건수를 그대로 쓴다(없으면 기존처럼 재구성 시도).
-                $short = $row['fee_short_orders'] !== null ? (int) $row['fee_short_orders'] : null;
-                $long  = $row['fee_long_orders'] !== null ? (int) $row['fee_long_orders'] : null;
-                WithdrawalFeeShare::distribute($id, (int) $row['rider_id'], (int) ($row['withhold_other'] ?? 0), null, $short, $long);
-                WithdrawalFeeShare::chargeTransferFee($id, (int) $row['rider_id'], (int) ($row['withhold_transfer_fee'] ?? 0));
-            } elseif ((string) ($row['kind'] ?? '') === 'agency_payout' && $agencyId > 0) {
-                // 대리점 자체 인출 — **이체가 확정된 지금** 지갑에서 뺀다(2026-09-20).
-                // 예전에는 신청 즉시 차감하고 완료로 찍었는데, 모의 게이트웨이라 실제로는
-                // 돈이 나가지 않았다. 이제 라이더 출금과 같은 시점에 같은 방식으로 뺀다.
-                AgencyWallet::debit(
-                    $agencyId,
-                    (int) ($row['amount'] ?? 0),
-                    'agency_payout',
-                    $id,
-                    '자체 인출',
-                    null
-                );
-            }
+            });
         });
 
         return $done;
+    }
+
+    /**
+     * 일시적 충돌(교착·잠금 대기 초과·1020)이면 잠깐 쉬었다 **다시 시도**한다.
+     *
+     * 같은 지갑 행을 동시에 건드리는 웹훅이 몰릴 때만 나는 오류라, 되풀이하면 대개 통과한다.
+     * 영구적 오류(문법·제약 위반 등)는 그대로 던져 원인이 묻히지 않게 한다.
+     *
+     * ⚠️ **바깥에 트랜잭션이 없을 때만** 써야 한다 — 이미 열린 트랜잭션 안에서 재시도하면
+     *    앞선 작업까지 되돌아간 채로 다시 돌게 된다. 호출부(웹훅·보정 조회)는 트랜잭션 밖이다.
+     */
+    private static function retryOnConflict(callable $fn, int $tries = 3): void
+    {
+        for ($i = 1; ; $i++) {
+            try {
+                $fn();
+
+                return;
+            } catch (Throwable $e) {
+                $m = $e->getMessage();
+                $transient = str_contains($m, 'try restarting transaction')
+                    || str_contains($m, 'Deadlock')
+                    || str_contains($m, 'Lock wait timeout');
+                if ($i >= $tries || !$transient) {
+                    throw $e;
+                }
+                error_log(sprintf('[withdrawal] 일시적 충돌 재시도 %d/%d — %s', $i, $tries - 1, $m));
+                usleep(200000 * $i);   // 0.2s → 0.4s
+            }
+        }
     }
 
     /**
