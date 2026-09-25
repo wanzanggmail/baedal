@@ -32,8 +32,8 @@ $rows = db_rows(
        JOIN riders r ON r.id = w.rider_id
        LEFT JOIN settlement_rider_cycles c ON c.rider_id = w.rider_id
       GROUP BY w.rider_id, w.balance, r.name, r.rider_code
-     HAVING cyc > w.balance
-      ORDER BY (cyc - w.balance) DESC'
+     HAVING COALESCE(SUM(GREATEST(0, c.net_amount - c.withdrawn_amount)), 0) > w.balance
+      ORDER BY COALESCE(SUM(GREATEST(0, c.net_amount - c.withdrawn_amount)), 0) - w.balance DESC'
 );
 
 if ($rows === []) {
