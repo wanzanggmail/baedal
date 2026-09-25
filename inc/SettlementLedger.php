@@ -12,6 +12,15 @@ require_once __DIR__ . '/SettlementAmounts.php';
  */
 final class SettlementLedger
 {
+    /**
+     * 지나간 미소비 차감을 다음 정산이 주워 갈 수 있는 **기간 상한**(일).
+     *
+     * 재반영 타이밍으로 놓친 며칠 치를 구제하는 장치라 창을 좁게 둔다. 이보다 오래된 건은
+     * 자동으로 걷지 않는다 — 그 사이 수동 조정으로 정리됐을 수도 있고, 한꺼번에 걷히면
+     * 라이더 실지급이 0 이 된다.
+     */
+    private const SWEEP_WINDOW_DAYS = 60;
+
     /** @var array<string, string> */
     private const PLATFORM_LABELS = [
         'baemin'  => '배달의민족',
@@ -1037,15 +1046,23 @@ final class SettlementLedger
             //    (2026-09-25 실서버에서 2건 발견). 날짜를 «이하» 로 넓혀 다음 정산이 줍게 한다.
             //    ⚠️ 소비 표시(consumed_cycle_id)가 **있는 서버에서만** 넓힌다 — 표시가 없으면
             //    모든 과거 차감을 사이클마다 다시 걷는 대형 사고가 된다.
+            //    ⏳ **회수 창(window)** — 지나간 것을 줍되 «최근 것만» 줍는다. 이 장치는 재반영
+            //    타이밍 때문에 놓친 며칠 치를 구제하려는 것이지, 몇 달 묵은 미수를 한 번에
+            //    청산하려는 게 아니다. 창이 없으면 오래전에 «걷을 수 없어 방치된» 차감이
+            //    한꺼번에 몰려 라이더 실지급이 0 으로 잘린다(개발서버 실측: 5개월치 170만원).
+            //    창 밖의 건은 `tools/audit_double_deduction.php` ③ 에 남아 사람이 판단한다.
             $claimable  = self::deductionEntriesClaimable();
-            $dateCond   = self::deductionSweepReady() ? 'applied_date <= ?' : 'applied_date = ?';
+            $sweep      = self::deductionSweepReady();
+            $dateCond   = $sweep
+                ? 'applied_date <= ? AND applied_date >= DATE_SUB(?, INTERVAL ' . self::SWEEP_WINDOW_DAYS . ' DAY)'
+                : 'applied_date = ?';
             $unconsumed = $claimable ? ' AND consumed_cycle_id IS NULL' : '';
             $manual = db_rows(
                 'SELECT id, applied_date, kind, amount, note FROM deduction_entries
                   WHERE rider_id = ? AND ' . $dateCond . ' AND amount <> 0'
                   . $excludeExcel . $unconsumed . '
                   ORDER BY applied_date ASC, id ASC',
-                [$riderId, $settlementDate]
+                $sweep ? [$riderId, $settlementDate, $settlementDate] : [$riderId, $settlementDate]
             );
             foreach ($manual as $m) {
                 $amt = abs((int) ($m['amount'] ?? 0));
