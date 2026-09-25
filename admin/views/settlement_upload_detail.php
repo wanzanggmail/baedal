@@ -1091,6 +1091,11 @@ $fmtWon = static fn (int $n): string => number_format($n) . '원';
 				{ label: '프로모션 3', amt: d.fee_promo3 },
 				{ label: '프로모션 4', amt: d.fee_promo4 },
 			];
+			// 배민은 일자 요약에 구성이 없어 서버가 오더별 상세를 합산해 내려준다(표시 전용).
+			// 항목 이름이 쿠팡과 아예 다르므로 목록을 통째로 갈아끼운다.
+			if (d.compose && d.compose.length) {
+				earnItems = d.compose.map(function (c) { return { label: c.label, amt: c.amount }; });
+			}
 			html += itemTable('ki-tag', '정산금액 구성 (부가세 제외)', earnItems, '+', '정산금액').html;
 
 			var deductItems = fees.map(function (f) {

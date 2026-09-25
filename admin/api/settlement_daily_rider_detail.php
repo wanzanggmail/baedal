@@ -75,6 +75,55 @@ foreach (SettlementAmounts::excelDeductions(
     ];
 }
 
+// ── 배민 정산금액 구성 ────────────────────────────────────────────────────
+// 배민은 일자 요약에 **총액(배달처리비)만** 들어 있고 구성 컬럼은 0이다(쿠팡 체계와 달라서).
+// 그래서 「정산금액 구성」이 배민만 비어 보였다. 구성은 오더별 상세에 있으므로 **여기서 합산해
+// 표시용으로만** 내려준다 — 일자 요약 컬럼을 채우면 `SettlementAmounts::exVat()` 가 구성 합을
+// 정산 기준액으로 삼아 **정산액이 달라진다**(실측: 구성 합이 배달처리비보다 하루 2,400원까지 작다).
+// 차액은 우리가 아직 안 읽는 할증 열이라, 합계가 맞도록 「기타」 로 묶어 보여준다.
+$compose = null;
+if ((string) $row['platform'] === 'baemin' && db_table_exists('settlement_order_details')) {
+    $where  = 'upload_id = ? AND settlement_date = ?';
+    $params = [(int) $row['upload_id'], (string) $row['settlement_date']];
+    if ((int) ($row['rider_id'] ?? 0) > 0) {
+        $where   .= ' AND rider_id = ?';
+        $params[] = (int) $row['rider_id'];
+    } else {
+        $where   .= ' AND rider_name_raw = ?';
+        $params[] = (string) $row['rider_name_raw'];
+    }
+    $o = db_row(
+        "SELECT COUNT(*) c,
+                COALESCE(SUM(fee_delivery),0) base, COALESCE(SUM(fee_area),0) area,
+                COALESCE(SUM(fee_weather),0) weather, COALESCE(SUM(fee_promo1),0) peak,
+                COALESCE(SUM(fee_promo2),0) extra, COALESCE(SUM(fee_promo3),0) bulk
+           FROM settlement_order_details WHERE {$where}",
+        $params
+    );
+    if ($o !== null && (int) $o['c'] > 0) {
+        // 라벨은 배민 정산서 표기 그대로. (DB 컬럼명이 쿠팡 기준이라 promo1~3 에 담겨 있을 뿐이다.)
+        $parts = [
+            ['기본단가', (int) $o['base']],
+            ['지역 할증', (int) $o['area']],
+            ['기상할증', (int) $o['weather']],
+            ['피크할증', (int) $o['peak']],
+            ['추가할증', (int) $o['extra']],
+            ['대량할증', (int) $o['bulk']],
+        ];
+        $sum     = array_sum(array_column($parts, 1));
+        $compose = [];
+        foreach ($parts as [$label, $amt]) {
+            if ($amt !== 0) {
+                $compose[] = ['label' => $label, 'amount' => $amt];
+            }
+        }
+        $etc = $earn - $sum;
+        if ($etc !== 0) {
+            $compose[] = ['label' => '기타(미분류 할증)', 'amount' => $etc];
+        }
+    }
+}
+
 $feesOut = [];
 foreach ($preview['fees'] as $f) {
     $feesOut[] = [
@@ -119,6 +168,8 @@ echo json_encode([
         'fee_promo2'       => (int) $row['fee_promo2'],
         'fee_promo3'       => (int) $row['fee_promo3'],
         'fee_promo4'       => (int) $row['fee_promo4'],
+        // 배민처럼 일자 요약에 구성이 없는 플랫폼용 — 있으면 화면이 이걸 그대로 쓴다.
+        'compose'          => $compose,
         'weekly_deductions'=> $weekly,
         'created_at'       => substr((string) $row['created_at'], 0, 19),
         'matched'          => $matched,

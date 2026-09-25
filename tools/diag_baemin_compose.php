@@ -77,4 +77,20 @@ if ($bad === []) {
     echo "  ⚠️ 불일치가 있다. 구성을 그대로 채우면 그만큼 정산 기준액이 달라진다.\n";
     echo "     원인 후보: 배달처리비 0원 처리건(라이더 귀책)·헛걸음 보상·우리가 안 읽는 할증 열.\n";
     echo "     → 구성은 «표시용»으로만 채우고 정산 기준액은 배달처리비를 유지하는 쪽이 안전하다.\n";
+
+    // ── ② 건별 차이 분포 — «어떤 금액이 몇 건에서» 비는지 보면 빠진 열의 정체가 드러난다.
+    echo "\n  건별 차이 분포(배달처리비 − 구성 합):\n";
+    foreach (db_rows(
+        "SELECT (od.net_amount - (od.fee_delivery + od.fee_area + od.fee_weather
+                                + od.fee_promo1 + od.fee_promo2 + od.fee_promo3)) AS gap,
+                COUNT(*) AS c
+           FROM settlement_order_details od
+           JOIN settlement_uploads u ON u.id = od.upload_id
+          WHERE u.platform = 'baemin'
+          GROUP BY gap ORDER BY c DESC LIMIT 15"
+    ) as $g) {
+        printf("    %+8s원 × %d건%s\n", $n($g['gap']), (int) $g['c'], (int) $g['gap'] === 0 ? '  (정상)' : '');
+    }
+    echo "     같은 금액이 여러 건에 반복되면 그게 **우리가 안 읽는 할증 열**이다.\n";
+    echo "     배민 정산서 헤더에서 그 이름을 찾아 XlsxParser::parseBaeminOrders() 에 추가하면 된다.\n";
 }
