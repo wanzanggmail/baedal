@@ -351,6 +351,75 @@ final class WithdrawalCycles
     }
 
     /**
+     * **출금이 아닌 경로로 지갑에서 빠진 돈**을 사이클에도 반영한다(오래된 것부터).
+     *
+     * 왜 필요한가 — 출금 가능액은 «지갑 잔액»을 한도로 삼고 소진 대상은 «사이클»이다.
+     * 수동 조정으로 지갑만 줄이면 **사이클이 지갑보다 많아진 채로 굳는다.** 그러면 라이더는
+     * 매번 그 차액만큼 사이클을 못 가져가고, 그 잔여가 다음 출금에 «지난 날짜»로 계속 따라붙는다
+     * (2026-09-25 이지성: 미수금 10,000 강제 조정 뒤 9/23 정산분 3건이 계속 남았다).
+     *
+     * 출금 요청에 연결하지 않는다 — 이 소진은 출금이 아니기 때문이다(반려로 되돌릴 대상도 아니다).
+     *
+     * @return int 실제로 반영한 금액
+     */
+    public static function consumeOutside(int $riderId, int $amount): int
+    {
+        if ($riderId < 1 || $amount <= 0 || !self::tableReady()) {
+            return 0;
+        }
+        $left = $amount;
+        foreach (self::unwithdrawn($riderId) as $c) {
+            if ($left <= 0) {
+                break;
+            }
+            $take = min($left, (int) $c['remaining']);
+            db_execute(
+                'UPDATE settlement_rider_cycles
+                    SET withdrawn_amount = LEAST(net_amount, withdrawn_amount + ?)
+                  WHERE id = ?',
+                [$take, (int) $c['id']]
+            );
+            $left -= $take;
+        }
+
+        return $amount - $left;
+    }
+
+    /**
+     * `consumeOutside()` 의 반대 — 지갑이 **늘어난** 수동 조정이면 사이클 점유를 푼다(최근 것부터).
+     *
+     * @return int 실제로 되돌린 금액
+     */
+    public static function releaseOutside(int $riderId, int $amount): int
+    {
+        if ($riderId < 1 || $amount <= 0 || !self::tableReady()) {
+            return 0;
+        }
+        $rows = db_rows(
+            'SELECT id, withdrawn_amount FROM settlement_rider_cycles
+              WHERE rider_id = ? AND withdrawn_amount > 0
+              ORDER BY settlement_date DESC, id DESC',
+            [$riderId]
+        );
+        $left = $amount;
+        foreach ($rows as $r) {
+            if ($left <= 0) {
+                break;
+            }
+            $back = min($left, (int) $r['withdrawn_amount']);
+            db_execute(
+                'UPDATE settlement_rider_cycles
+                    SET withdrawn_amount = GREATEST(0, withdrawn_amount - ?)
+                  WHERE id = ?',
+                [$back, (int) $r['id']]
+            );
+            $left -= $back;
+        }
+
+        return $amount - $left;
+    }
+
+    /**
      * 출금 반려/취소 시 점유 해제 — 사이클 withdrawn_amount 복구 + 연결 삭제.
      *
      * @param list<int> $requestIds

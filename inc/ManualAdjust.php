@@ -45,16 +45,30 @@ final class ManualAdjust
 
         db_execute('UPDATE rider_wallets SET balance = ?, updated_at = NOW() WHERE rider_id = ?', [$newBalance, $riderId]);
 
+        // ⚠️ **사이클도 같이 맞춘다.** 출금 가능액은 «지갑 잔액»을 한도로 삼고 실제 소진 대상은
+        //    «정산 사이클»이다. 지갑만 줄이면 사이클이 지갑보다 많아진 채로 굳어, 라이더는 매번
+        //    그 차액만큼 못 가져가고 그 잔여가 다음 출금에 «지난 날짜»로 계속 따라붙는다
+        //    (2026-09-25 이지성: 미수금 10,000 강제 조정 뒤 9/23 정산분 3건이 계속 남았다).
+        require_once __DIR__ . '/WithdrawalCycles.php';
+        $delta   = $newBalance - $before;
+        $synced  = 0;
+        if ($delta < 0) {
+            $synced = -WithdrawalCycles::consumeOutside($riderId, -$delta);
+        } elseif ($delta > 0) {
+            $synced = WithdrawalCycles::releaseOutside($riderId, $delta);
+        }
+
         self::audit('settlement.manual_adjust.rider', 'rider_wallets', $riderId, $adminId, $reason, [
             'target'  => 'rider_wallet',
             'rider'   => (string) $rider['rider_code'] . '/' . (string) $rider['name'],
             'balance' => $before,
         ], [
-            'balance' => $newBalance,
-            'reason'  => $reason,
+            'balance'      => $newBalance,
+            'reason'       => $reason,
+            'cycle_synced' => $synced,   // 사이클에 함께 반영한 금액(음수 = 소진 처리)
         ]);
 
-        return ['before' => $before, 'after' => $newBalance];
+        return ['before' => $before, 'after' => $newBalance, 'cycle_synced' => $synced];
     }
 
     /**
