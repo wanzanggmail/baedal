@@ -210,10 +210,22 @@ try {
         $hourlyIns              = [];
         $supports               = [];
         $addSupports            = [];
-        // 업로드 표기일 = 파일명 범위 시작 대신 실제 최소 운행일(더 정확)
-        $baeminDates = array_column($parsed['rows'], 'settlement_date');
+        // ⛔ **일일정산서는 한 파일에 하루만**(2026-09-25 갑). 배민은 기간으로 내려받을 수 있어
+        //    `..._20260921_20260923.xlsx` 처럼 3일치가 한 파일에 담겨 오기도 한다. 그대로 받으면
+        //    업로드 1건에 여러 정산일 사이클이 섞여 생기고, 중복 판정(대리점+팀지역+정산일)도
+        //    첫 날짜 기준으로만 걸려 **같은 날을 또 올려도 안 막힌다.** 아예 받지 않는다.
+        $baeminDates = array_values(array_unique(array_filter(array_column($parsed['rows'], 'settlement_date'))));
+        sort($baeminDates);
+        if (count($baeminDates) > 1) {
+            throw new InvalidArgumentException(sprintf(
+                '한 파일에 운행일이 %d개(%s) 들어 있습니다. 일일정산서는 하루치만 올릴 수 있습니다 — 배민에서 날짜를 하루로 지정해 다시 받아 주세요.',
+                count($baeminDates),
+                implode(', ', $baeminDates)
+            ));
+        }
+        // 업로드 표기일 = 파일명 범위 시작 대신 실제 운행일(더 정확)
         if ($baeminDates !== []) {
-            $settlementDate = min($baeminDates);
+            $settlementDate = $baeminDates[0];
         }
     } else {
         $parsed       = $parser->parseDailySheet($settlementDate);
