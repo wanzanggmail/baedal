@@ -35,9 +35,9 @@ $dupes = db_rows(
     $KINDS
 );
 
+echo "\n" . str_repeat('-', 74) . "\n① 같은 라이더·같은 날짜에 두 번 이상 빠진 건\n" . str_repeat('-', 74) . "\n";
 if ($dupes === []) {
-    echo "\n  이중차감 없음.\n";
-    exit(0);
+    echo "  없음.\n";
 }
 
 $excessTotal = 0;
@@ -76,5 +76,95 @@ foreach ($dupes as $d) {
     }
 }
 
-printf("\n합계 초과 차감 %s원 (%d건)\n", $n($excessTotal), count($dupes));
-echo "→ 라이더에게 돌려줄 금액이다. 「정산/잔액 수동 조정」(본사 전용)으로 처리한다.\n";
+if ($dupes !== []) {
+    printf("\n  합계 초과 차감 %s원 (%d건)\n", $n($excessTotal), count($dupes));
+    echo "  → 라이더에게 돌려줄 금액이다. 「정산/잔액 수동 조정」(본사 전용)으로 처리한다.\n";
+}
+
+// ── ② 원장 vs 정산 대조 ────────────────────────────────────────────────────
+// 미수금 원장(rider_debt_entries)은 «걷었다»는데 정산(settlement_fee_items)에는 없거나,
+// 그 반대인 건. 이중차감·취소 후 잔존·고아 차감이 전부 여기 걸린다.
+echo "\n" . str_repeat('-', 74) . "\n② 원장 vs 정산 대조 (라이더·날짜별 합계)\n" . str_repeat('-', 74) . "\n";
+
+$ledger = [];
+foreach (db_rows(
+    'SELECT rider_id, applied_date d, COALESCE(SUM(amount),0) amt
+       FROM rider_debt_entries GROUP BY rider_id, applied_date'
+) as $r) {
+    $ledger[(int) $r['rider_id'] . '|' . (string) $r['d']] = (int) $r['amt'];
+}
+
+$charged = [];
+foreach (db_rows(
+    "SELECT c.rider_id, c.settlement_date d, COALESCE(SUM(fi.amount),0) amt
+       FROM settlement_fee_items fi
+       JOIN settlement_rider_cycles c ON c.id = fi.cycle_id
+      WHERE fi.fee_code IN ({$ph})
+      GROUP BY c.rider_id, c.settlement_date",
+    $KINDS
+) as $r) {
+    $charged[(int) $r['rider_id'] . '|' . (string) $r['d']] = (int) $r['amt'];
+}
+
+$mismatch = 0;
+foreach (array_unique(array_merge(array_keys($ledger), array_keys($charged))) as $k) {
+    $l = $ledger[$k] ?? 0;
+    $c = $charged[$k] ?? 0;
+    if ($l === $c) {
+        continue;
+    }
+    $mismatch++;
+    [$rid, $date] = explode('|', (string) $k);
+    $rider = db_row('SELECT name, rider_code FROM riders WHERE id = ? LIMIT 1', [(int) $rid]) ?? [];
+    printf(
+        "  %s %s(%s) — 원장 %s / 정산 %s · 차이 %s\n",
+        $date,
+        (string) ($rider['name'] ?? '?'),
+        (string) ($rider['rider_code'] ?? '?'),
+        $n($l),
+        $n($c),
+        ($c > $l ? '+' : '') . $n($c - $l)
+    );
+}
+if ($mismatch === 0) {
+    echo "  일치.\n";
+} else {
+    echo "\n  «정산 > 원장» = 라이더가 더 떼임(이중차감·취소 후 잔존).\n";
+    echo "  «원장 > 정산» = 원장엔 걷었다는데 실제로는 안 걷힘(고아 차감).\n";
+    echo "  ⚠️ 엑셀 차감내역을 같은 코드로 등록한 건이 있으면 «정산 > 원장» 으로 보일 수 있다 — 건별로 확인할 것.\n";
+}
+
+// ── ③ 아직 안 먹힌 차감 행 ─────────────────────────────────────────────────
+// 귀속일에 사이클이 이미 있는데 consumed_cycle_id 가 비어 있으면, 그 차감은
+// 그 정산에서 안 걷혔다는 뜻이다(귀속일을 과거로 잡은 수동 차감 등).
+if (in_array('consumed_cycle_id', array_column(db_rows('SHOW COLUMNS FROM deduction_entries'), 'Field'), true)) {
+    echo "\n" . str_repeat('-', 74) . "\n③ 사이클이 지나갔는데 안 먹힌 차감 행\n" . str_repeat('-', 74) . "\n";
+    $orphans = db_rows(
+        "SELECT de.id, de.rider_id, de.applied_date, de.kind, de.amount, r.name, r.rider_code
+           FROM deduction_entries de
+           JOIN riders r ON r.id = de.rider_id
+          WHERE de.consumed_cycle_id IS NULL
+            AND de.kind IN ({$ph})
+            AND EXISTS (SELECT 1 FROM settlement_rider_cycles c
+                         WHERE c.rider_id = de.rider_id AND c.settlement_date = de.applied_date)
+          ORDER BY de.applied_date DESC",
+        $KINDS
+    );
+    if ($orphans === []) {
+        echo "  없음.\n";
+    } else {
+        foreach ($orphans as $o) {
+            printf(
+                "  %s %s(%s) · %s %s원 (차감행 #%d)\n",
+                (string) $o['applied_date'],
+                (string) $o['name'],
+                (string) $o['rider_code'],
+                (string) $o['kind'],
+                $n($o['amount']),
+                (int) $o['id']
+            );
+        }
+        echo "\n  → 원장엔 걷었다고 남고 실제로는 안 걷힌 건이다. 확인 후 수동 조정.\n";
+    }
+}
+

@@ -629,6 +629,19 @@ final class RiderDebt
         }
         $isAmortizing = in_array((string) $debt['kind'], self::AMORTIZING, true);
 
+        // ⛔ **이미 정산에 반영된 차감은 취소하면 안 된다.**
+        //    취소는 `deduction_entries` 행만 지우는데, 그 행을 이미 사이클이 먹었다면
+        //    라이더에게선 벌써 떼인 상태다. 잔액만 되살아나 **같은 돈을 다음 정산에서 또 뗀다**
+        //    (2026-09-25 점검에서 발견 — 화면 문구는 «정산 반영 전이라면» 이었지만 아무도
+        //    확인하지 않았다). 반영된 건의 정정은 본사 전용 「정산/잔액 수동 조정」이 맡는다.
+        $consumedBy = self::consumedCycleOf((int) ($entry['deduction_entry_id'] ?? 0));
+        if ($consumedBy > 0) {
+            throw new InvalidArgumentException(
+                '이미 정산에 반영된 차감이라 취소할 수 없습니다(사이클 #' . $consumedBy . '). '
+                . '라이더에게는 이미 차감된 금액이므로, 되돌리려면 「정산/잔액 수동 조정」을 쓰세요.'
+            );
+        }
+
         // 이 차감 건이 실제로 옮긴 배분액(스냅샷)을 그대로 되돌린다.
         // 설정이 그 사이 바뀌었어도 "그때 옮긴 금액"으로 복구해야 지갑이 어긋나지 않는다.
         $split = [
@@ -648,6 +661,17 @@ final class RiderDebt
             // 상위로 올려보낸 리스 수수료를 대리점에 되돌려준다.
             self::moveLeaseFees($split, $chain, -1, (int) $entry['id'], '리스 수수료 배분');
             db_execute('DELETE FROM rider_debt_entries WHERE id = ?', [(int) $entry['id']]);
+            // 커버 구간도 되돌린다 — 부과가 due_updated_on 을 «일수»만큼 앞당겼으니 그만큼 되민다.
+            // 안 되돌리면 그 날들은 영영 부과되지 않아 라이더가 안 갚은 채로 남는다.
+            // (선지급 전액회수는 days=0 이라 커버 개념이 없어 건드리지 않는다.)
+            $days = (int) ($entry['days'] ?? 0);
+            if ($days > 0) {
+                db_execute(
+                    'UPDATE rider_debts SET due_updated_on = DATE_SUB(due_updated_on, INTERVAL ? DAY)
+                      WHERE id = ? AND due_updated_on IS NOT NULL',
+                    [$days, (int) $debt['id']]
+                );
+            }
             if ($isAmortizing) {
                 // 잔액 복구 + 완납이었다면 active 로 되돌림
                 db_execute(
@@ -659,6 +683,27 @@ final class RiderDebt
                 );
             }
         });
+    }
+
+    /**
+     * 이 차감 행을 **이미 먹은 정산 사이클** id (0 = 아직 안 먹힘 / 컬럼 없는 구버전).
+     *
+     * @see SettlementLedger::claimDeductionEntries()
+     */
+    public static function consumedCycleOf(int $deductionEntryId): int
+    {
+        if ($deductionEntryId < 1 || !db_table_exists('deduction_entries')) {
+            return 0;
+        }
+        static $has = null;
+        if ($has === null) {
+            $has = in_array('consumed_cycle_id', array_column(db_rows('SHOW COLUMNS FROM deduction_entries'), 'Field'), true);
+        }
+        if (!$has) {
+            return 0;
+        }
+
+        return (int) (db_row('SELECT consumed_cycle_id FROM deduction_entries WHERE id = ? LIMIT 1', [$deductionEntryId])['consumed_cycle_id'] ?? 0);
     }
 
     /**
