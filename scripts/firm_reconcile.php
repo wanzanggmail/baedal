@@ -36,10 +36,11 @@ if ((int) (db_row('SELECT GET_LOCK(?, 5) AS g', [$lock])['g'] ?? 0) !== 1) {
 try {
     $r = FirmReconciler::run($minAge);
     printf(
-        "%s 조회 %d · 확정 %d · 진행중 %d · 오류 %d\n",
+        "%s 조회 %d · 확정 %d · 재확정 %d · 진행중 %d · 오류 %d\n",
         date('Y-m-d H:i:s'),
         $r['checked'],
         $r['finalized'],
+        $r['repaired'] ?? 0,
         $r['still_pending'],
         $r['errors']
     );
@@ -47,8 +48,13 @@ try {
         echo '  ' . $line . "\n";
     }
     // 확정이나 오류가 있으면 로그에서 눈에 띄게 남긴다.
-    if ($r['finalized'] > 0 || $r['errors'] > 0) {
-        error_log(sprintf('[firm_reconcile] 확정 %d건 · 오류 %d건', $r['finalized'], $r['errors']));
+    if ($r['finalized'] > 0 || ($r['repaired'] ?? 0) > 0 || $r['errors'] > 0) {
+        error_log(sprintf(
+            '[firm_reconcile] 확정 %d건 · 재확정 %d건 · 오류 %d건',
+            $r['finalized'],
+            $r['repaired'] ?? 0,
+            $r['errors']
+        ));
     }
 } finally {
     db_row('SELECT RELEASE_LOCK(?) AS r', [$lock]);

@@ -25,11 +25,15 @@ final class FirmReconciler
      * 미확정 건을 조회해 결과를 반영한다.
      *
      * @param int $minAgeMinutes 접수 후 이 시간이 지난 건만 본다(웹훅이 올 시간을 준다)
-     * @return array{checked:int, finalized:int, still_pending:int, errors:int, orphans:int, details:list<string>}
+     * @return array{checked:int, finalized:int, still_pending:int, errors:int, orphans:int, repaired:int, details:list<string>}
      */
     public static function run(int $minAgeMinutes = 5, int $limit = 100): array
     {
-        $out = ['checked' => 0, 'finalized' => 0, 'still_pending' => 0, 'errors' => 0, 'orphans' => 0, 'details' => []];
+        $out = ['checked' => 0, 'finalized' => 0, 'still_pending' => 0, 'errors' => 0, 'orphans' => 0, 'repaired' => 0, 'details' => []];
+
+        // 🩹 **갈라진 상태부터 잇는다** — 장부는 확정인데 출금이 안 따라온 건.
+        //    바움에 다시 물을 필요가 없으니 연동이 꺼져 있어도 돌린다.
+        self::repairSplit($out);
 
         require_once __DIR__ . '/FirmConfig.php';
         if (!FirmConfig::isReady()) {
@@ -119,6 +123,57 @@ final class FirmReconciler
         }
 
         return $out;
+    }
+
+    /**
+     * 장부는 확정됐는데 출금이 「접수중」에 남은 건을 **다시 확정시킨다**.
+     *
+     * 확정이 두 단계(장부 → 출금+지갑)라 ①만 되고 ②에서 터지면 그 건은 영영 안 풀린다.
+     * `pending()` 이 `finalized_at IS NULL` 만 보기 때문이다. 여기서 ② 만 다시 태운다 —
+     * `finalizeSuccess()`·`markTransferFailed()` 는 상태 조건이 걸려 있어 **멱등**하므로
+     * 이미 처리된 건에는 아무 일도 하지 않는다.
+     *
+     * @param array<string,mixed> $out
+     */
+    private static function repairSplit(array &$out): void
+    {
+        $rows = FirmTransfer::finalizedButOpen();
+        if ($rows === []) {
+            return;
+        }
+
+        require_once __DIR__ . '/Withdrawal.php';
+        foreach ($rows as $tr) {
+            $refId  = (int) $tr['ref_id'];
+            $status = strtoupper((string) $tr['status']);
+            try {
+                if ($status === BaumFirmGateway::ST_SUCCESS) {
+                    $ok = Withdrawal::finalizeSuccess(
+                        $refId,
+                        '이체 완료 재확정(장부-출금 불일치 보정) · 접수번호 ' . (string) $tr['reception_id']
+                    );
+                } else {
+                    $ok = Withdrawal::markTransferFailed(
+                        $refId,
+                        '이체 실패 재확정(장부-출금 불일치 보정) · ' . (string) $tr['fail_reason']
+                    );
+                }
+            } catch (Throwable $e) {
+                $out['errors']++;
+                $out['details'][] = sprintf('출금 #%d 재확정 실패 — %s', $refId, $e->getMessage());
+                continue;
+            }
+
+            if ($ok) {
+                $out['repaired']++;
+                $out['details'][] = sprintf(
+                    '🩹 출금 #%d — 장부는 %s 인데 「%s」 에 남아 있어 다시 확정했습니다.',
+                    $refId,
+                    $status,
+                    (string) ($tr['src_status'] ?? '')
+                );
+            }
+        }
     }
 
     /**

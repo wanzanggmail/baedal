@@ -114,13 +114,13 @@ try {
         $minAge = max(0, min(1440, (int) ($body['min_age'] ?? 5)));
         $r      = FirmReconciler::run($minAge);
 
-        AuditLog::record('firm.reconcile', '1', sprintf('펌뱅킹 보정 조회 — 확인 %d건 / 확정 %d건', $r['checked'], $r['finalized']));
+        AuditLog::record('firm.reconcile', '1', sprintf('펌뱅킹 보정 조회 — 확인 %d건 / 확정 %d건 / 재확정 %d건', $r['checked'], $r['finalized'], $r['repaired'] ?? 0));
 
         echo json_encode([
             'ok'      => true,
             'message' => sprintf(
-                '조회 %d건 · 확정 %d건 · 진행중 %d건 · 오류 %d건',
-                $r['checked'], $r['finalized'], $r['still_pending'], $r['errors']
+                '조회 %d건 · 확정 %d건 · 재확정 %d건 · 진행중 %d건 · 오류 %d건',
+                $r['checked'], $r['finalized'], $r['repaired'] ?? 0, $r['still_pending'], $r['errors']
             ),
             'result'  => $r,
         ], JSON_UNESCAPED_UNICODE);

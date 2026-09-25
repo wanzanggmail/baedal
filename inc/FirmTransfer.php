@@ -168,6 +168,38 @@ final class FirmTransfer
         );
     }
 
+    /**
+     * **장부는 확정됐는데 원본 출금이 안 따라온 건** — 갈라진 상태.
+     *
+     * 확정은 두 단계다: ① `firm_transfers` 상태 갱신 ② `withdrawal_requests` 확정 + 지갑 이동.
+     * 둘이 한 트랜잭션이 아니라서, ①만 되고 ②에서 터지면 **출금이 「접수중」에 영원히 갇힌다.**
+     * ① 이 끝난 건은 `pending()`(finalized_at IS NULL)에서 빠지므로 보정 조회도 다시 안 본다
+     * (2026-09-25 실서버 1건 — 이체는 됐는데 출금은 접수중, 크론이 돌아도 안 풀렸다).
+     *
+     * 반려(rejected)된 건은 사람이 판단한 결과라 자동으로 되살리지 않는다.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function finalizedButOpen(int $limit = 100): array
+    {
+        if (!self::tableExists() || !db_table_exists('withdrawal_requests')) {
+            return [];
+        }
+
+        return db_rows(
+            "SELECT ft.*, wr.status AS src_status
+               FROM firm_transfers ft
+               JOIN withdrawal_requests wr ON wr.id = ft.ref_id
+              WHERE ft.finalized_at IS NOT NULL
+                AND ft.kind IN ('withdrawal', 'daily_payout', 'agency_payout')
+                AND wr.status <> 'rejected'
+                AND ((ft.status = 'SUCCESS' AND wr.status <> 'completed')
+                  OR (ft.status IN ('FAILED', 'CANCELLED') AND wr.status NOT IN ('failed', 'completed')))
+              ORDER BY ft.id ASC
+              LIMIT " . max(1, min(200, $limit))
+        );
+    }
+
     /** 미확정 건수 — 화면 배지용. */
     public static function pendingCount(): int
     {
