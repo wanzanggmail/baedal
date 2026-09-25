@@ -113,21 +113,41 @@ foreach (array_unique(array_merge(array_keys($ledger), array_keys($charged))) as
     if ($l === $c) {
         continue;
     }
-    $mismatch++;
     [$rid, $date] = explode('|', (string) $k);
     $rider = db_row('SELECT name, rider_code FROM riders WHERE id = ? LIMIT 1', [(int) $rid]) ?? [];
+
+    // 차감 행의 상태를 같이 본다 — 소비 표시가 다 붙어 있으면 **정산 밖에서 정리된 건**이다
+    // (수동 조정으로 돌려줬거나 걷었거나). 그런 건은 영원히 «원장 > 정산» 으로 남으므로
+    // 경고가 아니라 «정리됨» 으로 표시해야 진짜 문제가 묻히지 않는다.
+    $st = db_row(
+        "SELECT COUNT(*) total,
+                SUM(consumed_cycle_id IS NOT NULL) done
+           FROM deduction_entries
+          WHERE rider_id = ? AND applied_date = ? AND kind IN ({$ph})",
+        array_merge([(int) $rid, $date], $KINDS)
+    ) ?? ['total' => 0, 'done' => 0];
+    $pending = (int) $st['total'] - (int) $st['done'];
+    $settled = (int) $st['total'] > 0 && $pending === 0 && $c < $l;
+
+    if (!$settled) {
+        $mismatch++;
+    }
     printf(
-        "  %s %s(%s) — 원장 %s / 정산 %s · 차이 %s\n",
+        "  %s %s %s(%s) — 원장 %s / 정산 %s · 차이 %s%s\n",
+        $settled ? '✓' : '!',
         $date,
         (string) ($rider['name'] ?? '?'),
         (string) ($rider['rider_code'] ?? '?'),
         $n($l),
         $n($c),
-        ($c > $l ? '+' : '') . $n($c - $l)
+        ($c > $l ? '+' : '') . $n($c - $l),
+        $settled
+            ? '  ← 정산 밖에서 정리됨(수동 조정 등) · 조치 불필요'
+            : ($pending > 0 ? sprintf('  ← 미회수 차감 %d건 — 다음 정산에서 걷힌다', $pending) : '')
     );
 }
 if ($mismatch === 0) {
-    echo "  일치.\n";
+    echo "  조치가 필요한 건 없음.\n";
 } else {
     echo "\n  «정산 > 원장» = 라이더가 더 떼임(이중차감·취소 후 잔존).\n";
     echo "  «원장 > 정산» = 원장엔 걷었다는데 실제로는 안 걷힘(고아 차감).\n";
