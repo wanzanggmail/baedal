@@ -164,7 +164,12 @@ if (in_array('consumed_cycle_id', array_column(db_rows('SHOW COLUMNS FROM deduct
                 (int) $o['id']
             );
         }
-        echo "\n  → 원장엔 걷었다고 남고 실제로는 안 걷힌 건이다. 확인 후 수동 조정.\n";
+        echo "\n  → 원장엔 걷었다고 남고 실제로는 안 걷힌 건이다.\n";
+        echo "     2026-09-25 이후 코드는 **다음 정산 반영에서 자동으로 걷는다**(귀속일 이하의 미소비 차감을 줍는다).\n";
+        echo "     이미 수동 조정으로 정리한 건이라면 다시 걷히지 않게 소비 처리해 둘 것:\n";
+        echo "       UPDATE deduction_entries de JOIN settlement_rider_cycles c\n";
+        echo "         ON c.rider_id = de.rider_id AND c.settlement_date = de.applied_date\n";
+        echo "        SET de.consumed_cycle_id = c.id WHERE de.id IN (<위 차감행 번호>);\n";
     }
 }
 

@@ -1031,12 +1031,20 @@ final class SettlementLedger
             //    정산서에 동시에 올라오면 사이클이 두 개 생기는데, 둘 다 같은
             //    deduction_entries 행을 집어 **대여금이 두 번 빠졌다**(2026-09-24 실사용 발견).
             //    사이클이 먹은 행은 consumed_cycle_id 로 표시하고 여기서는 안 먹은 것만 본다.
-            $unconsumed = self::deductionEntriesClaimable() ? ' AND consumed_cycle_id IS NULL' : '';
+            // 🧹 **지나간 미소비 차감도 여기서 걷는다.** 귀속일에 사이클이 없거나(그날 일 안 함),
+            //    이미 만들어진 사이클 뒤에 차감이 생기면(미수금을 나중에 등록·재반영) 그 행은
+            //    영영 안 걷혔다 — 원장엔 «걷었다» 고 남고 라이더에게선 안 빠지는 상태
+            //    (2026-09-25 실서버에서 2건 발견). 날짜를 «이하» 로 넓혀 다음 정산이 줍게 한다.
+            //    ⚠️ 소비 표시(consumed_cycle_id)가 **있는 서버에서만** 넓힌다 — 표시가 없으면
+            //    모든 과거 차감을 사이클마다 다시 걷는 대형 사고가 된다.
+            $claimable  = self::deductionEntriesClaimable();
+            $dateCond   = self::deductionSweepReady() ? 'applied_date <= ?' : 'applied_date = ?';
+            $unconsumed = $claimable ? ' AND consumed_cycle_id IS NULL' : '';
             $manual = db_rows(
-                'SELECT id, kind, amount, note FROM deduction_entries
-                  WHERE rider_id = ? AND applied_date = ? AND amount <> 0'
+                'SELECT id, applied_date, kind, amount, note FROM deduction_entries
+                  WHERE rider_id = ? AND ' . $dateCond . ' AND amount <> 0'
                   . $excludeExcel . $unconsumed . '
-                  ORDER BY id ASC',
+                  ORDER BY applied_date ASC, id ASC',
                 [$riderId, $settlementDate]
             );
             foreach ($manual as $m) {
@@ -1045,9 +1053,16 @@ final class SettlementLedger
                     continue;
                 }
                 $kind = (string) ($m['kind'] ?? 'manual');
+                // 지난 날짜 것을 뒤늦게 걷는 경우 라벨에 원래 귀속일을 남긴다 — 라이더 명세서에서
+                // «왜 오늘 이게 빠졌지» 가 되지 않게.
+                $label = self::deductionKindLabel($kind, (string) ($m['note'] ?? ''));
+                $when  = (string) ($m['applied_date'] ?? '');
+                if ($when !== '' && $when !== $settlementDate) {
+                    $label .= ' (' . substr($when, 5) . ' 분)';
+                }
                 $items[] = [
                     'fee_code' => $kind,
-                    'label'    => self::deductionKindLabel($kind, (string) ($m['note'] ?? '')),
+                    'label'    => $label,
                     'amount'   => $amt,
                     // 이 사이클이 확정되면 아래 claimDeductionEntries() 가 이 행을 잠근다.
                     'entry_id' => (int) $m['id'],
@@ -1068,6 +1083,25 @@ final class SettlementLedger
         }
 
         return $has;
+    }
+
+    /**
+     * 「지나간 미소비 차감 회수」를 켜도 되는가.
+     *
+     * 소급 기록(`MigrateRunner::backfillDeductionEntryClaim`)이 **한 번도 안 된 DB** 에서 이걸 켜면
+     * 이미 걷은 과거 차감을 전부 다시 걷는다. 코드가 먼저 배포되고 마이그레이션이 나중에 실행되는
+     * 그 사이가 정확히 그 상태다 — 그래서 «소비 표시가 붙은 행이 하나라도 있는가» 로 스스로 막는다.
+     * 새 DB 는 첫 정산이 사이클을 만들면서 표시가 붙어 자연히 켜진다(그 전엔 회수할 과거도 없다).
+     */
+    private static function deductionSweepReady(): bool
+    {
+        static $ready = null;
+        if ($ready === null) {
+            $ready = self::deductionEntriesClaimable()
+                && db_row('SELECT 1 AS x FROM deduction_entries WHERE consumed_cycle_id IS NOT NULL LIMIT 1') !== null;
+        }
+
+        return $ready;
     }
 
     /**

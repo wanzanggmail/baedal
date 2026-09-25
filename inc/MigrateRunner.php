@@ -3763,6 +3763,10 @@ final class MigrateRunner
         $cols = array_column(db_rows('SHOW COLUMNS FROM deduction_entries'), 'Field');
         if (in_array('consumed_cycle_id', $cols, true)) {
             echo "SKIP  deduction_entries.consumed_cycle_id (이미 있음)\n";
+            // ⚠️ 컬럼만 먼저 나가고 소급 기록이 나중에 배포된 서버가 있다(2026-09-25 실서버).
+            //    소급이 안 된 채로 「미소비 차감 회수」가 켜지면 이미 걷은 차감을 전부 다시 걷는다.
+            //    **멱등**하므로(증거가 있는 NULL 행만 채움) 매번 다시 돌려도 안전하다.
+            self::backfillDeductionEntryClaim();
 
             return;
         }
@@ -3773,6 +3777,38 @@ final class MigrateRunner
                 ADD KEY idx_de_consumed (consumed_cycle_id)"
         );
         echo "OK    deduction_entries.consumed_cycle_id 추가\n";
+
+        self::backfillDeductionEntryClaim();
+    }
+
+    /**
+     * 과거 차감 행의 소비 표시 **소급 기록** — 컬럼을 새로 만들면 기존 행이 전부 NULL(=안 먹힘)이라,
+     * 「지나간 미소비 차감을 다음 정산이 줍는다」(`buildFeeItems`)가 켜지는 순간 **이미 걷은 차감을
+     * 전부 다시 걷는** 사고가 된다. 그래서 컬럼 추가 직후 한 번 채운다.
+     *
+     * 먹었다고 보는 기준(둘 중 하나면 소비):
+     *   ① 같은 날짜 사이클에 **같은 fee_code 의 차감 항목**이 있다 → 그 사이클이 걷었다
+     *   ② 그 사이클에서 **같은 fee_code 로 이월**이 발생했다 → 정산액이 모자라 이월 원장이 들고 있다
+     * 둘 다 아니면 NULL 로 남겨 **진짜 고아**(원장엔 걷었다는데 어디에도 없는 건)만 다음 정산이 줍는다.
+     */
+    private static function backfillDeductionEntryClaim(): void
+    {
+        $hasCarry = db_table_exists('rider_carry_forward');
+        $carrySql = $hasCarry
+            ? " OR EXISTS (SELECT 1 FROM rider_carry_forward cf
+                            WHERE cf.origin_cycle_id = c.id AND cf.fee_code = de.kind)"
+            : '';
+
+        $n = db_execute(
+            "UPDATE deduction_entries de
+                JOIN settlement_rider_cycles c
+                  ON c.rider_id = de.rider_id AND c.settlement_date = de.applied_date
+                SET de.consumed_cycle_id = c.id
+              WHERE de.consumed_cycle_id IS NULL
+                AND (EXISTS (SELECT 1 FROM settlement_fee_items fi
+                              WHERE fi.cycle_id = c.id AND fi.fee_code = de.kind){$carrySql})"
+        );
+        echo "OK    과거 차감 행 소비 표시 {$n}건 기록(나머지는 미소비로 남겨 다음 정산이 회수)\n";
     }
 
     private static function migrateFeePayerFlags(): void
