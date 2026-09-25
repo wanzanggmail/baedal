@@ -287,14 +287,17 @@ $cntReady = $cntAll - $cntBelow;
 			}
 
 			// 출금 가능 일자(이번에 소진되는 정산일) + 수수료 구간 내역
-			var dates = (res.picked || []).map(function (c) { return c.date + '(' + c.orders + '건)'; });
+			// 「자세히 보기」에는 **일자별 소진 금액**까지 보여준다 — 합계만 보고는 어느 날짜가
+			// 얼마나 나가는지 알 수 없어 «전액 출금했는데 왜 지난 날짜가 또 나오나» 를 설명 못 했다.
+			var picked = res.picked || [];
 			var feeParts = [];
 			if (p.fee_short_orders > 0) feeParts.push(p.fee_short_orders + '건×' + p.fee_rate_short + '원');
 			if (p.fee_long_orders > 0) feeParts.push(p.fee_long_orders + '건×' + p.fee_rate_long + '원');
 
 			// 출금 가능 일자는 정산일이 쌓인 만큼 줄줄이 길어져(수십 건) 표를 밀어낸다.
 			// 평소엔 "며칠분 N건"으로만 요약하고, 「자세히 보기」를 눌렀을 때 펼친다.
-			var totalOrders = (res.picked || []).reduce(function (a, c) { return a + (Number(c.orders) || 0); }, 0);
+			var totalOrders = picked.reduce(function (a, c) { return a + (Number(c.orders) || 0); }, 0);
+			var totalTaken  = picked.reduce(function (a, c) { return a + (Number(c.amount) || 0); }, 0);
 
 			var h = '';
 			h += '<div><span class="text-gray-600">실지급액</span> <span class="fw-bold text-primary fs-7">'
@@ -321,14 +324,30 @@ $cntReady = $cntAll - $cntBelow;
 			h += '<div class="mt-1 d-flex align-items-center gap-2 flex-wrap">'
 			   + '<span class="text-gray-600">출금 가능 일자</span>'
 			   + '<span class="fw-semibold text-gray-800">'
-			   + (dates.length ? dates.length + '일분 · ' + totalOrders + '건' : '—') + '</span>'
-			   + (dates.length
+			   + (picked.length ? picked.length + '일분 · ' + totalOrders + '건 · ' + won(totalTaken) : '—') + '</span>'
+			   + (picked.length
 			       ? '<button type="button" class="btn btn-sm btn-light py-0 px-2 fs-9 wp-dates-toggle">자세히 보기</button>'
 			       : '')
 			   + '</div>';
-			if (dates.length) {
+			if (picked.length) {
+				var rows = picked.map(function (c) {
+					// 「일부」 = 그 날짜 정산분을 이번에 다 못 가져간다(건 단위로 잘렸거나 한도에 걸림).
+					return '<tr>'
+					     + '<td class="pe-3 text-nowrap">' + esc(c.date) + '</td>'
+					     + '<td class="pe-3 text-end text-nowrap">' + (Number(c.orders) || 0) + '건</td>'
+					     + '<td class="text-end fw-semibold text-nowrap">' + won(c.amount) + '</td>'
+					     + '<td class="ps-2 text-nowrap">'
+					     + (c.partial ? '<span class="badge badge-light-warning fs-9">일부</span>' : '')
+					     + '</td></tr>';
+				}).join('');
 				h += '<div class="wp-dates d-none mt-1 p-2 bg-light rounded text-gray-700">'
-				   + esc(dates.join(', ')) + '</div>';
+				   + '<table class="table table-sm table-borderless mb-0 fs-8">'
+				   + '<tbody>' + rows + '</tbody>'
+				   + '<tfoot><tr class="fw-bold border-top">'
+				   + '<td class="pe-3">합계</td>'
+				   + '<td class="pe-3 text-end">' + totalOrders + '건</td>'
+				   + '<td class="text-end">' + won(totalTaken) + '</td><td></td>'
+				   + '</tr></tfoot></table></div>';
 			}
 			cell.innerHTML = h;
 			btn.setAttribute('data-amount', p.payout_amount);
