@@ -711,6 +711,12 @@ class XlsxParser
                 'store_name'      => (string) ($get($cols, $map['store_name'] ?? null) ?? ''),
                 'pickup_area'     => (string) ($get($cols, $map['pickup_area'] ?? null) ?? ''),
                 'delivery_area'   => (string) ($get($cols, $map['delivery_area'] ?? null) ?? ''),
+                'order_time'      => self::excelDateTime($get($cols, $map['order_time'] ?? null)),
+                // 배민 정산서에는 「피크타임」 열이 없다 — **주문시각으로 구간을 유도**한다(2026-09-26 갑 시간표).
+                'peak_time'       => self::baeminPeak(
+                    self::excelDateTime($get($cols, $map['order_time'] ?? null)),
+                    self::yyyymmdd((string) ($get($cols, $map['run_date'] ?? null) ?? ''))
+                ),
                 'assigned_at'     => self::excelDateTime($get($cols, $map['assigned_at'] ?? null)),
                 'accepted_at'     => self::excelDateTime($get($cols, $map['picked_at'] ?? null)),
                 'delivered_at'    => self::excelDateTime($get($cols, $map['delivered_at'] ?? null)),
@@ -923,6 +929,43 @@ class XlsxParser
         }
 
         return $rows;
+    }
+
+    /**
+     * 배민 피크 구간 — **주문시각** 기준(2026-09-26 갑 시간표).
+     *
+     *   아침점심피크  평일 09:00~12:59 / 주말 09:00~13:59
+     *   오후논피크    평일 13:00~16:59 / 주말 14:00~16:59
+     *   저녁피크      17:00~19:59 (요일 무관)
+     *   심야논피크    20:00~23:59 (요일 무관)
+     *
+     * ⚠️ **00:00~08:59 는 표에 없다** — 배민이 구간을 두지 않은 시간대라 빈 값으로 둔다.
+     *    임의로 어딘가에 넣으면 라이더 명세서에 없는 구간이 생긴다.
+     * ⚠️ 주말은 **토·일**. 판정은 배달번호의 운행일(run_date) 기준이다.
+     *
+     * 쿠팡은 「피크타임」 열을 그대로 주므로 이 함수를 타지 않는다.
+     */
+    private static function baeminPeak(?string $orderedAt, string $runDate): string
+    {
+        if ($orderedAt === null || $orderedAt === '') {
+            return '';
+        }
+        $ts = strtotime($orderedAt);
+        if ($ts === false) {
+            return '';
+        }
+        $min = (int) date('G', $ts) * 60 + (int) date('i', $ts);
+        $w   = (int) date('w', strtotime($runDate) ?: $ts);
+        $weekend = ($w === 0 || $w === 6);
+
+        $lunchEnd = $weekend ? 13 * 60 + 59 : 12 * 60 + 59;   // 주말은 한 시간 늦게 끝난다
+        return match (true) {
+            $min >= 9 * 60  && $min <= $lunchEnd      => '아침점심피크',
+            $min >  $lunchEnd && $min <= 16 * 60 + 59 => '오후논피크',
+            $min >= 17 * 60 && $min <= 19 * 60 + 59   => '저녁피크',
+            $min >= 20 * 60 && $min <= 23 * 60 + 59   => '심야논피크',
+            default                                   => '',   // 00:00~08:59 — 배민 표에 구간 없음
+        };
     }
 
     /** "YYYYMMDD" → "Y-m-d". 실패 시 오늘. */

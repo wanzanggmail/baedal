@@ -783,7 +783,8 @@ function settlement_baemin_normalize(array $orders, string $fallbackDate): array
             'accepted_at'      => $o['accepted_at'] ?? null,
             'delivered_at'     => $o['delivered_at'] ?? null,
             'duration_minutes' => 0,
-            'peak_time'        => '',
+            // 배민은 「피크타임」 열이 없어 주문시각으로 유도한다(XlsxParser::baeminPeak).
+            'peak_time'        => (string) ($o['peak_time'] ?? ''),
             'distance_m'       => (int) ($o['distance_m'] ?? 0),
             'delivery_type'    => (string) ($o['delivery_type'] ?? ''),
             'fee_pickup'       => 0,
