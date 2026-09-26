@@ -96,7 +96,8 @@ if ((string) $row['platform'] === 'baemin' && db_table_exists('settlement_order_
         "SELECT COUNT(*) c,
                 COALESCE(SUM(fee_delivery),0) base, COALESCE(SUM(fee_area),0) area,
                 COALESCE(SUM(fee_weather),0) weather, COALESCE(SUM(fee_promo1),0) peak,
-                COALESCE(SUM(fee_promo2),0) extra, COALESCE(SUM(fee_promo3),0) bulk
+                COALESCE(SUM(fee_promo2),0) extra, COALESCE(SUM(fee_promo3),0) bulk,
+                COALESCE(SUM(fee_promo4),0) area2
            FROM settlement_order_details WHERE {$where}",
         $params
     );
@@ -105,6 +106,7 @@ if ((string) $row['platform'] === 'baemin' && db_table_exists('settlement_order_
         $parts = [
             ['기본단가', (int) $o['base']],
             ['지역 할증', (int) $o['area']],
+            ['지역할증2', (int) $o['area2']],
             ['기상할증', (int) $o['weather']],
             ['피크할증', (int) $o['peak']],
             ['추가할증', (int) $o['extra']],

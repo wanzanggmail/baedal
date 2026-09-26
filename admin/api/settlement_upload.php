@@ -796,7 +796,9 @@ function settlement_baemin_normalize(array $orders, string $fallbackDate): array
             'fee_promo1'       => (int) ($o['fee_peak'] ?? 0),
             'fee_promo2'       => (int) ($o['fee_extra'] ?? 0),
             'fee_promo3'       => (int) ($o['fee_bulk'] ?? 0),
-            'fee_promo4'       => 0,
+            // 배민 「지역할증2」 — 쿠팡 체계에 대응 컬럼이 없어 빈 promo4 자리에 담는다.
+            // 화면 라벨은 상세 API 의 compose 가 배민 표기로 바꿔 준다(2026-09-26).
+            'fee_promo4'       => (int) ($o['fee_area2'] ?? 0),
             'net_amount'       => (int) ($o['payout'] ?? 0),
         ];
     }

@@ -671,6 +671,10 @@ class XlsxParser
             'fee_weather'   => ['기상할증'],
             'fee_extra'     => ['추가할증'],
             'fee_peak'      => ['피크할증'],
+            // ⚠️ **'지역할증2' 를 먼저 둔다.** 매칭이 부분일치(str_contains)라, 이 열이 먼저 오면
+            //    'fee_area' 의 키워드 '지역할증' 이 «지역할증2» 를 집어삼킨다. 순서가 곧 우선순위다.
+            //    (2026-09-26: 이 열을 안 읽어 배달처리비와 구성 합이 건당 400원씩 어긋났다.)
+            'fee_area2'     => ['지역할증2', '지역 할증2'],
             'fee_area'      => ['지역 할증', '지역할증'],
             'fee_bulk'      => ['대량 할증', '대량할증'],
             'payout'        => ['배달처리비'],
@@ -718,6 +722,7 @@ class XlsxParser
                 'fee_extra'       => $money($cols, $map['fee_extra'] ?? null),
                 'fee_peak'        => $money($cols, $map['fee_peak'] ?? null),
                 'fee_area'        => $money($cols, $map['fee_area'] ?? null),
+                'fee_area2'       => $money($cols, $map['fee_area2'] ?? null),
                 'fee_bulk'        => $money($cols, $map['fee_bulk'] ?? null),
                 'payout'          => $money($cols, $map['payout'] ?? null),
             ];

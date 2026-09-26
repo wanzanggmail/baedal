@@ -28,7 +28,7 @@ $rows = db_rows(
             COUNT(*) AS orders,
             COALESCE(SUM(od.net_amount), 0) AS payout,
             COALESCE(SUM(od.fee_delivery + od.fee_area + od.fee_weather
-                       + od.fee_promo1 + od.fee_promo2 + od.fee_promo3), 0) AS compose
+                       + od.fee_promo1 + od.fee_promo2 + od.fee_promo3 + od.fee_promo4), 0) AS compose
        FROM settlement_order_details od
        JOIN settlement_uploads u ON u.id = od.upload_id
       WHERE u.platform = 'baemin'
@@ -82,7 +82,7 @@ if ($bad === []) {
     echo "\n  건별 차이 분포(배달처리비 − 구성 합):\n";
     foreach (db_rows(
         "SELECT (od.net_amount - (od.fee_delivery + od.fee_area + od.fee_weather
-                                + od.fee_promo1 + od.fee_promo2 + od.fee_promo3)) AS gap,
+                                + od.fee_promo1 + od.fee_promo2 + od.fee_promo3 + od.fee_promo4)) AS gap,
                 COUNT(*) AS c
            FROM settlement_order_details od
            JOIN settlement_uploads u ON u.id = od.upload_id
