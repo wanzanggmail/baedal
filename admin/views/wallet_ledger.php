@@ -196,6 +196,11 @@ $net = $sum['credit'] - $sum['debit'];
 					<label class="form-label fs-8 mb-1">유형</label>
 					<select name="reason" class="form-select form-select-sm" style="min-width:170px">
 						<option value="">전체</option>
+						<?php // 묶음을 먼저 — 「미수금 전체」처럼 관련 항목을 한 번에 고를 수 있다(2026-09-26). ?>
+						<?php foreach (AgencyWallet::REASON_GROUPS as $gcode => $g) : ?>
+						<option value="<?= $esc($gcode) ?>" <?= $filterReason === $gcode ? 'selected' : '' ?>><?= $esc($g['label']) ?></option>
+						<?php endforeach; ?>
+						<option value="" disabled>──────────</option>
 						<?php foreach (AgencyWallet::REASON_LABELS as $code => $label) : ?>
 						<option value="<?= $esc($code) ?>" <?= $filterReason === $code ? 'selected' : '' ?>><?= $esc($label) ?></option>
 						<?php endforeach; ?>
@@ -214,6 +219,16 @@ $net = $sum['credit'] - $sum['debit'];
 					<?php endforeach; ?>
 				</div>
 			</form>
+			<?php // 미수금을 고르면 «여기 안 나오는 돈»을 먼저 알려준다 — 안 그러면 금액이 적다고 오해한다. ?>
+			<?php if ($filterReason === 'debt') : ?>
+			<div class="alert bg-light-warning fs-8 p-3 mt-3 mb-0">
+				이 원장에는 <strong>리스 제공 수수료를 본사·총판·대리점이 나눠 갖는 이동</strong>만 남습니다.
+				<strong>대여금·선지급·리스 원금 회수액은 여기 나오지 않습니다</strong> — 라이더 지갑에서 빠지고
+				그 돈은 대리점이 원래 들고 있던 것이라 <strong>조직 지갑 잔액이 변하지 않기 때문</strong>입니다.
+				라이더별 미수금 잔액·차감 이력은
+				<a href="<?= $esc(admin_url('deduction/debts')) ?>" class="fw-bold">미수금 원장</a>에서 보세요.
+			</div>
+			<?php endif; ?>
 		</div>
 	</div>
 

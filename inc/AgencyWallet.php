@@ -23,10 +23,12 @@ final class AgencyWallet
         'rider_payout'      => '라이더 지급',
         'agency_payout'     => '자체 인출',
         'manual_adjust'     => '수동 조정',
-        'lease_fee_up'      => '리스 수수료 상위 이체',
-        'lease_fee_up_rev'  => '리스 수수료 상위 이체 취소',
-        'lease_fee_in'      => '리스 수수료 수입',
-        'lease_fee_in_rev'  => '리스 수수료 수입 취소',
+        // 미수금(대여금·리스/렌탈·선지급) 관련 — 코드는 리스 시절 이름 그대로지만 표기는 「미수금」이다.
+        // 실제로 지갑이 움직이는 미수금 항목은 **리스 제공 수수료 배분**뿐이다(아래 REASON_GROUPS 주석).
+        'lease_fee_up'      => '미수금 수수료 상위 이체',
+        'lease_fee_up_rev'  => '미수금 수수료 상위 이체 취소',
+        'lease_fee_in'      => '미수금 수수료 수입',
+        'lease_fee_in_rev'  => '미수금 수수료 수입 취소',
         'wd_fee_up'         => '정산수수료 상위 이체',
         'wd_fee_in'         => '정산수수료 수입',
         'transfer_fee_up'   => '이체 수수료 상위 이체',
@@ -42,6 +44,24 @@ final class AgencyWallet
         'msg_fee_in'        => '메시지 발송 요금 수입(본사)',
         // 과거 move() 비원자성으로 원장이 누락된 구간을 사후 기록한 보정분(잔액은 불변).
         'ledger_fix'        => '원장 보정(과거 누락분)',
+    ];
+
+    /**
+     * 유형 필터의 **묶음** — 관련 계정과목을 한 번에 고르게 한다(2026-09-26 갑).
+     *
+     * ⚠️ **미수금 회수액 자체는 이 원장에 남지 않는다.** 대여금·선지급·리스 원금은 «라이더 지갑»
+     * 에서 빠지고 그 돈은 대리점이 원래 들고 있던 것이라 **조직 지갑 잔액이 변하지 않는다**
+     * (원장은 잔액이 움직일 때만 쓴다 — 안 그러면 「잔액 = 입금합 − 출금합」 감사가 깨진다).
+     * 여기 남는 미수금 관련 금액은 **리스 제공 수수료를 본사·총판·대리점이 나눠 갖는 이동**뿐이다.
+     * 라이더별 미수금 잔액·차감 이력은 「대여금·리스 원장」(`deduction/debts`)에서 본다.
+     *
+     * @var array<string, array{label:string, reasons:list<string>}>
+     */
+    public const REASON_GROUPS = [
+        'debt' => [
+            'label'   => '미수금 (대여금·리스·선지급) 전체',
+            'reasons' => ['lease_fee_up', 'lease_fee_up_rev', 'lease_fee_in', 'lease_fee_in_rev'],
+        ],
     ];
 
     /**
@@ -423,7 +443,12 @@ final class AgencyWallet
         }
 
         $reason = trim((string) ($filters['reason'] ?? ''));
-        if ($reason !== '' && isset(self::REASON_LABELS[$reason])) {
+        if ($reason !== '' && isset(self::REASON_GROUPS[$reason])) {
+            // 묶음 선택 — 속한 계정과목을 전부 본다.
+            $codes    = self::REASON_GROUPS[$reason]['reasons'];
+            $where[]  = 'l.reason IN (' . implode(',', array_fill(0, count($codes), '?')) . ')';
+            $params   = array_merge($params, $codes);
+        } elseif ($reason !== '' && isset(self::REASON_LABELS[$reason])) {
             $where[]  = 'l.reason = ?';
             $params[] = $reason;
         }
