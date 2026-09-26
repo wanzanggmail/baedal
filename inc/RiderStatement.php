@@ -117,6 +117,9 @@ final class RiderStatement
             // 표기용 — 구 대행수수료 + 출금 시점 정산수수료. 둘 다 라이더가 낸 「정산수수료」다.
             'agency_fee'    => $agencyFee + $wd['settle'],
             'transfer_fee'  => $wd['transfer'],
+            // 출금 시점 정산수수료만 따로 — 감사 도구가 «원장(지갑 적립) = 명세서 실수령 + 출금수수료»
+            // 를 확인하는 데 쓴다. 표기용 agency_fee 에는 구 대행수수료가 섞여 있어 따로 둔다.
+            'withdraw_fee'  => $wd['settle'],
             'advance'       => $advance,
             'fixed'         => $fixed,
             'total_fee'     => $totalFee + $wd['settle'] + $wd['transfer'],

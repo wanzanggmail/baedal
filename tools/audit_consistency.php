@@ -178,8 +178,12 @@ foreach ($riderIds as $rid) {
     // 라이더 기준 — 명세서
     $st = RiderStatement::summary($rid, $from, $to);
 
-    // 1) 실수령은 **어느 쪽에서 봐도 같아야 한다** — 여기가 어긋나면 돈이 어긋난 것이다
-    $check((int) $st['net'] === (int) $adm['n'], '실수령 일치 (명세서 = 원장)', $w);
+    // 1) 실수령은 **어느 쪽에서 봐도 같아야 한다** — 여기가 어긋나면 돈이 어긋난 것이다.
+    //    ⚠️ 2026-09-25 부터 명세서 실수령액은 «지갑 적립액»이 아니라 **실제 이체액**이다
+    //    (출금 시점 정산수수료·이체수수료를 뺀 값). 그래서 원장(사이클 net 합)과 비교할 때
+    //    라이더가 부담한 출금 수수료를 도로 더해 준다.
+    $wdFee = (int) ($st['withdraw_fee'] ?? 0) + (int) ($st['transfer_fee'] ?? 0);
+    $check((int) $st['net'] + $wdFee === (int) $adm['n'], '실수령 일치 (명세서 = 원장 − 출금수수료)', $w);
 
     // 2) 라이더 화면은 그 자체로 앞뒤가 맞아야 한다
     $check(
@@ -188,8 +192,9 @@ foreach ($riderIds as $rid) {
         $w
     );
 
-    // 3) 관리자와 라이더의 차이는 **정확히 선차감만큼**이어야 한다
-    $check((int) $adm['f'] - (int) $st['total_fee'] === $pre, '공제 차이 = 선차감', $w);
+    // 3) 관리자와 라이더의 차이는 **선차감(라이더에게 안 보임) − 출금수수료(원장에 없음)** 여야 한다.
+    //    선차감은 원장 공제에만 있고, 출금수수료는 명세서 공제에만 있다 — 방향이 반대다.
+    $check((int) $adm['f'] - (int) $st['total_fee'] + $wdFee === $pre, '공제 차이 = 선차감 − 출금수수료', $w);
 
     // 4) 라이더 앱 집계(지갑 화면)도 명세서와 같아야 한다
     $sum = SettlementLedger::sumForRider($rid, ['from' => $from, 'to' => $to]);
@@ -273,9 +278,9 @@ $orderRows = db_rows(
     "SELECT c.rider_id, c.settlement_date, c.gross_amount cg, c.order_count co,
             o.s AS os, o.c AS oc
        FROM settlement_rider_cycles c
-       INNER JOIN (SELECT rider_id, settlement_date, SUM(net_amount) s, COUNT(*) c
-                     FROM settlement_order_details GROUP BY rider_id, settlement_date) o
-               ON o.rider_id = c.rider_id AND o.settlement_date = c.settlement_date " . $cycWhere,
+       INNER JOIN (SELECT upload_id, rider_id, settlement_date, SUM(net_amount) s, COUNT(*) c
+                     FROM settlement_order_details GROUP BY upload_id, rider_id, settlement_date) o
+               ON o.upload_id = c.upload_id AND o.rider_id = c.rider_id AND o.settlement_date = c.settlement_date " . $cycWhere,
     $params
 );
 
@@ -313,28 +318,31 @@ printf(
 );
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ⑦ 라이더 지갑 잔액 = 정산합 − 출금 소진분
+// ⑦ 라이더 지갑 잔액 ≥ 사이클 남은 합계
 // ══════════════════════════════════════════════════════════════════════════════
-echo "⑦ 라이더 지갑 잔액 대사\n";
+// 예전 기준(정산합 − 출금)은 **수동 조정을 보지 못했다** — 미수금을 지갑에서 직접 뺀 건이
+// 전부 불일치로 잡혔다(2026-09-25 이지성·노동현 각 10,000원). 지금 의미 있는 불변식은
+// 「지갑 ≥ 사이클 남은 합계」다:
+//   · 지갑 < 사이클 → **라이더가 그 차액만큼 영영 출금 못 한다**(출금 한도가 지갑이므로).
+//     수동 조정이 사이클을 안 건드리던 시절의 흔적이다 — `tools/repair_cycle_wallet_gap.php` 로 정리.
+//   · 지갑 > 사이클 → 정상. 프로모션처럼 사이클 없이 지갑에만 적립되는 경로가 있다.
+echo "⑦ 라이더 지갑 ≥ 사이클 남은 합계\n";
 
 $wallets = db_rows(
     "SELECT w.rider_id, w.balance,
-            COALESCE((SELECT SUM(net_amount) FROM settlement_rider_cycles c
-                       WHERE c.rider_id = w.rider_id), 0) AS settled,
-            COALESCE((SELECT SUM(amount
-                        + CASE WHEN settle_fee_payer = 'agency' THEN 0 ELSE withhold_other END
-                        + CASE WHEN transfer_fee_payer = 'agency' THEN 0 ELSE withhold_transfer_fee END)
-                        FROM withdrawal_requests r
-                       WHERE r.rider_id = w.rider_id AND r.status = 'completed'), 0) AS taken
+            COALESCE((SELECT SUM(GREATEST(0, c.net_amount - c.withdrawn_amount))
+                        FROM settlement_rider_cycles c
+                       WHERE c.rider_id = w.rider_id), 0) AS remaining
        FROM rider_wallets w"
     . ($onlyRider > 0 ? ' WHERE w.rider_id = ?' : ''),
     $onlyRider > 0 ? [$onlyRider] : []
 );
 foreach ($wallets as $r) {
-    $expect = (int) $r['settled'] - (int) $r['taken'];
+    $gap = (int) $r['remaining'] - (int) $r['balance'];
     $check(
-        (int) $r['balance'] === $expect,
-        sprintf('지갑 잔액 = 정산합−출금 (기대 %s, 실제 %s)', number_format($expect), number_format((int) $r['balance'])),
+        $gap <= 0,
+        sprintf('지갑 ≥ 사이클 남은분 (지갑 %s / 사이클 %s · 못 찾는 돈 %s)',
+            number_format((int) $r['balance']), number_format((int) $r['remaining']), number_format(max(0, $gap))),
         sprintf('라이더#%d', (int) $r['rider_id'])
     );
 }
