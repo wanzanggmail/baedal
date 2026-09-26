@@ -33,6 +33,11 @@ if ($filterRiderId > 0) {
 
 $rows = [];
 $kpi  = ['active' => 0, 'balance' => 0, 'lease_daily' => 0, 'closed' => 0, 'lease_no_end' => 0, 'lease_overdue' => 0];
+// 회수 집계 — 마이그레이션 전이면 빈 값으로 렌더된다.
+$recSettle = [];
+$recLedger = [];
+$recFrom   = date('Y-m-01');
+$recTo     = date('Y-m-d');
 
 // 총판·대리점 선택 목록 — 현재 계정 스코프 안에서만(총판 계정=자기, 대리점 계정=자기뿐이라 사실상 선택 불필요)
 [$orgScopeSql, $orgScopeParams] = Org::orgScopeClause('id');
@@ -119,6 +124,51 @@ if (!$needsMigrate) {
         'lease_no_end'  => (int) ($k['lease_no_end'] ?? 0),
         'lease_overdue' => (int) ($k['lease_overdue'] ?? 0),
     ];
+
+    // ── 회수 집계(2026-09-26 갑) ────────────────────────────────────────────────
+    // 「얼마나 걷혔나」는 기존 KPI(잔액·건수)로는 안 보였다. 기간을 잡아 종류별로 집계한다.
+    //
+    // ⚠️ **두 기준을 나란히 본다** — 같아야 정상이고, 다르면 그 자체가 신호다.
+    //   · 정산 기준(`settlement_fee_items`) = 라이더에게서 **실제로 뗀 돈**. 귀속은 정산일.
+    //   · 원장 기준(`rider_debt_entries`)   = 미수금 원장이 «걷었다»고 기록한 돈. 귀속은 차감일.
+    // 수동 조정으로 지갑에서 직접 회수했거나(정산 밖) 차감이 어느 사이클에도 안 먹힌 경우
+    // 둘이 벌어진다 — 자세한 건별 확인은 `tools/audit_double_deduction.php` ② 가 한다.
+    $isDate  = static fn (string $v): bool => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $v);
+    $recFrom = trim((string) ($_GET['rfrom'] ?? ''));
+    $recTo   = trim((string) ($_GET['rto'] ?? ''));
+    $recFrom = $isDate($recFrom) ? $recFrom : date('Y-m-01');   // 기본: 이번 달
+    $recTo   = $isDate($recTo) ? $recTo : date('Y-m-d');
+    $debtCodes = array_keys(RiderDebt::KINDS);
+    $debtCodes[] = 'rental';   // 구 데이터에 남아 있는 코드
+    $ph = implode(',', array_fill(0, count($debtCodes), '?'));
+
+    $recSettle = [];
+    foreach (db_rows(
+        "SELECT fi.fee_code k, COALESCE(SUM(fi.amount),0) s, COUNT(*) c
+           FROM settlement_fee_items fi
+           INNER JOIN settlement_rider_cycles cy ON cy.id = fi.cycle_id
+           INNER JOIN riders r ON r.id = cy.rider_id
+          WHERE fi.fee_code IN ({$ph}) AND cy.settlement_date BETWEEN ? AND ?"
+          . ($scopeSql !== '' ? " AND {$scopeSql}" : '') . '
+          GROUP BY fi.fee_code',
+        array_merge($debtCodes, [$recFrom, $recTo], $scopeParams)
+    ) as $r2) {
+        $recSettle[(string) $r2['k']] = ['sum' => (int) $r2['s'], 'cnt' => (int) $r2['c']];
+    }
+
+    $recLedger = [];
+    foreach (db_rows(
+        "SELECT d.kind k, COALESCE(SUM(e.amount),0) s, COUNT(*) c
+           FROM rider_debt_entries e
+           INNER JOIN rider_debts d ON d.id = e.debt_id
+           INNER JOIN riders r ON r.id = d.rider_id
+          WHERE e.applied_date BETWEEN ? AND ?"
+          . ($scopeSql !== '' ? " AND {$scopeSql}" : '') . '
+          GROUP BY d.kind',
+        array_merge([$recFrom, $recTo], $scopeParams)
+    ) as $r2) {
+        $recLedger[(string) $r2['k']] = ['sum' => (int) $r2['s'], 'cnt' => (int) $r2['c']];
+    }
 }
 
 $kindBadge   = ['loan' => 'primary', 'lease' => 'warning', 'advance' => 'info'];
@@ -207,6 +257,95 @@ $currentUrl = admin_url('deduction/debts');
 		</div>
 	</div>
 	<!--end::KPI-->
+
+	<!--begin::회수 집계-->
+	<?php // 「얼마나 걷혔나」 — 잔액·건수만으로는 안 보이던 값. 기간을 잡아 종류별로 센다(2026-09-26 갑). ?>
+	<div class="card card-flush mb-8">
+		<div class="card-header pt-5 flex-wrap gap-3">
+			<h3 class="card-title fw-bold m-0">회수 집계
+				<span class="text-muted fs-8 ms-1">기간 안에 실제로 걷힌 미수금</span>
+			</h3>
+			<form method="get" action="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>" class="card-toolbar d-flex align-items-end gap-2">
+				<?php if (defined('ADMIN_USE_QUERY_URL') && ADMIN_USE_QUERY_URL): ?>
+				<input type="hidden" name="route" value="deduction/debts" />
+				<?php endif; ?>
+				<?php // 목록 필터는 그대로 유지한 채 기간만 바꾼다. ?>
+				<?php foreach (['kind' => $filterKind, 'status' => $filterStatus, 'q' => $filterQ,
+				                'distributor' => $filterDist, 'agency' => $filterAgency, 'rider_id' => $filterRiderId] as $k => $v) : ?>
+					<?php if ((string) $v !== '' && (string) $v !== '0') : ?>
+					<input type="hidden" name="<?= $k ?>" value="<?= htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8') ?>" />
+					<?php endif; ?>
+				<?php endforeach; ?>
+				<input type="date" name="rfrom" value="<?= htmlspecialchars($recFrom, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" style="width:150px" />
+				<span class="text-muted">~</span>
+				<input type="date" name="rto" value="<?= htmlspecialchars($recTo, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" style="width:150px" />
+				<button type="submit" class="btn btn-sm btn-primary">집계</button>
+			</form>
+		</div>
+		<div class="card-body pt-2">
+			<div class="table-responsive">
+				<table class="table table-row-bordered align-middle fs-7 gy-2 mb-0">
+					<thead>
+						<tr class="fw-bold text-muted">
+							<th>종류</th>
+							<th class="text-end">정산에서 뗀 금액</th>
+							<th class="text-end">건수</th>
+							<th class="text-end">원장 기록</th>
+							<th class="text-end">차이</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+						$recTotalS = 0;
+						$recTotalL = 0;
+						$recKinds  = RiderDebt::KINDS + ['rental' => '렌탈(구)'];
+						foreach ($recKinds as $code => $label) :
+						    $sv = (int) ($recSettle[$code]['sum'] ?? 0);
+						    $sc = (int) ($recSettle[$code]['cnt'] ?? 0);
+						    $lv = (int) ($recLedger[$code]['sum'] ?? 0);
+						    if ($sv === 0 && $lv === 0) { continue; }
+						    $recTotalS += $sv;
+						    $recTotalL += $lv;
+						    $diff = $sv - $lv;
+						?>
+						<tr>
+							<td class="fw-semibold"><?= htmlspecialchars((string) $label, ENT_QUOTES, 'UTF-8') ?></td>
+							<td class="text-end fw-bold text-danger"><?= $won($sv) ?></td>
+							<td class="text-end text-muted"><?= number_format($sc) ?>건</td>
+							<td class="text-end text-gray-700"><?= $won($lv) ?></td>
+							<td class="text-end <?= $diff === 0 ? 'text-muted' : 'text-warning fw-semibold' ?>">
+								<?= $diff === 0 ? '—' : ($diff > 0 ? '+' : '') . $won($diff) ?>
+							</td>
+						</tr>
+						<?php endforeach; ?>
+						<?php if ($recTotalS === 0 && $recTotalL === 0) : ?>
+						<tr><td colspan="5" class="text-center text-muted py-6">이 기간에 걷힌 미수금이 없습니다.</td></tr>
+						<?php endif; ?>
+					</tbody>
+					<?php if ($recTotalS !== 0 || $recTotalL !== 0) : ?>
+					<tfoot>
+						<tr class="fw-bold bg-light">
+							<td>합계</td>
+							<td class="text-end text-danger"><?= $won($recTotalS) ?></td>
+							<td></td>
+							<td class="text-end"><?= $won($recTotalL) ?></td>
+							<td class="text-end <?= $recTotalS === $recTotalL ? 'text-muted' : 'text-warning' ?>">
+								<?= $recTotalS === $recTotalL ? '—' : ($recTotalS - $recTotalL > 0 ? '+' : '') . $won($recTotalS - $recTotalL) ?>
+							</td>
+						</tr>
+					</tfoot>
+					<?php endif; ?>
+				</table>
+			</div>
+			<div class="text-muted fs-8 mt-3">
+				<strong>정산에서 뗀 금액</strong> = 라이더 정산에서 실제로 빠진 돈(귀속: 정산일) ·
+				<strong>원장 기록</strong> = 미수금 원장이 「걷었다」고 남긴 돈(귀속: 차감일).
+				<span class="text-gray-700">둘은 같아야 정상이고, <strong>차이가 나면</strong> 수동 조정으로 정산 밖에서 회수했거나
+				차감이 어느 정산에도 안 걷힌 건이 있다는 뜻입니다</span> — 건별 확인은 <code>tools/audit_double_deduction.php</code>.
+			</div>
+		</div>
+	</div>
+	<!--end::회수 집계-->
 
 	<!--begin::Filter-->
 	<form method="get" action="<?= htmlspecialchars($currentUrl, ENT_QUOTES, 'UTF-8') ?>">
