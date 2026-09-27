@@ -60,7 +60,9 @@ $_SESSION['admin_org_id']   = (int) $admin['org_id'];
 
 // 요약은 렌더가 끝난 뒤 한 번에 찍는다 — 먼저 출력하면 index.php 의 http_response_code() 가
 // "headers already sent" 경고를 낸다.
-$summary = sprintf(
+// 변수 이름에 `__render` 를 붙인 이유: 뷰를 전역 스코프에서 include 하므로 뷰가 만든 같은 이름의
+// 변수가 이걸 덮어쓴다(광고 클릭 로그의 $summary 가 배열이라 "Array" 가 찍혔다).
+$__renderSummary = sprintf(
     "계정     : %s (org %d)\n라우트   : %s\n접근권한 : %s\n",
     $admin['login_id'],
     (int) $admin['org_id'],
@@ -72,7 +74,7 @@ ob_start();
 require dirname(__DIR__) . '/admin/index.php';
 $html = ob_get_clean();
 
-echo $summary;
+echo $__renderSummary;
 
 $out = __DIR__ . '/_render_out.html';
 file_put_contents($out, $html);
