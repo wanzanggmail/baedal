@@ -188,15 +188,19 @@ final class PgCancelResult
 /** 삭제 등 단순 성공/실패 */
 final class PgSimpleResult
 {
+    /**
+     * @param bool $alreadyGone 성공이지만 **PG 에 이미 없던** 경우(빌키 해지에서 RV470) — 호출부가 기록에 남긴다.
+     */
     public function __construct(
         public readonly bool $success,
-        public readonly string $failReason = ''
+        public readonly string $failReason = '',
+        public readonly bool $alreadyGone = false
     ) {
     }
 
-    public static function ok(): self
+    public static function ok(bool $alreadyGone = false): self
     {
-        return new self(true);
+        return new self(true, '', $alreadyGone);
     }
 
     public static function fail(string $reason): self

@@ -147,6 +147,15 @@ final class RealPgGateway implements PgGateway
             return PgSimpleResult::fail('응답 시간 초과 — 해지 여부가 불확실합니다. 잠시 후 다시 시도하세요.');
         }
 
+        // RV470/PV470 = «빌키가 존재하지 않습니다». 해지의 목적(PG 에 결제수단이 안 남는 것)이 이미
+        // 이뤄진 상태라 **성공으로 본다**(멱등). 가맹점(MID)이 바뀌면 옛 가맹점에서 발급한 빌키는
+        // 새 가맹점에서 조회되지 않아 이 코드가 온다 — 실패로 막으면 카드를 영영 못 지운다(2026-10-13 갑).
+        // 그 밖의 실패(통신 오류·검증 오류 등)는 해지 여부를 모르므로 계속 막는다.
+        // 같은 «빌키 없음» 이 `RV470`·`PV470` 두 접두사로 온다(실서버에서 둘 다 확인 — RV406/PV406 과 같은 짝).
+        if (!$res['ok'] && preg_match('/^[RP]V470$/', (string) $res['code']) === 1) {
+            return PgSimpleResult::ok(true);
+        }
+
         return $res['ok'] ? PgSimpleResult::ok() : PgSimpleResult::fail($this->failMessage($res));
     }
 

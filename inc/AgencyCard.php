@@ -193,8 +193,13 @@ final class AgencyCard
     /**
      * 카드 해지 — **PG에 먼저 빌키 삭제를 요청하고** 성공해야 우리 DB에서 지운다.
      * 순서를 바꾸면 PG 쪽엔 살아있는 빌키가 우리 시스템에서만 사라진다(유령 빌키).
+     *
+     * PG 가 «그런 빌키 없음»(RV470)으로 답하면 이미 해지된 것으로 보고 지운다 — 가맹점 정보가
+     * 바뀌어 옛 빌키를 새 가맹점이 못 찾는 경우다(2026-10-13 갑).
+     *
+     * @return bool PG 에 빌키가 이미 없었으면 true(기록용)
      */
-    public static function delete(int $agencyId, int $id): void
+    public static function delete(int $agencyId, int $id): bool
     {
         self::assertOwned($agencyId, $id);
         require_once __DIR__ . '/PgGateway.php';
@@ -203,14 +208,18 @@ final class AgencyCard
         $row        = db_row('SELECT billing_key FROM agency_cards WHERE id = ? LIMIT 1', [$id]);
         $billingKey = Crypto::decrypt((string) ($row['billing_key'] ?? ''));
 
+        $alreadyGone = false;
         if ($billingKey !== '') {
             $res = PgGatewayFactory::make()->deleteBillingKey($billingKey, PgPayment::makeOrderNo($agencyId));
             if (!$res->success) {
                 throw new RuntimeException('PG 빌키 해지에 실패해 카드를 삭제하지 않았습니다: ' . $res->failReason);
             }
+            $alreadyGone = $res->alreadyGone;
         }
 
         db_execute('DELETE FROM agency_cards WHERE id = ?', [$id]);
+
+        return $alreadyGone;
     }
 
     private static function assertOwned(int $agencyId, int $id): void

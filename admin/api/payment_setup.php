@@ -143,8 +143,17 @@ try {
             $msg = '우선순위가 변경되었습니다.';
             break;
         case 'card_delete':
-            AgencyCard::delete($agencyId, (int) ($body['id'] ?? 0));
-            $msg = '카드가 삭제되었습니다.';
+            $cardId = (int) ($body['id'] ?? 0);
+            $gone   = AgencyCard::delete($agencyId, $cardId);
+            // PG 에 이미 빌키가 없었던 경우(가맹점 변경 등)도 남긴다 — 나중에 «왜 해지 없이 지워졌나» 를 설명할 수 있게.
+            AuditLog::record(
+                'org.card_delete',
+                (string) $cardId,
+                ($gone ? '카드 삭제 · PG에 빌키 없음(RV470/PV470) — 이미 해지된 것으로 처리' : '카드 삭제 · PG 빌키 해지 완료') . $onBehalf
+            );
+            $msg = $gone
+                ? '카드가 삭제되었습니다. (PG에는 이미 등록 정보가 없었습니다 — 가맹점 변경 등으로 이미 해지된 상태입니다.)'
+                : '카드가 삭제되었습니다.';
             break;
         case 'account_save':
             BankAccount::save($agencyId, $body);
