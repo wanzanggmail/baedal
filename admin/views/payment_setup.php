@@ -331,7 +331,8 @@ if ($agencyId > 0) {
 		// ⚠️ `$targetAgency`만 보면 **본사 자신을 고른 경우**(그때는 null)에 0이 나가 "대상을 선택하세요"가 뜬다.
 		var TARGET_AGENCY_ID = <?= $isSelf ? 0 : (int) $agencyId ?>;
 		var toast = document.getElementById('ps_toast'), toastMsg = document.getElementById('ps_toast_msg');
-		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok ? 'success' : 'danger'); toastMsg.textContent = m; toast.classList.remove('d-none'); window.scrollTo(0, 0); }
+		// ok: true=성공(초록) · false=실패(빨강) · 'warn'=처리는 됐지만 확인이 필요함(노랑)
+		function showToast(m, ok) { toast.className = 'alert alert-dismissible mb-6 alert-' + (ok === 'warn' ? 'warning' : (ok ? 'success' : 'danger')); toastMsg.textContent = m; toast.classList.remove('d-none'); window.scrollTo(0, 0); }
 		function post(p) {
 			if (TARGET_AGENCY_ID > 0) { p.agency_id = TARGET_AGENCY_ID; }
 			return fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(p) }).then(function (r) { return r.json(); });
@@ -382,7 +383,7 @@ if ($agencyId > 0) {
 		});
 		on('ps_cards', 'click', function (ev) {
 			var tr = ev.target.closest('tr'); if (!tr) return; var id = parseInt(tr.getAttribute('data-id'), 10);
-			if (ev.target.closest('.ps-del')) { if (!confirm('카드를 삭제할까요?')) return; post({ action: 'card_delete', id: id }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); tr.remove(); renderEmptyIfNone(); }).catch(function (e) { showToast(e.message, false); }); }
+			if (ev.target.closest('.ps-del')) { if (!confirm('카드를 삭제할까요?')) return; post({ action: 'card_delete', id: id }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, r.warning ? 'warn' : true); tr.remove(); renderEmptyIfNone(); }).catch(function (e) { showToast(e.message, false); }); }
 			if (ev.target.closest('.ps-toggle')) { var on = ev.target.textContent.trim() === '활성'; post({ action: 'card_toggle', id: id, active: !on }).then(function (r) { if (!r.ok) throw new Error(r.message); showToast(r.message, true); reloadSoon(); }).catch(function (e) { showToast(e.message, false); }); }
 		});
 		on('ps_cards', 'change', function (ev) {

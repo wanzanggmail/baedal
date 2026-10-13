@@ -151,9 +151,11 @@ try {
                 (string) $cardId,
                 ($gone ? '카드 삭제 · PG에 빌키 없음(RV470/PV470) — 이미 해지된 것으로 처리' : '카드 삭제 · PG 빌키 해지 완료') . $onBehalf
             );
+            // 빌키 없음은 **경고만 하고 삭제는 진행**한다(2026-10-13 갑) — 성공(초록)과 구분해 노란색으로 띄운다.
             $msg = $gone
-                ? '카드가 삭제되었습니다. (PG에는 이미 등록 정보가 없었습니다 — 가맹점 변경 등으로 이미 해지된 상태입니다.)'
+                ? '카드를 삭제했습니다. 다만 PG에 이 카드의 빌키가 없었습니다(가맹점 변경 등). 예전 가맹점에 빌키가 남아 있을 수 있으니 필요하면 PG사에 정리를 요청하세요.'
                 : '카드가 삭제되었습니다.';
+            $warning = $gone;
             break;
         case 'account_save':
             BankAccount::save($agencyId, $body);
@@ -177,6 +179,7 @@ try {
     }
     echo json_encode([
         'ok'      => true,
+        'warning' => $warning ?? false,
         'message' => $msg,
         'cards'   => AgencyCard::listForAgency($agencyId),
         'account' => BankAccount::get($agencyId),
